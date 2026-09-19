@@ -62,6 +62,13 @@ ONNX 그래프는 입출력 float 개수만 말한다. 어느 열이 어느 관�
 그래프에 없고, 배포 측이 하나라도 틀리면 로봇은 자신 있게 틀리게 움직인다.
 관절 순서는 파싱된 articulation에서만 알 수 있고 export는 시뮬레이터 없이
 돌므로, 학습 시점에 `deploy/metadata.py`가 해석된 환경에서 스냅샷을 떠
-체크포인트에 싣고 export가 그것을 ONNX metadata(`gd_lab.policy.v1`)와
-`.deploy.json`에 적는다. 계약이 그래프를 설명하지 못하면 export는 실패한다
+체크포인트에 싣고 export가 그것을 ONNX metadata(`camel.policy.v1`)와
+`deploy.json`에 적는다. 계약이 그래프를 설명하지 못하면 export는 실패한다
 (조용히 라벨 없는 그래프를 내보내지 않는다).
+
+스키마는 gd_rbq10_deploy `pilot/src/PolicyRuntime.cpp`가 읽는 것과 같다:
+`robot`, `terms`, `history_initialization`이 최상위, `action.clip`은 명시(`null`),
+`action.previous_action`은 `"clipped"`, 게인 가드레일 kp ≤ 200 / kd ≤ 10. export
+폴더(`policy.onnx` + `deploy.json`)를 그대로 `resources/policy/<이름>/`에 넣고
+`policy-check`로 확인한다. 학습의 소프트 리밋 포화(`soft_margin_deg`)는 로봇
+런타임이 재현하지 않는다.

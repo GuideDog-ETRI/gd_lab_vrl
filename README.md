@@ -98,6 +98,10 @@ nohup bash -c 'CUDA_VISIBLE_DEVICES=0 OMNI_KIT_ACCEPT_EULA=YES \
 # 튜닝 오버라이드는 hydra CLI로 (코드 값 수정 금지 — 규칙 6)
 run scripts/train.py env.rewards.base_height.weight=-10.0 agent.max_iterations=20000
 
+# Pulse 없는 4개 학습 arm: 1/3은 50 Hz, 2/4는 100 Hz, 모두 payload 포함
+# 1/2는 현재 gain, 3/4는 kp=123.39/127.77, kd=2.4
+TRAIN_ARM=1 run scripts/train.py --headless --logger tensorboard
+
 # 재개
 run scripts/train.py --resume --load_run <run폴더명>
 
@@ -107,9 +111,12 @@ run scripts/play.py --task Gd-Blind-Rbq10-Dreamwaq-Play-v0
 # Xbox 패드 free-play (호스트 패드 장치 + inputs 패키지 필요)
 run scripts/play.py --task Gd-Blind-Rbq10-Dreamwaq-Gamepad-v0
 
-# 시뮬레이터 없이 체크포인트만으로 export
+# 시뮬레이터 없이 체크포인트 + 같은 run의 params/agent.yaml로 export
 run scripts/export.py logs/blind_rbq10_dreamwaq/<run>/model_50000.pt
 ```
+
+Arm 설정과 재개/play 방법은 [configs/experiment/](configs/experiment/README.md).
+Arm을 선택한 실행은 `logs/blind_rbq10_dreamwaq/arm_N/` 아래에 기록된다.
 
 ### 6. 기여자 체크 (PR 전)
 

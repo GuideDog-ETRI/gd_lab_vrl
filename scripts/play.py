@@ -1,11 +1,14 @@
 """Run a trained gd_lab policy in a play environment and export it for deploy."""
 
 import argparse
+import os
 import sys
 
 from isaaclab.app import AppLauncher
 
 import cli_args  # isort: skip
+
+from gd_lab.core.experiments import training_arm_overrides
 
 parser = argparse.ArgumentParser(description="Play a trained gd_lab policy.")
 parser.add_argument("--task", type=str, default="Gd-Blind-Rbq10-Dreamwaq-Play-v0", help="Name of the task.")
@@ -17,13 +20,19 @@ cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
 
-sys.argv = [sys.argv[0]] + hydra_args
+train_arm = os.environ.get("TRAIN_ARM")
+try:
+    arm_overrides = training_arm_overrides(train_arm, play=True)
+except ValueError as exc:
+    parser.error(str(exc))
+sys.argv = [sys.argv[0]] + arm_overrides + hydra_args
+if train_arm is not None:
+    print(f"[INFO] Playing training arm: {train_arm} (configs/experiment/arm_{train_arm}.yaml)")
 
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
 import importlib
-import os
 import time
 
 import gymnasium as gym

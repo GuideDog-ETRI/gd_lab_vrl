@@ -7,6 +7,12 @@ that moves confidently and incorrectly, so the semantics are captured from the
 resolved environment at training time and written next to the graph.
 
 JSON only, no simulator imports, so export reads it without IsaacLab.
+
+The schema is the ``camel.policy.v1`` contract that gd_rbq10_deploy's
+``PolicyRuntime`` parses: flat top level (``robot``, ``terms``,
+``history_initialization``), ``action.previous_action == "clipped"`` with an
+explicit ``action.clip`` (``null`` when the policy is unclipped, so clipped and
+raw coincide), and gain guardrails identical to the robot's.
 """
 
 from __future__ import annotations
@@ -17,7 +23,8 @@ import os
 import re
 from pathlib import Path
 
-METADATA_KEY = "gd_lab.policy.v1"
+METADATA_KEY = "camel.policy.v1"
+ROBOT = "RBQ10"
 SCHEMA_VERSION = 1
 
 # An unmapped term means the deploy host has no defined way to fill it.
@@ -31,8 +38,9 @@ _OBS_SOURCES = {
     "payload_mass": "payload",
 }
 
-# Software deployment guardrails, not certified actuator limits.
-_GAIN_LIMITS = {"kp": 400.0, "kd": 20.0}
+# Software deployment guardrails, not certified actuator limits. Keep in sync
+# with gd_rbq10_deploy pilot/src/PolicyRuntime.cpp, which rejects, not clamps.
+_GAIN_LIMITS = {"kp": 200.0, "kd": 10.0}
 
 
 def _numbers(value, size: int) -> list[float]:
@@ -46,6 +54,17 @@ def _numbers(value, size: int) -> list[float]:
     if len(values) != size or not all(math.isfinite(v) for v in values):
         raise ValueError(f"Expected {size} finite values, got {values}")
     return values
+
+
+def _shared_action_values(value, size: int) -> list[float]:
+    """IsaacLab stores joint transforms as one identical row per environment."""
+    if hasattr(value, "detach") and value.ndim == 2:
+        if value.shape[0] == 0 or value.shape[1] != size:
+            raise ValueError(f"Expected action transform shape (num_envs, {size}), got {tuple(value.shape)}")
+        if not (value == value[0]).all().item():
+            raise ValueError("Per-environment action transforms cannot share one deployment contract")
+        value = value[0]
+    return _numbers(value, size)
 
 
 def _validate_gains(gains: dict[str, list[float]], num_joints: int) -> None:
@@ -146,22 +165,25 @@ def capture_context(env, policy) -> dict:
 
     return {
         "schema_version": SCHEMA_VERSION,
+        "robot": ROBOT,
         "policy_dt": float(env.step_dt),
         "joint_names": joint_names,
         "default_joint_pos": _numbers(robot.data.default_joint_pos[0, joint_ids], num_joints),
         "action": {
             "type": "joint_position",
-            "scale": _numbers(action._scale, num_joints),
-            "offset": _numbers(action._offset, num_joints),
-            "previous_action": "raw",
+            "scale": _shared_action_values(action._scale, num_joints),
+            "offset": _shared_action_values(action._offset, num_joints),
+            # No action clipping in training, so the clipped and raw previous
+            # action are the same tensor; "clipped" is the convention the robot reads.
+            "clip": None,
+            "previous_action": "clipped",
+            # Train-time soft-limit saturation of the actuator target. The robot
+            # runtime does not replicate it; recorded so the gap is visible.
             "soft_margin_deg": float(getattr(action.cfg, "soft_margin_deg", 0.0)),
             "gains": gains,
         },
-        "observation": {
-            "layout": "term_major",
-            "history_initialization": "repeat_first",
-            "terms": _observation_terms(env, policy_groups[0]),
-        },
+        "history_initialization": "repeat_first",
+        "terms": _observation_terms(env, policy_groups[0]),
         "actor_history_steps": int(getattr(policy, "actor_history_steps", 1)),
         "provenance": {"policy_class": type(policy).__name__, "source": "resolved_environment"},
     }
@@ -172,13 +194,14 @@ def bind_graph(context: dict, model) -> dict:
     import onnx
 
     spec = json.loads(json.dumps(context))  # deep copy, and proves serializability
-    if spec.get("schema_version") != SCHEMA_VERSION:
-        raise ValueError(f"Unsupported deployment context version {spec.get('schema_version')}")
+    if spec.get("schema_version") != SCHEMA_VERSION or spec.get("robot") != ROBOT:
+        raise ValueError(f"Unsupported deployment context {spec.get('schema_version')}/{spec.get('robot')}")
     _validate_gains(spec["action"]["gains"], len(spec["joint_names"]))
 
-    terms = spec["observation"]["terms"]
+    terms = spec["terms"]
     expected = sum(t["size"] * t["history"] for t in terms)
-    spec["inputs"], spec["outputs"] = [], []
+    # No recurrent state: every graph input is an observation.
+    spec["inputs"], spec["outputs"], spec["states"] = [], [], []
     for value in model.graph.input:
         if value.type.tensor_type.elem_type != onnx.TensorProto.FLOAT:
             raise ValueError(f"Only float32 inputs are supported: {value.name}")
@@ -221,7 +244,7 @@ def bind_graph(context: dict, model) -> dict:
 
 
 def attach_metadata(onnx_path: str, context: dict) -> dict:
-    """Write the bound spec into the ONNX metadata and a sidecar ``.deploy.json``."""
+    """Write the bound spec into the ONNX metadata and a ``deploy.json`` sidecar next to it."""
     import onnx
 
     path = Path(onnx_path)
@@ -237,5 +260,5 @@ def attach_metadata(onnx_path: str, context: dict) -> dict:
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
-    path.with_suffix(".deploy.json").write_text(json.dumps(spec, indent=2, allow_nan=False) + "\n")
+    path.with_name("deploy.json").write_text(json.dumps(spec, indent=2, allow_nan=False) + "\n")
     return spec

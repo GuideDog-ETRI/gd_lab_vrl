@@ -146,7 +146,8 @@ def payload_mass(env: ManagerBasedEnv, scale: float = 0.2) -> torch.Tensor:
     """Commanded trunk payload as ``payload_kg * scale``, ``(N, 1)``.
 
     An observable, not a privileged estimate: the operator enters the mounted
-    payload at deploy, so it carries no noise.
+    payload at deploy, so it carries no noise. Scale 0.2 maps the {0, 6} kg set
+    to {0, 1.2}. The randomized mount position is not part of this scalar.
     """
     payload = getattr(env, "payload_kg", None)
     if payload is None:

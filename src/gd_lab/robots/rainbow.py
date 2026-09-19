@@ -8,6 +8,34 @@ from isaaclab.assets.articulation import ArticulationCfg
 from gd_lab.core.paths import ASSETS_DIR
 from gd_lab.robots.actuators import DelayedDCMotorCfg
 
+# RBQ-10 drive gain quantization: use only gains the real drive can hold.
+#
+# The drive stores kp/kd as integer multiples of a per-joint-group step, so a
+# commanded gain is snapped to the nearest step and the robot runs *that*
+# value. Steps were back-solved from the 2026-08/09 hardware logs
+# (residual < 1e-4); they are inferred, not vendor-documented.
+#
+#   group                       kp step [Nm/rad]   kd step [Nms/rad]
+#   rbq_hip   (.*_HIP, .*_THIGH)     17.62734          0.01762734
+#   rbq_knee  (.*_KNEE)              25.55443          0.02555443
+#
+# Observed: commanded 80 / 2.0 -> hip 88.14 / 2.0095, knee 76.66 / 1.9933.
+# kp snaps to the nearest step; the kd rounding rule is not confirmed (hip kd
+# 2.0 = 113.46 steps came back as 114), so pick exact multiples via
+# rbq_drive_gain instead of relying on the drive to round.
+RBQ_DRIVE_KP_STEP = {"rbq_hip": 17.62734, "rbq_knee": 25.55443}
+RBQ_DRIVE_KD_STEP = {group: step / 1000.0 for group, step in RBQ_DRIVE_KP_STEP.items()}
+
+
+def rbq_drive_gain(steps: int, group: str, kind: str = "kp") -> float:
+    """A gain the RBQ drive represents exactly: ``steps`` x the group's step.
+
+    e.g. ``rbq_drive_gain(5, "rbq_hip")`` -> 88.1367, ``rbq_drive_gain(113, "rbq_hip", "kd")`` -> 1.9919.
+    """
+    table = {"kp": RBQ_DRIVE_KP_STEP, "kd": RBQ_DRIVE_KD_STEP}[kind]
+    return round(steps * table[group], 4)
+
+
 RBQ10_CFG = ArticulationCfg(
     spawn=sim_utils.UrdfFileCfg(
         fix_base=False,
@@ -56,14 +84,16 @@ RBQ10_CFG = ArticulationCfg(
         # max torque, no-load speed = max angular vel. effort_limit is derated
         # to 90% of peak spec as a sim-side torque cap; saturation_effort and
         # velocity_limit stay at peak so the curve itself matches the real
-        # motor. stiffness/damping match the robot's deploy gains.
+        # motor. stiffness/damping are drive-representable multiples of the
+        # group step (see rbq_drive_gain), nominal kp ~ 90-100 / kd ~ 2.0.
+        # Deployment must command these exact values.
         "rbq_hip": DelayedDCMotorCfg(
             joint_names_expr=[".*_HIP", ".*_THIGH"],
             effort_limit=93.6,  # 104 * 0.9
             saturation_effort=104,
             velocity_limit=14.4,
-            stiffness=123.39,
-            damping=2.5,
+            stiffness=rbq_drive_gain(5, "rbq_hip"),  # 88.1367
+            damping=rbq_drive_gain(113, "rbq_hip", "kd"),  # 1.9919
             armature=0.014058,
             min_delay=0,
             max_delay=1,
@@ -75,8 +105,8 @@ RBQ10_CFG = ArticulationCfg(
             effort_limit=126.0,  # 140 * 0.9
             saturation_effort=140,
             velocity_limit=11.15,
-            stiffness=127.77,
-            damping=2.5,
+            stiffness=rbq_drive_gain(4, "rbq_knee"),  # 102.2177
+            damping=rbq_drive_gain(78, "rbq_knee", "kd"),  # 1.9932
             armature=0.0214816,
             min_delay=0,
             max_delay=1,

@@ -17,7 +17,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install "rsl-rl-lib==3.0.1" "onnxscript>=0.5" gymnasium numpy tensorboard pytest ruff import-linter
+          pip install "rsl-rl-lib==3.0.1" "onnxscript>=0.5" "PyYAML>=6.0" gymnasium numpy tensorboard pytest ruff import-linter
           pip install -e . --no-deps
       - name: Lint
         run: ruff check src scripts tests tools
