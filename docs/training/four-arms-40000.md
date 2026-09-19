@@ -1,8 +1,8 @@
-# ARM 1~4: 각 40,000 iteration 학습 전달서
+# ARM 1–4: 각 40,000 iteration 학습 전달서
 
 ## 목표와 전달 범위
 
-동일한 코드 버전으로 ARM 1~4를 각각 처음부터 **40,000 iteration** 학습한다.
+동일한 코드 버전으로 ARM 1–4를 각각 처음부터 **40,000 iteration** 학습한다.
 완료 후 각 arm의 체크포인트, 최종 설정, 학습 로그, ONNX export를 전달한다.
 이 문서는 원격 학습 담당자 또는 학습을 실행하는 에이전트가 따라 할 실행 절차다.
 
@@ -27,9 +27,9 @@ arm 1·2는 로봇 기본 gain을 상속하므로, 전달받은 코드 버전과
 - Command pulse OFF, `pulse_prob_schedule` OFF. 나머지 커리큘럼은 유지한다.
 - Payload 이벤트 ON: 에피소드마다 **0 kg 20% / 6 kg 80%**.
 - Payload 장착 위치: trunk 좌표계에서 `x ∈ [-0.05, 0.05] m`, `y=0`, `z=0.07 m`.
-- 표의 gain을 기준으로 기존 reset 시 gain 랜덤화 **0.85~1.15배**를 유지한다.
-- 일반·역계단은 각각 기존 폭 25 cm / 높이 5~20 cm를 비율 0.1로 유지하고,
-  폭 30 cm / 높이 5~25 cm인 `pyramid_stairs_wide`·`pyramid_stairs_inv_wide`를
+- 표의 gain을 기준으로 기존 reset 시 gain 랜덤화 **0.85–1.15배**를 유지한다.
+- 일반·역계단은 각각 기존 폭 25 cm / 높이 5–20 cm를 비율 0.1로 유지하고,
+  폭 30 cm / 높이 5–25 cm인 `pyramid_stairs_wide`·`pyramid_stairs_inv_wide`를
   비율 0.1씩 추가한다. 전체 지형은 10종, proportion 합은 1.0이다.
 - `feet_cadence_overrun`의 상한은 **swing 0.4 s / stance 0.6 s**다.
   Weight -1.0과 발별 overrun cap 0.5를 유지한다.
@@ -158,7 +158,7 @@ echo "$!" > "$GD_LAB_LOG_ROOT/launcher.pid"
 
 ### B. GPU 네 장에서 병렬 실행
 
-사용 가능한 GPU 0~3에 하나씩 배치한다. GPU 번호는 머신 상황에 맞게 바꾼다.
+사용 가능한 GPU 0–3에 하나씩 배치한다. GPU 번호는 머신 상황에 맞게 바꾼다.
 
 ```bash
 for arm in 1 2 3 4; do

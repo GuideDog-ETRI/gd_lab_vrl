@@ -21,7 +21,7 @@
 - Payload reset 이벤트를 그대로 포함한다. 현재 설정은 에피소드마다
   **0 kg 20% / 6 kg 80%**, 장착 위치는 trunk 기준
   `x ∈ [-0.05, 0.05] m`, `y=0`, `z=0.07 m`이다.
-- 표는 nominal gain이다. 기존 reset 시 gain 랜덤화(0.85~1.15배)는 유지한다.
+- 표는 nominal gain이다. 기존 reset 시 gain 랜덤화(0.85–1.15배)는 유지한다.
   arm 1·2는 로봇 기본 gain을 상속하고, arm 3·4는 표의 값을 정확히 적용한다.
 - 물리 시뮬레이션은 모두 `dt=0.005 s` (200 Hz)다. 제어 decimation만
   50 Hz에서 4, 100 Hz에서 2로 바꾸고, height scanner와 렌더링 주기를
