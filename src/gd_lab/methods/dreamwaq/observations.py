@@ -33,6 +33,8 @@ _PROPRIO_SPECS = {
     "joint_vel": dict(func=base_mdp.joint_vel_rel, noise=Unoise(n_min=-1.5, n_max=1.5), clip=(-2000.0, 2000.0), scale=0.05),
     "actions": dict(func=base_mdp.last_action),
     "base_lin_vel": dict(func=base_mdp.base_lin_vel, clip=(-50.0, 50.0), scale=2.0),
+    # Clean on purpose: the deploy payload is an exact operator input.
+    "payload": dict(func=gd_obs.payload_mass, params={"scale": 0.2}),
 }
 
 
@@ -66,6 +68,7 @@ class DreamwaqObservationsCfg:
         joint_pos = _proprio_obs("joint_pos")
         joint_vel = _proprio_obs("joint_vel")
         actions = _proprio_obs("actions")
+        payload = _proprio_obs("payload")
 
         def __post_init__(self) -> None:
             self.enable_corruption = True
@@ -106,12 +109,21 @@ class DreamwaqObservationsCfg:
         friction_coeff = ObsTerm(func=gd_obs.friction_coeff)
         base_mass_offset = ObsTerm(func=gd_obs.base_mass_offset, scale=0.2)
         actuator_gain_scale = ObsTerm(func=gd_obs.actuator_gain_scale)
+        # The push event sets root velocity directly, leaving no wrench in the
+        # scene state; without this the critic prices a push as an unexplained
+        # velocity jump - advantage noise on the riskiest transitions.
+        push_delta_v = ObsTerm(
+            func=gd_obs.push_delta_v,
+            params={"hold_s": 0.2},
+            clip=(-2.0, 2.0),
+        )
         height_scan = ObsTerm(
             func=base_mdp.height_scan,
             params={"sensor_cfg": SceneEntityCfg("height_scanner")},
             clip=(-1.0, 1.0),
             scale=5.0,
         )
+        payload = _proprio_obs("payload")
 
         def __post_init__(self) -> None:
             self.enable_corruption = False

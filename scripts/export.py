@@ -26,6 +26,9 @@ def main() -> None:
     parser.add_argument(
         "--height-scan-dim", type=int, default=187, help="Ray count of the critic height scanner (17x11 grid)."
     )
+    parser.add_argument(
+        "--no-metadata", action="store_true", help="Export a bare graph without the deployment contract."
+    )
     args = parser.parse_args()
 
     critic = DREAMWAQ_SPEC.critic.resolve(height_scan=args.height_scan_dim)
@@ -40,9 +43,18 @@ def main() -> None:
     loaded = torch.load(args.checkpoint, weights_only=False, map_location="cpu")
     policy.load_state_dict(loaded["model_state_dict"])
 
+    context = (loaded.get("infos") or {}).get("gd_lab", {}).get("deploy_context")
+    if context is None and not args.no_metadata:
+        raise SystemExit(
+            "Checkpoint carries no deployment context; it predates metadata capture or the "
+            "capture failed at training time. Re-export with --no-metadata to accept a bare graph."
+        )
+
     out_dir = args.out or os.path.join(os.path.dirname(args.checkpoint), "exported")
-    jit_path, onnx_path = export_policy(policy, out_dir)
+    jit_path, onnx_path = export_policy(policy, out_dir, deploy_context=None if args.no_metadata else context)
     print(f"Exported: {jit_path}\n          {onnx_path}")
+    if context is not None and not args.no_metadata:
+        print(f"          {os.path.splitext(onnx_path)[0]}.deploy.json")
 
 
 if __name__ == "__main__":

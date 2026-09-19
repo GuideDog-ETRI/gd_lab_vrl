@@ -12,10 +12,10 @@ from gd_lab.deploy.export import DreamwaqDeployPolicy, export_policy
 from gd_lab.rl import DreamwaqActorCritic
 
 NUM_ENVS = 16
-TERM_DIMS = [3, 3, 3, 12, 12, 12]
+TERM_DIMS = [3, 3, 3, 12, 12, 12, 1]
 ONE_STEP = sum(TERM_DIMS)
 POLICY_DIM = ONE_STEP * 5
-CRITIC_DIM = 294
+CRITIC_DIM = 298
 
 
 def _make_policy() -> DreamwaqActorCritic:

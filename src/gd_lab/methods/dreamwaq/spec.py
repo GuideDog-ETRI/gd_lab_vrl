@@ -15,7 +15,7 @@ HISTORY_LENGTH = 5
 
 # The proprio block is shared by the policy (noisy, stacked) and critic (clean,
 # current) groups; its order is a deploy contract - the on-robot observation
-# packer fills exactly this layout.
+# packer fills exactly this layout, and ``payload`` extends it by one.
 _PROPRIO_TERMS = (
     ObsTermSpec("base_ang_vel", 3, "ang_vel"),
     ObsTermSpec("projected_gravity", 3, "lin_vec"),
@@ -25,8 +25,12 @@ _PROPRIO_TERMS = (
     ObsTermSpec("actions", NUM_JOINTS, "joint"),
 )
 
+# The operator-known trunk payload. Declared AFTER the proprio block in both
+# groups so toggling it leaves that deploy-stable prefix untouched.
+_PAYLOAD_TERM = ObsTermSpec("payload", 1, "identity")
+
 DREAMWAQ_SPEC = ObsSpecSet(
-    policy=ObsSpec(terms=_PROPRIO_TERMS, history=HISTORY_LENGTH),
+    policy=ObsSpec(terms=(*_PROPRIO_TERMS, _PAYLOAD_TERM), history=HISTORY_LENGTH),
     critic=ObsSpec(
         terms=(
             *_PROPRIO_TERMS,
@@ -37,7 +41,9 @@ DREAMWAQ_SPEC = ObsSpecSet(
             ObsTermSpec("friction_coeff", 2, "identity"),
             ObsTermSpec("base_mass_offset", 1, "identity"),
             ObsTermSpec("actuator_gain_scale", 2 * NUM_JOINTS, "gain24"),
+            ObsTermSpec("push_delta_v", 3, "lin_vec"),
             ObsTermSpec("height_scan", None, "scan"),
+            _PAYLOAD_TERM,
         ),
         history=1,
     ),

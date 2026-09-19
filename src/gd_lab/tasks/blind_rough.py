@@ -16,6 +16,7 @@ from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import (
 
 from gd_lab.mdp.actions import JointPositionActionWithLimitCfg
 from gd_lab.mdp.commands_gamepad import GamepadVelocityCommandCfg
+from gd_lab.mdp.commands_pulse import UniformThresholdVelocityCommandCfg
 from gd_lab.mdp.terrains import (
     MeshInvertedPyramidStairsNosingTerrainCfg,
     MeshPyramidStairsNosingTerrainCfg,
@@ -107,10 +108,13 @@ class BlindRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         sub["pyramid_stairs_inv"].proportion = 0.2
         sub["pyramid_stairs_inv"].step_width = 0.25
         sub["pyramid_stairs_inv"].step_height_range = (0.05, 0.20)
+        # Descent keeps the taller ceiling; the ascending nosed family stays at
+        # 0.20, where it stalled on the curriculum at 0.25 and the top rows
+        # produced only falls instead of gradient.
         sub["pyramid_stairs_nose"] = MeshPyramidStairsNosingTerrainCfg(
             proportion=0.1,
             step_width=0.3,
-            step_height_range=(0.05, 0.20),
+            step_height_range=(0.05, 0.25),
             platform_width=3.0,
             border_width=1.0,
             holes=False,
@@ -149,16 +153,22 @@ class BlindRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         sub["hf_pyramid_slope_inv"].platform_width = 2.0
 
     def _command_init(self):
-        self.commands.base_velocity = UniformVelocityCommandCfg(
+        self.commands.base_velocity = UniformThresholdVelocityCommandCfg(
             asset_name="robot",
             resampling_time_range=(3.0, 7.0),
             rel_standing_envs=0.2,
             rel_heading_envs=1.0,
             heading_command=True,
             heading_control_stiffness=0.5,
+            # Trains the stop / re-launch transition a deploy joystick produces.
+            # The curriculum ramps it in from 0; PLAY zeroes it.
+            pulse_prob=0.2,
+            pulse_hold_range=(0.3, 1.0),
+            pulse_zero_hold_range=(0.2, 2.0),
+            pulse_resample_prob=0.5,
             debug_vis=True,
             # The command-range curriculum ramps 0.1x -> 1.0x of this terminal range.
-            ranges=UniformVelocityCommandCfg.Ranges(
+            ranges=UniformThresholdVelocityCommandCfg.Ranges(
                 lin_vel_x=(-1.2, 1.2),
                 lin_vel_y=(-1.0, 1.0),
                 ang_vel_z=(-1.0, 1.0),
@@ -173,7 +183,7 @@ class BlindRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         # Curriculum terms resolve reward terms by name at runtime; check them
         # before the zero-weight strip so declared-at-0 terms still count.
         reward_terms = {n for n in vars(self.rewards) if getattr(self.rewards, n) is not None}
-        for name in ("penalty_terrain_schedule", "feet_touchdown_schedule"):
+        for name in ("penalty_terrain_schedule",):
             term = getattr(self.curriculum, name, None)
             if term is not None:
                 missing = set(term.params["term_names"]) - reward_terms
@@ -207,6 +217,9 @@ def _apply_play(env_cfg: BlindRoughEnvCfg) -> None:
     env_cfg.curriculum.command_levels_ang_vel = None
     env_cfg.observations.policy.enable_corruption = False
     env_cfg.events.push_robot = None
+    env_cfg.commands.base_velocity.pulse_prob = 0.0
+    # Its ramp would write the declared value straight back.
+    env_cfg.curriculum.pulse_prob_schedule = None
 
 
 @configclass
