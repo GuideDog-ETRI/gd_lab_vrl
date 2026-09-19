@@ -45,11 +45,18 @@ class DreamwaqRunner(OnPolicyRunner):
         alg.init_storage("rl", self.env.num_envs, self.cfg["num_steps_per_env"], obs, [self.env.num_actions])
         return alg
 
+    #: Deployment contract, captured from the live environment by the entry
+    #: script (this layer is env-agnostic and cannot reach ``gd_lab.deploy``).
+    #: Carried in every checkpoint because export runs without a simulator.
+    deploy_context: dict | None = None
+
     def save(self, path: str, infos: dict | None = None) -> None:
         extra = {"learning_rate": self.alg.learning_rate}
         policy = self.alg.policy
         if isinstance(policy, DreamwaqActorCritic):
             extra["cenet_optimizer_state_dict"] = policy.cenet.optimizer.state_dict()
+        if self.deploy_context is not None:
+            extra["deploy_context"] = self.deploy_context
         infos = {**(infos or {}), "gd_lab": extra}
         super().save(path, infos)
 

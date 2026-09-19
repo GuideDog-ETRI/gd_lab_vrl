@@ -15,6 +15,7 @@ import os
 import torch
 import torch.nn as nn
 
+from gd_lab.deploy.metadata import attach_metadata
 from gd_lab.rl.actor_critic import DreamwaqActorCritic
 
 
@@ -26,19 +27,29 @@ class DreamwaqDeployPolicy(nn.Module):
         self.normalizer = policy.actor_obs_normalizer
         self.cenet = policy.cenet
         self.actor = policy.actor
-        self.register_buffer("latest_idx", policy.latest_idx.clone(), persistent=False)
+        self.register_buffer("frames_idx", policy.frames_idx.clone(), persistent=False)
 
     def forward(self, obs_history: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         norm = self.normalizer(obs_history)
-        latest = norm[..., self.latest_idx]
+        frames = norm[..., self.frames_idx]
         out = self.cenet(norm, deterministic=True)
         code = self.cenet.get_code(out)
-        actions = self.actor(torch.cat((latest, code), dim=-1))
+        actions = self.actor(torch.cat((frames, code), dim=-1))
         return actions, out.velocity
 
 
-def export_policy(policy: DreamwaqActorCritic, out_dir: str, stem: str = "policy") -> tuple[str, str]:
-    """Write ``<stem>.pt`` (TorchScript) and ``<stem>.onnx`` (opset 18); return their paths."""
+def export_policy(
+    policy: DreamwaqActorCritic,
+    out_dir: str,
+    stem: str = "policy",
+    deploy_context: dict | None = None,
+) -> tuple[str, str]:
+    """Write ``<stem>.pt`` (TorchScript) and ``<stem>.onnx`` (opset 18); return their paths.
+
+    ``deploy_context`` is the snapshot the training run stored in the checkpoint;
+    when given it is bound to the graph and written into the ONNX metadata plus a
+    ``<stem>.deploy.json`` sidecar. A graph the context does not describe raises.
+    """
     os.makedirs(out_dir, exist_ok=True)
     module = DreamwaqDeployPolicy(policy)
     example = torch.zeros(1, policy.cenet.input_dim)
@@ -57,4 +68,6 @@ def export_policy(policy: DreamwaqActorCritic, out_dir: str, stem: str = "policy
         output_names=["actions", "velocity_est"],
         dynamic_axes={"obs_history": {0: "batch"}, "actions": {0: "batch"}, "velocity_est": {0: "batch"}},
     )
+    if deploy_context is not None:
+        attach_metadata(onnx_path, deploy_context)
     return jit_path, onnx_path

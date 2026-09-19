@@ -105,13 +105,17 @@ def base_mass_offset(
 ) -> torch.Tensor:
     """Startup base-mass domain-randomization delta in kg, ``(N, 1)``.
 
-    Computed once on the first call and cached: the startup delta is constant
-    for the run.
+    Cached: the startup delta is constant for the run. Reads the payload event's
+    post-startup baseline when present, so the per-episode payload is not folded
+    into the startup delta.
     """
     cached = getattr(env, "_gd_base_mass_offset", None)
     if cached is None:
         asset: Articulation = env.scene[asset_cfg.name]
-        masses = asset.root_physx_view.get_masses()  # (N, bodies), CPU
+        # (N, bodies), CPU
+        masses = getattr(env, "_payload_base_mass", None)
+        if masses is None:
+            masses = asset.root_physx_view.get_masses()
         delta = (masses.sum(dim=1) - asset.data.default_mass.sum(dim=1)).to(env.device)
         cached = delta.unsqueeze(1)
         env._gd_base_mass_offset = cached
@@ -136,3 +140,31 @@ def actuator_gain_scale(
         kp[:, ids] = act.stiffness / asset.data.default_joint_stiffness[:, ids]
         kd[:, ids] = act.damping / asset.data.default_joint_damping[:, ids]
     return torch.cat((kp, kd), dim=1)
+
+
+def payload_mass(env: ManagerBasedEnv, scale: float = 0.2) -> torch.Tensor:
+    """Commanded trunk payload as ``payload_kg * scale``, ``(N, 1)``.
+
+    An observable, not a privileged estimate: the operator enters the mounted
+    payload at deploy, so it carries no noise.
+    """
+    payload = getattr(env, "payload_kg", None)
+    if payload is None:
+        payload = torch.zeros(env.num_envs, device=env.device)
+    return (payload * scale).unsqueeze(1)
+
+
+def push_delta_v(env: ManagerBasedEnv, hold_s: float = 0.2) -> torch.Tensor:
+    """Base-frame linear velocity delta the interval push applied, ``(N, 3)``.
+
+    Privileged, critic-only. Held ``hold_s`` seconds after each push, clipped to
+    the current episode so a push before a reset does not leak into the next.
+    Reads zeros with no push event, keeping the critic width stable.
+    """
+    buf = getattr(env, "push_delta_v_buf", None)
+    if buf is None:
+        return torch.zeros(env.num_envs, 3, device=env.device)
+    hold_steps = max(int(round(hold_s / env.step_dt)), 1)
+    age = int(env.common_step_counter) - env.push_step_buf
+    fresh = (age >= 0) & (age < hold_steps) & (age <= env.episode_length_buf)
+    return torch.where(fresh.unsqueeze(1), buf, torch.zeros_like(buf))

@@ -22,14 +22,39 @@ class DreamwaqPPO(PPO):
 
     policy: DreamwaqActorCritic
 
-    def __init__(self, *args: Any, episode_reward_window: int = 100, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        *args: Any,
+        episode_reward_window: int = 100,
+        min_learning_rate: float = 1.0e-5,
+        **kwargs: Any,
+    ) -> None:
+        self._min_learning_rate = float(min_learning_rate)
         super().__init__(*args, **kwargs)
         if not isinstance(self.policy, DreamwaqActorCritic):
             raise TypeError(f"DreamwaqPPO requires a DreamwaqActorCritic policy, got {type(self.policy).__name__}")
+        # Adam was built from the raw argument, before the floor applied.
+        for group in self.optimizer.param_groups:
+            group["lr"] = self.learning_rate
         self._episode_returns: deque[float] = deque(maxlen=episode_reward_window)
         self._cur_return: torch.Tensor | None = None
         self._next_latest: torch.Tensor | None = None
         self._aux_dones: torch.Tensor | None = None
+
+    # -- adaptive learning-rate floor --------------------------------------
+    # Upstream hardcodes ``max(1e-5, lr / 1.5)`` inside the minibatch loop, so
+    # raising the floor means either copying that method or intercepting the
+    # assignment. The stock line writes through this setter and the
+    # ``param_group["lr"]`` line after it reads the clamped value back; clamping
+    # after ``update()`` would leave that update's minibatches below the floor.
+    @property
+    def learning_rate(self) -> float:
+        return self._learning_rate
+
+    @learning_rate.setter
+    def learning_rate(self, value: float) -> None:
+        # ``PPO.__init__`` writes this before the subclass finishes.
+        self._learning_rate = max(getattr(self, "_min_learning_rate", 0.0), float(value))
 
     # -- rollout bookkeeping ----------------------------------------------
     def _ensure_aux_buffers(self, rewards: torch.Tensor) -> None:

@@ -25,6 +25,9 @@ class DreamwaqActorCriticCfg(RslRlPpoActorCriticCfg):
     history_length: int = HISTORY_LENGTH
     policy_term_dims: list[int] = [t.dim for t in DREAMWAQ_SPEC.policy.terms]
     velocity_target_slice: tuple[int, int] = VELOCITY_TARGET_SLICE
+    # Fits inside the stored history, so the observation and ONNX contracts are
+    # unchanged - but checkpoints do not resume across a change of this value.
+    actor_history_steps: int = 4
 
     # CENet.
     cenet_latent_dim: int = 16
@@ -45,12 +48,16 @@ class DreamwaqActorCriticCfg(RslRlPpoActorCriticCfg):
 class DreamwaqAlgorithmCfg(RslRlPpoAlgorithmCfg):
     class_name: str = "gd_lab.rl.ppo:DreamwaqPPO"
 
+    # Above rsl-rl's hardcoded 1e-5: a run parked at the floor stops learning
+    # while still reporting a healthy KL.
+    min_learning_rate: float = 3.0e-5
+
 
 @configclass
 class DreamwaqRunnerCfg(RslRlOnPolicyRunnerCfg):
     class_name: str = "gd_lab.rl.runner:DreamwaqRunner"
 
-    num_steps_per_env = 48
+    num_steps_per_env = 100
     max_iterations = 50000
     save_interval = 1000
     experiment_name = "blind_rbq10_dreamwaq"
