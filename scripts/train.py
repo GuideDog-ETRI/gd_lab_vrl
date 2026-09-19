@@ -45,6 +45,7 @@ from rsl_rl.runners import OnPolicyRunner
 
 import gd_lab  # noqa: F401  (registers the tasks)
 from gd_lab.core.paths import LOG_ROOT
+from gd_lab.deploy.metadata import capture_context
 from gd_lab.managers.action_history import ensure_prev_prev_action_tracking
 
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -103,6 +104,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
 
     runner_class = _resolve(agent_cfg.class_name)
     runner: OnPolicyRunner = runner_class(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
+    # A capture failure must not cost a training run; export refuses later
+    # rather than guessing.
+    try:
+        runner.deploy_context = capture_context(env, runner.alg.policy)
+    except (ValueError, AttributeError, KeyError, TypeError) as exc:
+        print(f"[WARN] Deployment metadata unavailable; checkpoints will not carry it: {exc}")
     runner.add_git_repo_to_log(__file__)
     if agent_cfg.resume:
         print(f"[INFO] Loading checkpoint: {resume_path}")

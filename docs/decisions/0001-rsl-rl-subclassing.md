@@ -24,6 +24,6 @@
 
 - minibatch 순열이 전 epoch에 대해 1회만 추출됨.
 - `num_envs * num_steps_per_env`가 `num_mini_batches`로 나누어떨어지지 않으면
-  rollout 꼬리가 학습에서 제외됨 (기본 설정 4096 x 48 / 4는 정확히 나누어떨어진다).
+  rollout 꼬리가 학습에서 제외됨 (기본 설정 4096 x 100 / 4는 정확히 나누어떨어진다).
 - timeout bootstrap이 V(s_t)를 사용.
 - `log_dir=None`이면 iteration 0 저장에서 크래시 — 러너는 항상 log_dir와 함께 생성한다.
