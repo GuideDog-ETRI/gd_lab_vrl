@@ -9,7 +9,7 @@ Apptainer 컨테이너 기준 워크플로우다. 호스트에는 NVIDIA 드라�
 570대 이상)와 apptainer만 있으면 되고, IsaacSim을 호스트에 설치하지 않는다.
 이미지는 GPU 모델과 무관하다 (드라이버는 실행 시 호스트에서 주입).
 
-이미 IsaacSim 5.1.0 + IsaacLab 2.3.1 conda env가 있는 머신이라면 1~3단계를
+이미 IsaacSim 5.1.0 + IsaacLab 2.3.1 conda env가 있는 머신이라면 1–3단계를
 건너뛰고 그 env에서 `pip install -e .`만 하면 된다 — 이후 명령은 `run` 접두어
 없이 동일하다.
 
