@@ -13,12 +13,17 @@ from .cenet import CENet
 
 
 class DreamwaqActorCritic(ActorCritic):
-    """Actor input = cat(latest one-step obs, CENet code); asymmetric privileged critic.
+    """Actor input = cat(K newest one-step frames, CENet code); privileged critic.
 
-    The policy observation group is the flattened proprio history (term-major, each
-    term's history oldest -> newest). The CENet encodes the full history; the actor
-    additionally receives the latest one-step slice. The code enters the actor
-    detached: the CENet is trained only by its own decoupled loss, never by PPO.
+    The policy observation group is the flattened proprio history (term-major,
+    each term's history oldest -> newest). The CENet encodes the full history;
+    the actor additionally receives the ``actor_history_steps`` newest one-step
+    frames, newest first, which fit inside the stored history and so leave the
+    observation contract unchanged. Checkpoints do NOT resume across a change of
+    K - the actor input width is ``K * one_step + code_dim``.
+
+    The code enters the actor detached: the CENet is trained only by its own
+    decoupled loss, never by PPO.
     """
 
     def __init__(
@@ -30,6 +35,7 @@ class DreamwaqActorCritic(ActorCritic):
         history_length: int,
         policy_term_dims: list[int],
         velocity_target_slice: tuple[int, int],
+        actor_history_steps: int = 1,
         cenet_latent_dim: int = 16,
         cenet_encoder_hidden_dims: list[int] | None = None,
         cenet_decoder_hidden_dims: list[int] | None = None,
@@ -59,18 +65,25 @@ class DreamwaqActorCritic(ActorCritic):
                 f"Obs spec mismatch: sum(term dims)={one_step} x history={history_length} "
                 f"!= policy obs dim {actor_obs_dim}"
             )
+        if not 1 <= actor_history_steps <= history_length:
+            raise ValueError(
+                f"actor_history_steps={actor_history_steps} must be in [1, history_length={history_length}]"
+            )
         self.history_length = int(history_length)
         self.one_step_obs_dim = one_step
+        self.actor_history_steps = int(actor_history_steps)
         self._velocity_target_slice = slice(*velocity_target_slice)
 
-        # Flat indices of the newest history step in the term-major layout.
-        latest = []
-        offset = 0
-        for dim in policy_term_dims:
-            start = offset + (history_length - 1) * dim
-            latest.extend(range(start, start + dim))
-            offset += dim * history_length
-        self.register_buffer("latest_idx", torch.tensor(latest, dtype=torch.long), persistent=False)
+        # Term-major flat indices of the K newest steps, newest first.
+        frames = []
+        for k in range(self.actor_history_steps):
+            offset = 0
+            for dim in policy_term_dims:
+                start = offset + (history_length - 1 - k) * dim
+                frames.extend(range(start, start + dim))
+                offset += dim * history_length
+        self.register_buffer("frames_idx", torch.tensor(frames, dtype=torch.long), persistent=False)
+        self.register_buffer("latest_idx", self.frames_idx[:one_step].clone(), persistent=False)
 
         self.cenet = CENet(
             input_dim=actor_obs_dim,
@@ -88,9 +101,9 @@ class DreamwaqActorCritic(ActorCritic):
             adaboot_ema=adaboot_ema,
         )
 
-        # Replace the actor built by the base class (its input was the full history).
+        # Replace the base class's actor (its input was the full history).
         self.actor = MLP(
-            one_step + self.cenet.code_dim,
+            one_step * self.actor_history_steps + self.cenet.code_dim,
             num_actions,
             kwargs.get("actor_hidden_dims", [512, 256, 128]),
             kwargs.get("activation", "elu"),
@@ -127,12 +140,12 @@ class DreamwaqActorCritic(ActorCritic):
 
     def _actor_input(self, obs: TensorDict, *, inference: bool) -> torch.Tensor:
         history = self._normalized_history(obs)
-        latest = history[..., self.latest_idx]
+        frames = history[..., self.frames_idx]
         out = self.cenet(history, deterministic=inference)
         inject = self._should_inject_gt(inference)
         velocity_gt = self.velocity_target(obs) if inject else None
         code = self.cenet.get_code(out, velocity_gt=velocity_gt, inject_gt_velocity=inject)
-        return torch.cat((latest, code.detach()), dim=-1)
+        return torch.cat((frames, code.detach()), dim=-1)
 
     # -- rsl_rl API --------------------------------------------------------
     def act(self, obs: TensorDict, **kwargs: Any) -> torch.Tensor:

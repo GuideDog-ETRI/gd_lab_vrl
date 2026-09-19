@@ -20,6 +20,8 @@ dependencies = [
 # Training-machine extras. IsaacSim 5.1.0 + IsaacLab 2.3.1 must be pre-installed
 # in the environment; they are not pip-resolvable from here.
 train = ["wandb", "trimesh", "inputs"]
+# ONNX metadata is written at export time; the graph itself needs only torch.
+deploy = ["onnx"]
 dev = ["pytest", "ruff", "import-linter"]
 
 [tool.setuptools.packages.find]

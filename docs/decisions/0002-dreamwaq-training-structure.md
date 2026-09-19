@@ -42,6 +42,26 @@ rollout 시점과 동일한 CENet 가중치의 code를 보므로 재계산 log-p
 ## 관측 레이아웃 규약
 
 - IsaacLab 히스토리 평탄화는 term-major(항별로 oldest->newest 연속 블록)다.
-  latest one-step 추출 인덱스는 이 규약에서 계산된다.
-- policy one-step 레이아웃은 원 논문과 같다. payload 열이 붙은 외부 체크포인트를
-  로드하려면 actor 첫 층에서 그 열을 제거해야 한다.
+  actor가 보는 K개 프레임의 추출 인덱스는 이 규약에서 계산된다.
+- policy one-step 레이아웃은 원 논문의 proprio 블록 뒤에 `payload` 1열이 붙은
+  형태다. payload는 DR이 아니라 **태스크 변수**다 — 배포 시 운용자가 실제
+  적재량을 입력하므로, 정책이 하중을 CENet으로 추정하게 두는 대신 명시적으로
+  조건화한다. 그래서 노이즈를 싣지 않는다.
+
+## Actor 입력: K=4 프레임
+
+actor는 최신 one-step 대신 **최신 K=4 프레임**(newest first)과 code를 받는다.
+K는 저장된 히스토리(H=5) 안에 들어가므로 관측·ONNX 계약은 그대로다. 단
+actor 1층 폭이 `K * one_step + code_dim`이므로 **K를 바꾸면 체크포인트가
+resume되지 않는다**.
+
+## 배포 메타데이터
+
+ONNX 그래프는 입출력 float 개수만 말한다. 어느 열이 어느 관절인지, 어떤 단위
+인지, 커맨드에 이미 어떤 scale이 적용됐는지, 어떤 PD 게인 기준으로 학습됐는지는
+그래프에 없고, 배포 측이 하나라도 틀리면 로봇은 자신 있게 틀리게 움직인다.
+관절 순서는 파싱된 articulation에서만 알 수 있고 export는 시뮬레이터 없이
+돌므로, 학습 시점에 `deploy/metadata.py`가 해석된 환경에서 스냅샷을 떠
+체크포인트에 싣고 export가 그것을 ONNX metadata(`gd_lab.policy.v1`)와
+`.deploy.json`에 적는다. 계약이 그래프를 설명하지 못하면 export는 실패한다
+(조용히 라벨 없는 그래프를 내보내지 않는다).

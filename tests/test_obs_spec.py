@@ -12,8 +12,9 @@ from gd_lab.methods.dreamwaq.spec import (
 
 
 def test_policy_spec_dims():
-    assert ONE_STEP_OBS_DIM == 45
-    assert POLICY_OBS_DIM == 225
+    # 6 proprio terms (45) + payload (1)
+    assert ONE_STEP_OBS_DIM == 46
+    assert POLICY_OBS_DIM == 230
     assert DREAMWAQ_SPEC.policy.history == 5
 
 
@@ -25,8 +26,9 @@ def test_critic_spec_resolution():
     with pytest.raises(ValueError):
         _ = DREAMWAQ_SPEC.critic.total
     critic = DREAMWAQ_SPEC.critic.resolve(height_scan=187)
-    assert critic.total == 45 + 3 + 16 + 4 + 12 + 2 + 1 + 24 + 187 == 294
+    assert critic.total == 45 + 3 + 16 + 4 + 12 + 2 + 1 + 24 + 3 + 187 + 1 == 298
     assert critic.slice("base_lin_vel") == slice(45, 48)
+    assert critic.slice("payload") == slice(297, 298)
 
 
 def test_latest_slices_term_major_layout():

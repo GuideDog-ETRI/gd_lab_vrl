@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pytest
 import torch
 from tensordict import TensorDict
 
@@ -10,11 +11,12 @@ from gd_lab.rl import DreamwaqActorCritic, DreamwaqRunner
 NUM_ENVS = 8
 NUM_ACTIONS = 12
 HISTORY = 5
-TERM_DIMS = [3, 3, 3, 12, 12, 12]
+TERM_DIMS = [3, 3, 3, 12, 12, 12, 1]
 ONE_STEP = sum(TERM_DIMS)
 POLICY_DIM = ONE_STEP * HISTORY
-CRITIC_DIM = 294
+CRITIC_DIM = 298
 V_SLICE = (45, 48)
+ACTOR_HISTORY = 4
 
 
 def _obs(num_envs: int = NUM_ENVS) -> TensorDict:
@@ -36,6 +38,7 @@ def _policy_cfg() -> dict:
         history_length=HISTORY,
         policy_term_dims=list(TERM_DIMS),
         velocity_target_slice=V_SLICE,
+        actor_history_steps=ACTOR_HISTORY,
         cenet_latent_dim=16,
         cenet_encoder_hidden_dims=[32, 16],
         cenet_decoder_hidden_dims=[16, 32],
@@ -54,7 +57,27 @@ def test_actor_input_width():
     policy = _make_policy()
     assert policy.one_step_obs_dim == ONE_STEP
     assert policy.cenet.code_dim == 3 + 16
-    assert policy.actor[0].in_features == ONE_STEP + 19
+    assert policy.actor[0].in_features == ONE_STEP * ACTOR_HISTORY + 19
+
+
+def test_actor_frames_are_the_k_newest_steps_newest_first():
+    policy = _make_policy()
+    # Term-major layout: term t occupies [off, off + HISTORY*dim), oldest first.
+    expected = []
+    for k in range(ACTOR_HISTORY):
+        offset = 0
+        for dim in TERM_DIMS:
+            start = offset + (HISTORY - 1 - k) * dim
+            expected.extend(range(start, start + dim))
+            offset += dim * HISTORY
+    assert policy.frames_idx.tolist() == expected
+    assert policy.latest_idx.tolist() == expected[:ONE_STEP]
+
+
+def test_actor_history_steps_bounded_by_history():
+    cfg = {**_policy_cfg(), "actor_history_steps": HISTORY + 1}
+    with pytest.raises(ValueError):
+        DreamwaqActorCritic(_obs(), {"policy": ["policy"], "critic": ["critic"]}, NUM_ACTIONS, **cfg)
 
 
 def test_act_shapes_and_inference():
@@ -71,12 +94,13 @@ def test_adaboot_injection_uses_ground_truth():
     policy = _make_policy()
     policy.cenet.inject_gt.fill_(1)
     obs = _obs()
+    code_start = ONE_STEP * ACTOR_HISTORY
     actor_in = policy._actor_input(obs, inference=False)
-    code_velocity = actor_in[..., ONE_STEP : ONE_STEP + 3]
+    code_velocity = actor_in[..., code_start : code_start + 3]
     assert torch.allclose(code_velocity, policy.velocity_target(obs))
     # Inference never injects, and never consumes the coin.
     actor_in_inf = policy._actor_input(obs, inference=True)
-    assert not torch.allclose(actor_in_inf[..., ONE_STEP : ONE_STEP + 3], policy.velocity_target(obs))
+    assert not torch.allclose(actor_in_inf[..., code_start : code_start + 3], policy.velocity_target(obs))
 
 
 def test_adaboot_coin_resampled_once_per_iteration():
@@ -169,3 +193,39 @@ def test_runner_learns_and_resumes(tmp_path):
     assert fresh.alg.learning_rate == 3.0e-5
     assert fresh.current_learning_iteration == runner.current_learning_iteration + 1
     fresh.learn(num_learning_iterations=1)
+
+
+def _algorithm(min_learning_rate: float, learning_rate: float = 1.0e-3):
+    from gd_lab.rl.ppo import DreamwaqPPO
+
+    return DreamwaqPPO(
+        _make_policy(),
+        device="cpu",
+        learning_rate=learning_rate,
+        min_learning_rate=min_learning_rate,
+        num_learning_epochs=1,
+        num_mini_batches=1,
+    )
+
+
+def test_learning_rate_floor_clamps_every_write():
+    alg = _algorithm(3.0e-5)
+    # Upstream decays with max(1e-5, lr / 1.5) inside the minibatch loop; the
+    # floor must bind before the optimizer reads the value back.
+    alg.learning_rate = 1.0e-5
+    assert alg.learning_rate == 3.0e-5
+    alg.learning_rate = 1.0e-4
+    assert alg.learning_rate == 1.0e-4
+
+
+def test_learning_rate_floor_syncs_the_optimizer():
+    alg = _algorithm(3.0e-5, learning_rate=1.0e-6)
+    assert alg.learning_rate == 3.0e-5
+    assert all(g["lr"] == 3.0e-5 for g in alg.optimizer.param_groups)
+
+
+def test_default_floor_matches_upstream():
+    # Without an explicit floor the subclass must not change stock behaviour.
+    alg = _algorithm(1.0e-5)
+    alg.learning_rate = 1.0e-5
+    assert alg.learning_rate == 1.0e-5
