@@ -20,11 +20,13 @@ from isaaclab_tasks.manager_based.locomotion.velocity.velocity_env_cfg import Re
 
 import gd_lab.mdp.rewards as gd_rew
 
-# The four families where a flat-nominal standing pose is unreachable: the feet
+# Stair families where a flat-nominal standing pose is unreachable: the feet
 # sit on different step levels, so a pose pull leaves the downhill foot hovering.
 _STAIR_FAMILIES = (
     "pyramid_stairs",
     "pyramid_stairs_inv",
+    "pyramid_stairs_wide",
+    "pyramid_stairs_inv_wide",
     "pyramid_stairs_nose",
     "pyramid_stairs_inv_nose",
 )
@@ -111,7 +113,7 @@ class DreamwaqRewardsCfg(RewardsCfg):
     # Upstream's feet_air_time targets ANYmal body names (".*FOOT") and is
     # superseded by the cadence bound below.
     feet_air_time = None
-    # 0.3 air + 0.4 contact = 0.7 s period (~1.43 Hz). One-sided, so the caps
+    # 0.4 air + 0.6 contact = 1.0 s period. One-sided, so the caps
     # bound each phase from above without pinning a duty factor; asymmetric so
     # the swing tightens while rough terrain keeps its longer ground contact.
     feet_cadence_overrun = RewTerm(
@@ -120,8 +122,8 @@ class DreamwaqRewardsCfg(RewardsCfg):
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
             "command_name": "base_velocity",
-            "target_air_time": 0.3,
-            "target_contact_time": 0.4,
+            "target_air_time": 0.4,
+            "target_contact_time": 0.6,
             "overrun_cap": 0.5,
             "cmd_threshold": 0.1,
         },
@@ -153,7 +155,11 @@ class DreamwaqRewardsCfg(RewardsCfg):
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot"),
             "asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
-            "family_weight_scales": {"pyramid_stairs": 0.5, "pyramid_stairs_nose": 0.5},
+            "family_weight_scales": {
+                "pyramid_stairs": 0.5,
+                "pyramid_stairs_wide": 0.5,
+                "pyramid_stairs_nose": 0.5,
+            },
         },
     )
 
