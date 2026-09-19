@@ -102,15 +102,12 @@ class BlindRoughEnvCfg(LocomotionVelocityRoughEnvCfg):
         gen.num_cols = 12
         gen.slope_threshold = None
         sub = gen.sub_terrains
-        sub["pyramid_stairs"].proportion = 0.2
-        sub["pyramid_stairs"].step_width = 0.25
-        sub["pyramid_stairs"].step_height_range = (0.05, 0.20)
-        sub["pyramid_stairs_inv"].proportion = 0.2
-        sub["pyramid_stairs_inv"].step_width = 0.25
-        sub["pyramid_stairs_inv"].step_height_range = (0.05, 0.20)
-        # Descent keeps the taller ceiling; the ascending nosed family stays at
-        # 0.20, where it stalled on the curriculum at 0.25 and the top rows
-        # produced only falls instead of gradient.
+        # Split each plain stair family between the original and wider/taller steps.
+        for name in ("pyramid_stairs", "pyramid_stairs_inv"):
+            sub[name].proportion = 0.1
+            sub[name].step_width = 0.25
+            sub[name].step_height_range = (0.05, 0.20)
+            sub[f"{name}_wide"] = sub[name].replace(step_width=0.30, step_height_range=(0.05, 0.25))
         sub["pyramid_stairs_nose"] = MeshPyramidStairsNosingTerrainCfg(
             proportion=0.1,
             step_width=0.3,

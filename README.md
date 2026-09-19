@@ -86,13 +86,13 @@ GD_LAB_ISAAC_TESTS=1 run -m pytest tests/test_smoke_isaac.py  # 태스크 생성
 ```bash
 # GPU 선택 + 학습 (로그: <repo>/logs/blind_rbq10_dreamwaq/<타임스탬프>/)
 CUDA_VISIBLE_DEVICES=0 run scripts/train.py \
-    --task Gd-Blind-Rbq10-Dreamwaq-v0 --num_envs 4096 --headless --logger tensorboard
+    --task Gd-Blind-Rbq10-Dreamwaq-v0 --num_envs 4096 --max_iterations 40000 --headless --logger tensorboard
 
 # 장기 학습: nohup은 셸 함수를 못 받으므로 bash -c로 감싼다 (ssh 끊겨도 유지)
 nohup bash -c 'CUDA_VISIBLE_DEVICES=0 OMNI_KIT_ACCEPT_EULA=YES \
     apptainer exec --writable-tmpfs ~/workspace/gd_lab_isaaclab.sif \
     ~/workspace/venv/bin/python scripts/train.py \
-    --task Gd-Blind-Rbq10-Dreamwaq-v0 --num_envs 4096 --headless --logger tensorboard \
+    --task Gd-Blind-Rbq10-Dreamwaq-v0 --num_envs 4096 --max_iterations 40000 --headless --logger tensorboard \
     --run_name a1' > logs/nohup_a1.log 2>&1 &
 
 # 튜닝 오버라이드는 hydra CLI로 (코드 값 수정 금지 — 규칙 6)
@@ -100,10 +100,10 @@ run scripts/train.py env.rewards.base_height.weight=-10.0 agent.max_iterations=2
 
 # Pulse 없는 4개 학습 arm: 1/3은 50 Hz, 2/4는 100 Hz, 모두 payload 포함
 # 1/2는 현재 gain, 3/4는 kp=123.39/127.77, kd=2.4
-TRAIN_ARM=1 run scripts/train.py --headless --logger tensorboard
+TRAIN_ARM=1 run scripts/train.py --max_iterations 40000 --headless --logger tensorboard
 
-# 재개
-run scripts/train.py --resume --load_run <run폴더명>
+# 재개: --max_iterations는 추가 실행 횟수 (계산법은 아래 학습 전달서 참고)
+run scripts/train.py --resume --load_run <run폴더명> --max_iterations <남은횟수>
 
 # 학습된 정책 확인 — 실행 시 exported/policy.{pt,onnx} 자동 생성
 run scripts/play.py --task Gd-Blind-Rbq10-Dreamwaq-Play-v0
@@ -112,11 +112,13 @@ run scripts/play.py --task Gd-Blind-Rbq10-Dreamwaq-Play-v0
 run scripts/play.py --task Gd-Blind-Rbq10-Dreamwaq-Gamepad-v0
 
 # 시뮬레이터 없이 체크포인트 + 같은 run의 params/agent.yaml로 export
-run scripts/export.py logs/blind_rbq10_dreamwaq/<run>/model_50000.pt
+run scripts/export.py logs/blind_rbq10_dreamwaq/<run>/model_39999.pt
 ```
 
 Arm 설정과 재개/play 방법은 [configs/experiment/](configs/experiment/README.md).
 Arm을 선택한 실행은 `logs/blind_rbq10_dreamwaq/arm_N/` 아래에 기록된다.
+원격 머신에서 네 arm을 각각 40,000 iteration 실행하는 절차는
+[학습 전달서](docs/training/four-arms-40000.md)에 정리되어 있다.
 
 ### 6. 기여자 체크 (PR 전)
 

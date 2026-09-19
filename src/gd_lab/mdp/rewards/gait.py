@@ -20,8 +20,8 @@ def feet_cadence_overrun(
     env: ManagerBasedRLEnv,
     command_name: str,
     sensor_cfg: SceneEntityCfg,
-    target_air_time: float = 0.3,
-    target_contact_time: float = 0.4,
+    target_air_time: float = 0.4,
+    target_contact_time: float = 0.6,
     cmd_threshold: float = 0.1,
     overrun_cap: float | None = 0.5,
 ) -> torch.Tensor:
