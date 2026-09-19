@@ -14,6 +14,7 @@ dependencies = [
     "tensordict>=0.7.0",
     "rsl-rl-lib==3.0.1",
     "gymnasium",
+    "PyYAML>=6.0",
 ]
 
 [project.optional-dependencies]

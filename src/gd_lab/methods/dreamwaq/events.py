@@ -55,7 +55,10 @@ class DreamwaqEventsCfg:
         mode="reset",
         params={
             "asset_cfg": SceneEntityCfg("robot", body_names="trunk"),
-            "payload_masses": (0.0, 5.0),
+            "payload_masses": (0.0, 6.0),
+            "payload_probabilities": (0.2, 0.8),
+            # Mount point in trunk-link coordinates [m], sampled per episode.
+            "payload_position_range": {"x": (-0.05, 0.05), "y": (0.0, 0.0), "z": (0.07, 0.07)},
         },
     )
     reset_base = EventTerm(

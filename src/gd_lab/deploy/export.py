@@ -48,7 +48,7 @@ def export_policy(
 
     ``deploy_context`` is the snapshot the training run stored in the checkpoint;
     when given it is bound to the graph and written into the ONNX metadata plus a
-    ``<stem>.deploy.json`` sidecar. A graph the context does not describe raises.
+    ``deploy.json`` sidecar (gd_rbq10_deploy's ``resources/policy/<name>/`` layout). A graph the context does not describe raises.
     """
     os.makedirs(out_dir, exist_ok=True)
     module = DreamwaqDeployPolicy(policy)

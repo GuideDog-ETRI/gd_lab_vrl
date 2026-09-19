@@ -1,11 +1,14 @@
 """Train an RSL-RL agent on a gd_lab task."""
 
 import argparse
+import os
 import sys
 
 from isaaclab.app import AppLauncher
 
 import cli_args  # isort: skip
+
+from gd_lab.core.experiments import training_arm_overrides
 
 parser = argparse.ArgumentParser(description="Train an RSL-RL agent on a gd_lab task.")
 parser.add_argument("--task", type=str, default="Gd-Blind-Rbq10-Dreamwaq-v0", help="Name of the task.")
@@ -24,14 +27,20 @@ args_cli, hydra_args = parser.parse_known_args()
 if args_cli.video:
     args_cli.enable_cameras = True
 
-# Hand the remaining arguments to Hydra.
-sys.argv = [sys.argv[0]] + hydra_args
+# Explicit CLI overrides take precedence over the selected arm defaults.
+train_arm = os.environ.get("TRAIN_ARM")
+try:
+    arm_overrides = training_arm_overrides(train_arm)
+except ValueError as exc:
+    parser.error(str(exc))
+sys.argv = [sys.argv[0]] + arm_overrides + hydra_args
+if train_arm is not None:
+    print(f"[INFO] Training arm: {train_arm} (configs/experiment/arm_{train_arm}.yaml)")
 
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
 import importlib
-import os
 from datetime import datetime
 
 import gymnasium as gym

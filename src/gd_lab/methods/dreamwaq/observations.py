@@ -34,7 +34,8 @@ _PROPRIO_SPECS = {
     "actions": dict(func=base_mdp.last_action),
     "base_lin_vel": dict(func=base_mdp.base_lin_vel, clip=(-50.0, 50.0), scale=2.0),
     # Clean on purpose: the deploy payload is an exact operator input.
-    "payload": dict(func=gd_obs.payload_mass, params={"scale": 0.2}),
+    # Keep the conversion in the manager so deployment metadata sees it too.
+    "payload": dict(func=gd_obs.payload_mass, params={"scale": 1.0}, scale=0.2),
 }
 
 
