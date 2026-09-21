@@ -270,3 +270,24 @@ def test_vrl_actor_onnx_matches_torch_for_dynamic_batches(tmp_path):
         for pt, ts, onnx in zip(expected, scripted, actual, strict=True):
             assert torch.allclose(pt, ts, atol=1e-6)
             assert torch.allclose(pt, torch.from_numpy(onnx), atol=1e-5)
+
+
+def test_hazard_target_uses_visibility_mask():
+    grid = torch.zeros(1, 11, 17)
+    grid[:, :, 8:] = 3.25
+    visible = torch.ones_like(grid, dtype=torch.bool)
+    visible[:, :, 8:] = False
+    assert torch.equal(height_discontinuity_metres(grid.flatten(1), 5, valid_mask=visible), torch.zeros(1))
+
+
+def test_camera_projection_round_trip_with_rotated_mount():
+    import math
+
+    from gd_lab.core.camera_geometry import camera_visible_points, depth_pixels_world
+
+    quat = torch.tensor([[[math.sqrt(0.5), 0.0, math.sqrt(0.5), 0.0]]])
+    position = torch.zeros(1, 1, 3)
+    intrinsic = torch.tensor([[[[4.0, 0.0, 2.0], [0.0, 4.0, 2.0], [0.0, 0.0, 1.0]]]])
+    depth = torch.ones(1, 1, 5, 5)
+    point = depth_pixels_world(depth, position, quat, intrinsic)[:, :, 2, 2]
+    assert camera_visible_points(point, position[:, 0], quat[:, 0], intrinsic[:, 0], depth[:, 0]).item()

@@ -24,7 +24,7 @@ cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
 
-args_cli.enable_cameras = args_cli.enable_cameras or "-Vision" in args_cli.task
+args_cli.enable_cameras = True
 
 sys.argv = [sys.argv[0]] + hydra_args
 

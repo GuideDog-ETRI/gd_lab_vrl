@@ -86,12 +86,13 @@ from torch.utils.tensorboard import SummaryWriter
 import gd_lab  # noqa: F401  (registers the tasks)
 from gd_lab.core.paths import LOG_ROOT
 from gd_lab.managers.action_history import ensure_prev_prev_action_tracking
+from gd_lab.mdp.camera_noise import noisy_camera_tensor
 from gd_lab.mdp.platform_gap_noise import PlatformGapDepthGhost, PlatformGapDepthGhostCfg
 from gd_lab.mdp.terrain_families import terrain_family_gate
 from gd_lab.rl.actor_critic_vrl import DreamwaqVrlActorCritic
 from gd_lab.rl.perception import CameraPerceptionEncoder, height_discontinuity_metres
 from gd_lab.tasks.vrl_cameras import configure_vrl_cameras
-from gd_lab.tasks.vrl_rough import CameraNoiseCfg, noisy_camera_frames
+from gd_lab.tasks.vrl_rough import CameraNoiseCfg
 
 
 def _resolve(path: str):
@@ -171,32 +172,42 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                     actions = teacher.act_inference(obs)
                 obs, _, dones, _ = env.step(actions)
                 if dones.any():
-                    keep = (~dones.reshape(-1).bool()).unsqueeze(-1).to(hidden.dtype)
+                    done_rows = dones.reshape(-1).bool()
+                    keep = (~done_rows).unsqueeze(-1).to(hidden.dtype)
                     hidden = hidden * keep  # stays in-graph on purpose; see module docstring
+                    gap_ghost.reset(done_rows.nonzero(as_tuple=False).flatten())
 
-            if camera_noise_cfg is not None:
-                frames = noisy_camera_frames(env.unwrapped.scene, camera_noise_cfg)
-                if frames.shape[-2:] != (45, 80):
-                    frames = F.interpolate(frames.reshape(-1, *frames.shape[2:]), size=(45, 80), mode="bilinear", align_corners=False).reshape(frames.shape[0], frames.shape[1], frames.shape[2], 45, 80)
-            else:
-                frames = env.unwrapped._vrl_camera_snapshot[0].clone()
             snapshot = getattr(env.unwrapped, "_vrl_camera_snapshot", None)
-            if snapshot is not None:
-                gap_envs = terrain_family_gate(env.unwrapped, ("platform_gap",)) == 0
-                frames = gap_ghost(frames, snapshot, env.unwrapped.scene.env_origins, gap_envs)
+            if snapshot is None:
+                raise RuntimeError("VRL camera snapshot was not produced by the terrain observation")
+            frames = snapshot[0].clone()
+            if camera_noise_cfg is not None:
+                frames = noisy_camera_tensor(frames, camera_noise_cfg)
+            gap_envs = terrain_family_gate(env.unwrapped, ("platform_gap",)) == 0
+            frames = gap_ghost(frames, snapshot, env.unwrapped.scene.env_origins, gap_envs)
             student_latent, hidden = student(frames, hidden)
             hazard_pred = student.hazard_head(hidden).squeeze(-1)
 
             with torch.no_grad():
                 teacher_latent = teacher.terrain_latent(obs)
-                raw_height_scan = obs[teacher.obs_groups["critic"][0]][..., teacher._height_scan_slice]
+                terrain = obs["terrain"]
+                scan_cells = teacher._height_scan_slice.stop - teacher._height_scan_slice.start
+                visible_height = terrain[..., :scan_cells]
+                visibility = terrain[..., scan_cells:].bool()
                 hazard_label = height_discontinuity_metres(
-                    raw_height_scan, env_cfg.observations.critic.height_scan.scale,
-                    teacher.terrain_encoder.grid_shape,
+                    visible_height, 5.0, teacher.terrain_encoder.grid_shape, visibility
+                )
+                valid_grid = visibility.reshape(-1, *teacher.terrain_encoder.grid_shape)
+                hazard_supervised = (
+                    (valid_grid[:, 1:, :] & valid_grid[:, :-1, :]).flatten(1).any(1)
+                    | (valid_grid[:, :, 1:] & valid_grid[:, :, :-1]).flatten(1).any(1)
                 )
 
             latent_loss = F.mse_loss(student_latent, teacher_latent)
-            hazard_loss = F.mse_loss(hazard_pred, hazard_label)
+            if hazard_supervised.any():
+                hazard_loss = F.mse_loss(hazard_pred[hazard_supervised], hazard_label[hazard_supervised])
+            else:
+                hazard_loss = hazard_pred.sum() * 0.0
             window_loss = window_loss + latent_loss + args_cli.hazard_loss_coef * hazard_loss
             window_mse_sum += latent_loss.item()
             window_hazard_sum += hazard_loss.item()

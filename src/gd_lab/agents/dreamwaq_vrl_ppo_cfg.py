@@ -44,10 +44,16 @@ def _vrl_policy() -> DreamwaqVrlActorCriticCfg:
     return cfg
 
 
+def _vrl_algorithm():
+    cfg = DreamwaqRunnerCfg().algorithm
+    cfg.symmetry_cfg.data_augmentation_func = (
+        "gd_lab.methods.dreamwaq.vrl_symmetry:mirror_vrl_observations"
+    )
+    return cfg
+
+
 @configclass
 class DreamwaqVrlRunnerCfg(DreamwaqRunnerCfg):
-    # Terrain visibility is a second spatial channel and must mirror with the
-    # same y-axis permutation as the height grid.
-    symmetry_cfg = {"data_augmentation_func": "gd_lab.methods.dreamwaq.vrl_symmetry:mirror_vrl_observations"}
+    algorithm = _vrl_algorithm()
     experiment_name = "vision_rbq10_dreamwaq"
     policy = _vrl_policy()
