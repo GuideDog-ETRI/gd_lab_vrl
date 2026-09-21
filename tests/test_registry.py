@@ -7,11 +7,15 @@ import gd_lab  # noqa: F401  (registers the tasks)
 from gd_lab.core import registry
 
 
-def test_exactly_three_ids():
+def test_registered_blind_and_vision_ids():
     assert registry.all_ids() == [
         "Gd-Blind-Rbq10-Dreamwaq-v0",
         "Gd-Blind-Rbq10-Dreamwaq-Play-v0",
         "Gd-Blind-Rbq10-Dreamwaq-Gamepad-v0",
+        "Gd-Vrl-Rbq10-Dreamwaq-v0",
+        "Gd-Vrl-Rbq10-Dreamwaq-Play-v0",
+        "Gd-Vrl-Rbq10-Dreamwaq-Vision-v0",
+        "Gd-Vrl-Rbq10-Dreamwaq-VisionPlay-v0",
     ]
 
 

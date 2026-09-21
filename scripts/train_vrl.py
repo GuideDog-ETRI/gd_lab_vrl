@@ -1,21 +1,13 @@
-"""Train an RSL-RL agent on a gd_lab task."""
+"""Train an RSL-RL agent on a gd_lab vision-RL task (Stage 1 teacher: the blind
+DreamWaQ policy plus the privileged terrain encoder).
+
+Regenerated from scripts/train.py rather than kept as an old fork, so the
+deployment-contract capture and the TRAIN_ARM experiment overrides stay in step
+with the blind trainer. Only the default task and the camera flag differ."""
 
 import argparse
-import faulthandler
 import os
-import signal
 import sys
-
-# `kill -USR1 <pid>` dumps every thread's Python stack to stderr (the console log).
-#
-# This exists because on 2026-09-20 the blind run wedged at iteration 13,560 --
-# process alive, one thread spinning at 100%, GPU idle -- and we could not see
-# where: ptrace is blocked here (yama ptrace_scope=1, and even `sudo py-spy`
-# is denied on the apptainer process), so py-spy/gdb are both unavailable.
-# faulthandler needs no ptrace, and registering a signal handler has no effect
-# on the training maths, so it is safe to add mid-experiment.
-# See logs/incident_notes/arm1_gpu0_seed42_40k.md INC-004.
-faulthandler.register(signal.SIGUSR1, all_threads=True, chain=False)
 
 from isaaclab.app import AppLauncher
 
@@ -24,7 +16,7 @@ import cli_args  # isort: skip
 from gd_lab.core.experiments import training_arm_overrides
 
 parser = argparse.ArgumentParser(description="Train an RSL-RL agent on a gd_lab task.")
-parser.add_argument("--task", type=str, default="Gd-Blind-Rbq10-Dreamwaq-v0", help="Name of the task.")
+parser.add_argument("--task", type=str, default="Gd-Vrl-Rbq10-Dreamwaq-v0", help="Name of the task.")
 parser.add_argument("--agent", type=str, default="rsl_rl_cfg_entry_point", help="Agent config entry-point name.")
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
 parser.add_argument("--seed", type=int, default=None, help="Environment seed.")
@@ -37,13 +29,14 @@ cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
 
-if args_cli.video:
-    args_cli.enable_cameras = True
+# Teacher height scans use Warp ray casting; only image sensors/video need RTX.
+args_cli.enable_cameras = args_cli.enable_cameras or args_cli.video or "-Vision" in args_cli.task
 
 # Explicit CLI overrides take precedence over the selected arm defaults.
 train_arm = os.environ.get("TRAIN_ARM")
 try:
     arm_overrides = training_arm_overrides(train_arm)
+    arm_overrides = [item.replace("agent.experiment_name=blind_", "agent.experiment_name=vision_") for item in arm_overrides]
 except ValueError as exc:
     parser.error(str(exc))
 sys.argv = [sys.argv[0]] + arm_overrides + hydra_args
@@ -69,6 +62,7 @@ import gd_lab  # noqa: F401  (registers the tasks)
 from gd_lab.core.paths import LOG_ROOT
 from gd_lab.deploy.metadata import capture_context
 from gd_lab.managers.action_history import ensure_prev_prev_action_tracking
+from gd_lab.tasks.vrl_cameras import configure_vrl_cameras
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
@@ -107,6 +101,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     print(f"[INFO] Logging run in: {log_dir}")
     env_cfg.log_dir = log_dir
 
+    configure_vrl_cameras(env_cfg)
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
     ensure_prev_prev_action_tracking(env.unwrapped)
 

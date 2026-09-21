@@ -37,6 +37,10 @@ class CENet(nn.Module):
         decoder_hidden_dims: list[int] | tuple[int, ...] = (64, 128),
         beta: float = 1.0,
         learning_rate: float = 1.0e-3,
+        velocity_target_limit: float = 10.0,
+        recon_target_limit: float = 10.0,
+        obs_history_limit: float = 10.0,
+        loss_skip_threshold: float = 50.0,
         velocity_loss_coef: float = 1.0,
         reconstruction_loss_coef: float = 1.0,
         activation: str = "elu",
@@ -78,6 +82,19 @@ class CENet(nn.Module):
         self.register_buffer("adaboot_update_count", torch.zeros((), dtype=torch.long))
         self.register_buffer("inject_gt", torch.zeros((), dtype=torch.long))
 
+        # Outlier guards on the *targets*. velocity_target arrives in raw m/s
+        # (ppo.py reads it from the unnormalised critic obs) and the robot is
+        # commanded at most 1.2 m/s, so 10 m/s is pure headroom -- only a physics
+        # blow-up reaches it. recon_target is already normalised, so its limit is
+        # in sigma.
+        self.velocity_target_limit = float(velocity_target_limit)
+        self.recon_target_limit = float(recon_target_limit)
+        self.obs_history_limit = float(obs_history_limit)
+        # Last line of defence, and the only one that does not care which input
+        # went bad. Normal cenet loss is ~0.5; the four observed blow-ups were
+        # 7e3 / 5.7e4 / 2.2e4 / 3.2e4. 50 is 100x normal and still 140x below the
+        # smallest blow-up.
+        self.loss_skip_threshold = float(loss_skip_threshold)
         self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
 
     def forward(self, obs_history: torch.Tensor, deterministic: bool = False) -> CENetOut:
@@ -145,6 +162,30 @@ class CENet(nn.Module):
         valid_mask: torch.Tensor | None = None,
     ) -> dict[str, float]:
         """One optimizer step. ``valid_mask`` restricts reconstruction to non-terminal rows."""
+        # Guard the targets, not the gradients. A PhysX blow-up in a few envs puts
+        # absurd values in both targets at once; one such batch destroyed the
+        # estimator on the blind run (arm 1, 2026-09-20, iter 10,796 -- cenet loss
+        # 0.605 -> 7124, policy down 600 iterations, see
+        # logs/incident_notes/arm1_gpu0_seed42_40k.md INC-003).
+        #
+        # Gradient clipping is the reflex here and it does **not** work: Adam
+        # already normalises the step, so clipping measured no effect at all
+        # (3.13 vs 3.02 relative drift). Clamping the targets brings drift back to
+        # the no-outlier baseline (1.31 vs 1.24). The counts are logged rather than
+        # swallowed, so an upstream physics problem still shows up.
+        vlim, rlim, hlim = self.velocity_target_limit, self.recon_target_limit, self.obs_history_limit
+        n_clamped_velocity = int((velocity_target.abs() > vlim).sum())
+        n_clamped_recon = int((next_obs_target.abs() > rlim).sum())
+        n_clamped_history = int((obs_history.abs() > hlim).sum())
+        velocity_target = velocity_target.clamp(-vlim, vlim)
+        next_obs_target = next_obs_target.clamp(-rlim, rlim)
+        # The encoder input needs the same guard as the targets. On 2026-09-21
+        # (arm 1, iter 14,138) the targets were clamped and the loss was still
+        # 31,531: velocity_target never exceeded its limit (clamp count 0) yet the
+        # velocity loss was 11,036, so sqrt() puts the *prediction* near 105 m/s.
+        # An extreme history drives the forward pass, not the targets.
+        obs_history = obs_history.clamp(-hlim, hlim)
+
         out = self.forward(obs_history, deterministic=False)
         velocity_loss = F.mse_loss(out.velocity, velocity_target.detach())
         target = next_obs_target.detach()
@@ -162,11 +203,20 @@ class CENet(nn.Module):
             + self.reconstruction_loss_coef * recon_loss
             + self.beta * kl_loss
         )
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+        # Clamping bounds the inputs but cannot bound everything: the loss is the
+        # one place where every failure path becomes visible. If it is absurd,
+        # the batch has nothing to teach -- take no step rather than a wrong one.
+        skipped = not torch.isfinite(loss) or float(loss) > self.loss_skip_threshold
+        self.optimizer.zero_grad(set_to_none=True)
+        if not skipped:
+            loss.backward()
+            self.optimizer.step()
 
         metrics = {
+            "cenet_clamped_velocity": float(n_clamped_velocity),
+            "cenet_clamped_recon": float(n_clamped_recon),
+            "cenet_clamped_history": float(n_clamped_history),
+            "cenet_skipped_steps": float(skipped),
             "cenet_velocity": velocity_loss.item(),
             "cenet_recon": recon_loss.item(),
             "cenet_kl": kl_loss.item(),
