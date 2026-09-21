@@ -86,10 +86,12 @@ from torch.utils.tensorboard import SummaryWriter
 import gd_lab  # noqa: F401  (registers the tasks)
 from gd_lab.core.paths import LOG_ROOT
 from gd_lab.managers.action_history import ensure_prev_prev_action_tracking
+from gd_lab.mdp.platform_gap_noise import PlatformGapDepthGhost, PlatformGapDepthGhostCfg
+from gd_lab.mdp.terrain_families import terrain_family_gate
 from gd_lab.rl.actor_critic_vrl import DreamwaqVrlActorCritic
 from gd_lab.rl.perception import CameraPerceptionEncoder, height_discontinuity_metres
 from gd_lab.tasks.vrl_cameras import configure_vrl_cameras
-from gd_lab.tasks.vrl_rough import CameraNoiseCfg, belly_camera_frames, noisy_camera_frames
+from gd_lab.tasks.vrl_rough import CameraNoiseCfg, noisy_camera_frames
 
 
 def _resolve(path: str):
@@ -138,6 +140,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     optimizer = torch.optim.Adam(student.parameters(), lr=args_cli.lr)
 
     camera_noise_cfg = None if args_cli.no_camera_noise else CameraNoiseCfg()
+    gap_ghost = PlatformGapDepthGhost(PlatformGapDepthGhostCfg())
     print(f"[INFO] Camera sensor-noise domain randomization: {'OFF' if camera_noise_cfg is None else camera_noise_cfg}")
 
     run_name = args_cli.perception_run_name or time.strftime("%Y-%m-%d_%H-%M-%S") + "_perception"
@@ -173,8 +176,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
 
             if camera_noise_cfg is not None:
                 frames = noisy_camera_frames(env.unwrapped.scene, camera_noise_cfg)
+                if frames.shape[-2:] != (45, 80):
+                    frames = F.interpolate(frames.reshape(-1, *frames.shape[2:]), size=(45, 80), mode="bilinear", align_corners=False).reshape(frames.shape[0], frames.shape[1], frames.shape[2], 45, 80)
             else:
-                frames = belly_camera_frames(env.unwrapped.scene)
+                frames = env.unwrapped._vrl_camera_snapshot[0].clone()
+            snapshot = getattr(env.unwrapped, "_vrl_camera_snapshot", None)
+            if snapshot is not None:
+                gap_envs = terrain_family_gate(env.unwrapped, ("platform_gap",)) == 0
+                frames = gap_ghost(frames, snapshot, env.unwrapped.scene.env_origins, gap_envs)
             student_latent, hidden = student(frames, hidden)
             hazard_pred = student.hazard_head(hidden).squeeze(-1)
 

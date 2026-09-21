@@ -151,3 +151,31 @@ def test_platform_no_success_for_unsafe_crossing(invalid):
     for _ in range(10):
         result = term(env, NS(name="robot", body_ids=slice(None)), NS(name="contact_forces", body_ids=slice(None)))
         assert not result.any()
+
+
+def test_platform_gap_depth_ghost_changes_only_depth_and_only_gap_family():
+    import torch
+
+    from gd_lab.mdp.platform_gap_noise import PlatformGapDepthGhost, PlatformGapDepthGhostCfg
+
+    n, cameras, h, w = 2, 4, 9, 12
+    frames = torch.zeros(n, cameras, 2, h, w)
+    frames[:, :, 0] = 0.2
+    frames[:, :, 1] = 0.37
+    depth = torch.full((n, cameras, h, w), 1.0)
+    positions = torch.zeros(n, cameras, 3)
+    positions[..., 0] = 1.5
+    positions[..., 2] = -1.0
+    rotations = torch.zeros(n, cameras, 4)
+    rotations[..., 0] = 1.0
+    intrinsics = torch.zeros(n, cameras, 3, 3)
+    intrinsics[..., 0, 0] = intrinsics[..., 1, 1] = 20.0
+    intrinsics[..., 0, 2] = w / 2
+    intrinsics[..., 1, 2] = h / 2
+    intrinsics[..., 2, 2] = 1.0
+    snapshot = (frames.clone(), depth, positions, rotations, intrinsics)
+    cfg = PlatformGapDepthGhostCfg(probability=1.0, lifetime_steps=(3, 3), patch_fraction=(1.0, 1.0))
+    noisy = PlatformGapDepthGhost(cfg)(frames, snapshot, torch.zeros(n, 3), torch.tensor([True, False]))
+    assert torch.equal(noisy[1], frames[1])
+    assert torch.equal(noisy[0, :, 1], frames[0, :, 1])
+    assert not torch.equal(noisy[0, :, 0], frames[0, :, 0])
