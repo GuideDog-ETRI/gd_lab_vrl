@@ -44,7 +44,7 @@ def camera_visible_points(points_w, camera_pos, camera_quat_ros, intrinsic, dept
     """
     n, h, w = depth.shape
     rotation = camera_rotation_matrix(camera_quat_ros)
-    camera_points = (points_w - camera_pos[:, None]) @ rotation.transpose(1, 2)
+    camera_points = (points_w - camera_pos[:, None]) @ rotation
     z = camera_points[..., 2]
     homogeneous = camera_points @ intrinsic.transpose(1, 2)
     uv = homogeneous[..., :2] / z.clamp_min(1e-6)[..., None]

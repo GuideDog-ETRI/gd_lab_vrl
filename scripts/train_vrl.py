@@ -29,8 +29,8 @@ cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
 
-# Teacher height scans use Warp ray casting; only image sensors/video need RTX.
-args_cli.enable_cameras = args_cli.enable_cameras or args_cli.video or "-Vision" in args_cli.task
+# The actor terrain target is masked by rendered camera visibility.
+args_cli.enable_cameras = True
 
 # Explicit CLI overrides take precedence over the selected arm defaults.
 train_arm = os.environ.get("TRAIN_ARM")

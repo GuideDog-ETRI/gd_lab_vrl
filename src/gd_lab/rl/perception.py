@@ -14,17 +14,22 @@ import torch
 from torch import nn
 
 
-def height_discontinuity_metres(height_scan: torch.Tensor, scale: float, grid_shape=(11, 17)) -> torch.Tensor:
-    """Max adjacent height jump in metres, undoing ObservationTerm scale.
-
-    This is edge severity, not distance-to-hazard or a collision probability.
-    Missing adjacent cells provide no valid supervision for that edge.
-    """
+def height_discontinuity_metres(
+    height_scan: torch.Tensor,
+    scale: float,
+    grid_shape=(11, 17),
+    valid_mask: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Maximum visible adjacent height jump in metres."""
     if scale == 0 or min(grid_shape) < 2:
         raise ValueError("height scan scale must be nonzero and grid axes >= 2")
     grid = height_scan.reshape(height_scan.shape[0], *grid_shape) / scale
     rows = (grid[:, 1:, :] - grid[:, :-1, :]).abs()
     cols = (grid[:, :, 1:] - grid[:, :, :-1]).abs()
+    if valid_mask is not None:
+        valid = valid_mask.reshape(valid_mask.shape[0], *grid_shape).bool()
+        rows = torch.where(valid[:, 1:, :] & valid[:, :-1, :], rows, 0.0)
+        cols = torch.where(valid[:, :, 1:] & valid[:, :, :-1], cols, 0.0)
     rows = torch.where(torch.isfinite(rows), rows, 0.0)
     cols = torch.where(torch.isfinite(cols), cols, 0.0)
     return torch.maximum(rows.amax(dim=(1, 2)), cols.amax(dim=(1, 2)))

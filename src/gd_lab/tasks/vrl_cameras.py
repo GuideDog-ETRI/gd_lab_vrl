@@ -21,7 +21,7 @@ def default_vrl_camera(name: str) -> TiledCameraCfg:
             clipping_range=contract.depth_clip,
         ),
         width=contract.width, height=contract.render_height,
-        update_period=contract.policy_dt, update_latest_camera_pose=True,
+        update_period=contract.period_steps * contract.policy_dt, update_latest_camera_pose=True,
     )
 
 def configure_vrl_cameras(cfg):
@@ -30,7 +30,7 @@ def configure_vrl_cameras(cfg):
     dt = cfg.decimation * cfg.sim.dt
     if not math.isclose(dt, contract.policy_dt, abs_tol=1e-8):
         raise ValueError("VRL camera contract requires policy_dt=0.02 seconds")
-    cfg.sim.render_interval = cfg.decimation
+    cfg.sim.render_interval = cfg.decimation * contract.period_steps
     cfg.rerender_on_reset = True
     for name, pos, quat in zip(CAMERA_NAMES, contract.positions, contract.quaternions_opengl, strict=True):
         norm = math.sqrt(sum(v*v for v in quat))
@@ -43,6 +43,7 @@ def configure_vrl_cameras(cfg):
                 horizontal_aperture=contract.sensor_size_m[0] * 1000,
                 clipping_range=contract.depth_clip,
             ),
-            width=contract.width, height=contract.render_height, update_period=dt,
+            width=contract.width, height=contract.render_height,
+            update_period=contract.period_steps * dt,
             update_latest_camera_pose=True,
         ))

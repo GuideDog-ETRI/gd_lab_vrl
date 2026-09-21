@@ -12,6 +12,11 @@ import torch
 from gd_lab.core.camera_geometry import depth_pixels_world
 
 
+def _sample(bounds, shape, device):
+    lo, hi = bounds
+    return lo + torch.rand(shape, device=device) * (hi - lo)
+
+
 @dataclass
 class PlatformGapDepthGhostCfg:
     probability: float = 0.25
@@ -35,6 +40,9 @@ class PlatformGapDepthGhost:
         self.remaining = None
         self.center = None
         self.mode = None
+        self.radius = None
+        self.hole_depth = None
+        self.return_offset = None
 
     def reset(self, env_ids=None):
         if self.remaining is None:
@@ -50,6 +58,9 @@ class PlatformGapDepthGhost:
             self.remaining = torch.zeros(n, cameras, device=device, dtype=torch.long)
             self.center = torch.zeros(n, cameras, 2, device=device)
             self.mode = torch.zeros(n, cameras, device=device, dtype=torch.long)
+            self.radius = torch.ones(n, cameras, device=device)
+            self.hole_depth = torch.full((n, cameras), self.cfg.max_depth, device=device)
+            self.return_offset = torch.zeros(n, cameras, device=device)
 
     def __call__(self, frames, snapshot, origins, platform_gap_envs):
         """Return frames with depth corruption; inputs are ``N,C,2,H,W``.
@@ -82,30 +93,45 @@ class PlatformGapDepthGhost:
         eligible &= active[:, None, None, None]
         eligible &= torch.isfinite(clean_depth) & (clean_depth >= cfg.min_depth) & (clean_depth <= cfg.max_depth)
 
-        fresh = (self.remaining <= 0) & active[:, None]
+        has_eligible = eligible.flatten(2).any(-1)
+        fresh = (self.remaining <= 0) & active[:, None] & has_eligible
         start = fresh & (torch.rand_like(self.remaining.float()) < cfg.probability)
         lo, hi = cfg.lifetime_steps
-        self.remaining = torch.where(start, torch.randint(lo, hi + 1, self.remaining.shape, device=frames.device), self.remaining)
+        sampled_life = torch.randint(lo, hi + 1, self.remaining.shape, device=frames.device)
+        self.remaining = torch.where(start, sampled_life, self.remaining)
         self.mode = torch.where(start, torch.randint(0, 2, self.mode.shape, device=frames.device), self.mode)
-        if start.any():
-            self.center[..., 0] = torch.rand_like(self.center[..., 0]) * w
-            self.center[..., 1] = torch.rand_like(self.center[..., 1]) * h
+
+        # Pick each new patch centre from that camera's eligible pixels. Existing
+        # camera patches keep all parameters until their lifetime expires.
+        random_score = torch.rand_like(clean_depth).masked_fill(~eligible, -1.0)
+        centre_index = random_score.flatten(2).argmax(-1)
+        sampled_x = (centre_index % w).to(frames.dtype)
+        sampled_y = torch.div(centre_index, w, rounding_mode="floor").to(frames.dtype)
+        self.center[..., 0] = torch.where(start, sampled_x, self.center[..., 0])
+        self.center[..., 1] = torch.where(start, sampled_y, self.center[..., 1])
+        fraction = _sample(cfg.patch_fraction, self.remaining.shape, frames.device)
+        sampled_radius = (fraction.sqrt() * min(h, w) / 2).clamp_min(1.0)
+        self.radius = torch.where(start, sampled_radius, self.radius)
+        self.hole_depth = torch.where(
+            start, _sample(cfg.false_hole_depth, self.remaining.shape, frames.device), self.hole_depth
+        )
+        self.return_offset = torch.where(
+            start, _sample(cfg.false_return_offset, self.remaining.shape, frames.device), self.return_offset
+        )
+
         active_patch = (self.remaining > 0) & active[:, None]
         ys = torch.arange(h, device=frames.device).view(1, 1, h, 1)
         xs = torch.arange(w, device=frames.device).view(1, 1, 1, w)
-        fraction = cfg.patch_fraction[0] + torch.rand(n, cameras, device=frames.device) * (cfg.patch_fraction[1] - cfg.patch_fraction[0])
-        radius = (fraction.sqrt() * min(h, w) / 2).clamp_min(1.0)
-        patch = ((xs - self.center[..., 0, None, None]).abs() <= radius[..., None, None])
-        patch = patch & ((ys - self.center[..., 1, None, None]).abs() <= radius[..., None, None])
+        patch = (xs - self.center[..., 0, None, None]).abs() <= self.radius[..., None, None]
+        patch = patch & ((ys - self.center[..., 1, None, None]).abs() <= self.radius[..., None, None])
         mask = eligible & patch & active_patch[:, :, None, None]
 
         out = frames.clone()
-        depth = (out[:, :, 0] * (cfg.max_depth - cfg.min_depth) + cfg.min_depth)
-        hole_depth = cfg.false_hole_depth[0] + torch.rand(n, cameras, device=frames.device) * (cfg.false_hole_depth[1] - cfg.false_hole_depth[0])
-        offset = cfg.false_return_offset[0] + torch.rand(n, cameras, device=frames.device) * (cfg.false_return_offset[1] - cfg.false_return_offset[0])
-        near = (depth - offset[..., None, None]).clamp(cfg.min_depth, cfg.max_depth)
-        replacement = torch.where(self.mode[..., None, None] == 0, hole_depth[..., None, None], near)
-        depth = torch.where(mask, replacement, depth)
-        out[:, :, 0] = ((depth - cfg.min_depth) / (cfg.max_depth - cfg.min_depth)).clamp(0, 1)
+        input_depth = frames[:, :, 0]
+        metric_depth = input_depth * (cfg.max_depth - cfg.min_depth) + cfg.min_depth
+        near = (metric_depth - self.return_offset[..., None, None]).clamp(cfg.min_depth, cfg.max_depth)
+        replacement = torch.where(self.mode[..., None, None] == 0, self.hole_depth[..., None, None], near)
+        replacement_norm = ((replacement - cfg.min_depth) / (cfg.max_depth - cfg.min_depth)).clamp(0, 1)
+        out[:, :, 0] = torch.where(mask, replacement_norm, input_depth)
         self.remaining = (self.remaining - 1).clamp_min(0)
         return out

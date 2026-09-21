@@ -59,7 +59,6 @@ from gd_lab.managers.action_history import ensure_prev_prev_action_tracking
 from gd_lab.rl.actor_critic_vrl import DreamwaqVrlActorCritic
 from gd_lab.rl.perception import CameraPerceptionEncoder
 from gd_lab.tasks.vrl_cameras import configure_vrl_cameras
-from gd_lab.tasks.vrl_rough import belly_camera_frames
 
 
 def _resolve(path: str):
@@ -117,7 +116,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         start = time.time()
         with torch.inference_mode():
             if step_i % camera_steps == 0:
-                frames = belly_camera_frames(env.unwrapped.scene)
+                snapshot = getattr(env.unwrapped, "_vrl_camera_snapshot", None)
+                if snapshot is None:
+                    raise RuntimeError("VRL camera snapshot was not produced by the terrain observation")
+                frames = snapshot[0]
                 terrain_latent, hidden = student(frames, hidden)
 
                 if args_cli.diag_every > 0 and camera_update_i % args_cli.diag_every == 0:
@@ -126,7 +128,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                     # what the teacher's own privileged height_scan encoder would
                     # have said for the exact same instant -- same comparison
                     # train_perception.py's loss makes, just for eyeballing here.
-                    # belly_camera_frames() already maps no-hit/inf pixels to 1.0
+                    # The canonical snapshot maps no-hit/inf pixels to 1.0
                     # (see its docstring), so plain isfinite() would trivially
                     # read 1.0 here -- "< 0.999" recovers the same "did this pixel
                     # actually hit something" signal instead.
