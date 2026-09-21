@@ -8,7 +8,7 @@ PREFIX = "Gd"
 
 _ALL_IDS: list[str] = []
 
-_VALID_MODES = (None, "Play", "Gamepad")
+_VALID_MODES = (None, "Play", "Gamepad", "Vision", "VisionPlay")
 
 
 def make_task_id(*, task: str, robot: str, method: str, mode: str | None = None) -> str:

@@ -1,8 +1,21 @@
 """Train an RSL-RL agent on a gd_lab task."""
 
 import argparse
+import faulthandler
 import os
+import signal
 import sys
+
+# `kill -USR1 <pid>` dumps every thread's Python stack to stderr (the console log).
+#
+# This exists because on 2026-09-20 the blind run wedged at iteration 13,560 --
+# process alive, one thread spinning at 100%, GPU idle -- and we could not see
+# where: ptrace is blocked here (yama ptrace_scope=1, and even `sudo py-spy`
+# is denied on the apptainer process), so py-spy/gdb are both unavailable.
+# faulthandler needs no ptrace, and registering a signal handler has no effect
+# on the training maths, so it is safe to add mid-experiment.
+# See logs/incident_notes/arm1_gpu0_seed42_40k.md INC-004.
+faulthandler.register(signal.SIGUSR1, all_threads=True, chain=False)
 
 from isaaclab.app import AppLauncher
 

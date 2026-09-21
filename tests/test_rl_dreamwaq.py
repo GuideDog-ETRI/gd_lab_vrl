@@ -21,7 +21,7 @@ ACTOR_HISTORY = 4
 
 def _obs(num_envs: int = NUM_ENVS) -> TensorDict:
     return TensorDict(
-        {"policy": torch.randn(num_envs, POLICY_DIM), "critic": torch.randn(num_envs, CRITIC_DIM)},
+        {"policy": torch.randn(num_envs, POLICY_DIM), "critic": torch.randn(num_envs, CRITIC_DIM), "terrain": torch.randn(num_envs, 374)},
         batch_size=[num_envs],
     )
 
