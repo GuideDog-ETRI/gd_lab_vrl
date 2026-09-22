@@ -21,6 +21,7 @@ import sys
 from isaaclab.app import AppLauncher
 
 import cli_args  # isort: skip
+from vrl_runtime import prepare_vrl_runtime, verify_vrl_runtime
 
 parser = argparse.ArgumentParser(description="Show one robot per terrain type from a trained gd_lab policy.")
 parser.add_argument("--task", type=str, default="Gd-Vrl-Rbq10-Dreamwaq-Play-v0", help="Name of the task.")
@@ -31,12 +32,14 @@ cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
 
-args_cli.enable_cameras = args_cli.enable_cameras or "-Vision" in args_cli.task
+args_cli.enable_cameras = True
 
 sys.argv = [sys.argv[0]] + hydra_args
 
+runtime_root = prepare_vrl_runtime(args_cli)
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
+verify_vrl_runtime(runtime_root)
 
 import importlib
 import os

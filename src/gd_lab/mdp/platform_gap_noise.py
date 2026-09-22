@@ -28,6 +28,7 @@ class PlatformGapDepthGhostCfg:
     min_depth: float = 0.15
     max_depth: float = 5.0
     false_hole_depth: tuple[float, float] = (2.5, 5.0)
+    false_hole_min_offset: float = 0.15
     false_return_offset: tuple[float, float] = (0.15, 0.65)
     patch_fraction: tuple[float, float] = (0.04, 0.16)
 
@@ -91,7 +92,8 @@ class PlatformGapDepthGhost:
         eligible &= local[..., 2] >= -1.1
         eligible &= local[..., 2] <= 0.35
         eligible &= active[:, None, None, None]
-        eligible &= torch.isfinite(clean_depth) & (clean_depth >= cfg.min_depth) & (clean_depth <= cfg.max_depth)
+        # The far sentinel represents no return, not a measured surface.
+        eligible &= torch.isfinite(clean_depth) & (clean_depth >= cfg.min_depth) & (clean_depth < cfg.max_depth)
 
         has_eligible = eligible.flatten(2).any(-1)
         fresh = (self.remaining <= 0) & active[:, None] & has_eligible
@@ -128,9 +130,11 @@ class PlatformGapDepthGhost:
 
         out = frames.clone()
         input_depth = frames[:, :, 0]
-        metric_depth = input_depth * (cfg.max_depth - cfg.min_depth) + cfg.min_depth
-        near = (metric_depth - self.return_offset[..., None, None]).clamp(cfg.min_depth, cfg.max_depth)
-        replacement = torch.where(self.mode[..., None, None] == 0, self.hole_depth[..., None, None], near)
+        # Direction is relative to the clean surface, not preceding generic noise.
+        near = (clean_depth - self.return_offset[..., None, None]).clamp(cfg.min_depth, cfg.max_depth)
+        far = torch.maximum(clean_depth + cfg.false_hole_min_offset, self.hole_depth[..., None, None])
+        far = far.clamp(cfg.min_depth, cfg.max_depth)
+        replacement = torch.where(self.mode[..., None, None] == 0, far, near)
         replacement_norm = ((replacement - cfg.min_depth) / (cfg.max_depth - cfg.min_depth)).clamp(0, 1)
         out[:, :, 0] = torch.where(mask, replacement_norm, input_depth)
         self.remaining = (self.remaining - 1).clamp_min(0)

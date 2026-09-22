@@ -15,6 +15,7 @@ import sys
 from isaaclab.app import AppLauncher
 
 import cli_args  # isort: skip
+from vrl_runtime import prepare_vrl_runtime, verify_vrl_runtime
 
 parser = argparse.ArgumentParser(description="Closed-loop test: frozen teacher actor + stage-3 camera student.")
 parser.add_argument(
@@ -39,8 +40,10 @@ args_cli.enable_cameras = True  # this script always renders the belly cameras
 
 sys.argv = [sys.argv[0]] + hydra_args
 
+runtime_root = prepare_vrl_runtime(args_cli)
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
+verify_vrl_runtime(runtime_root)
 
 import importlib
 import os
@@ -54,6 +57,8 @@ from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
 import gd_lab  # noqa: F401  (registers the tasks)
+from gd_lab.core.camera_contract import load_camera_contract
+from gd_lab.core.camera_timing import camera_refresh_mask
 from gd_lab.core.paths import LOG_ROOT
 from gd_lab.managers.action_history import ensure_prev_prev_action_tracking
 from gd_lab.rl.actor_critic_vrl import DreamwaqVrlActorCritic
@@ -97,13 +102,19 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         latent_dim=agent_cfg.policy.terrain_latent_dim,
     ).to(device)
     ckpt = torch.load(args_cli.student_checkpoint, map_location=device)
+    camera_contract = load_camera_contract(env_cfg.camera_profile)
+    recorded = ckpt.get("camera_contract")
+    if recorded is not None and recorded != camera_contract.manifest():
+        raise ValueError("Student camera contract does not match the environment calibration")
+    if recorded is None:
+        print("[WARN] Legacy student checkpoint has no camera calibration metadata.")
     student.load_state_dict(ckpt["model"])
     student.eval()
     print(f"[INFO] Student checkpoint: {args_cli.student_checkpoint} (iteration {ckpt.get('iteration')})")
 
     dt = env.unwrapped.step_dt
-    cam_period = env.unwrapped.scene["front_depth_camera0"].cfg.update_period
-    camera_steps = max(1, round(cam_period / dt))
+    camera_steps = camera_contract.period_steps
+    cam_period = camera_steps * dt
     print(f"[INFO] Camera updates every {camera_steps} env steps (update_period={cam_period}s, step_dt={dt}s)")
 
     hidden = student.init_hidden(env.unwrapped.num_envs, device)
@@ -112,15 +123,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     obs = env.get_observations()
     step_i = 0
     camera_update_i = 0
+    last_camera_step = torch.full((env.unwrapped.num_envs,), -1, device=device, dtype=torch.long)
     while simulation_app.is_running() and (args_cli.max_steps == 0 or step_i < args_cli.max_steps):
         start = time.time()
         with torch.inference_mode():
-            if step_i % camera_steps == 0:
+            common_step = env.unwrapped.common_step_counter
+            refresh = camera_refresh_mask(last_camera_step, common_step, camera_steps)
+            if refresh.any():
                 snapshot = getattr(env.unwrapped, "_vrl_camera_snapshot", None)
                 if snapshot is None:
                     raise RuntimeError("VRL camera snapshot was not produced by the terrain observation")
                 frames = snapshot[0]
-                terrain_latent, hidden = student(frames, hidden)
+                new_latent, new_hidden = student(frames[refresh], hidden[refresh])
+                terrain_latent[refresh], hidden[refresh] = new_latent, new_hidden
+                last_camera_step[refresh] = common_step
 
                 if args_cli.diag_every > 0 and camera_update_i % args_cli.diag_every == 0:
                     # Proves the vision path is actually live: real, moving camera
@@ -154,6 +170,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                 keep = (~dones.reshape(-1).bool()).unsqueeze(-1).to(hidden.dtype)
                 hidden = hidden * keep
                 terrain_latent = terrain_latent * keep
+                last_camera_step[dones.reshape(-1).bool()] = -1
         step_i += 1
         if args_cli.real_time:
             sleep_time = dt - (time.time() - start)
