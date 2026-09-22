@@ -63,8 +63,8 @@ class DreamwaqVrlActorCritic(DreamwaqActorCritic):
     """Actor input = cat(K newest frames, CENet code, terrain latent).
 
     Everything except the terrain latent is inherited unchanged. The latent is
-    produced from the privileged height_scan block of the critic observation
-    group, located by the spec-derived ``height_scan_start`` plus the grid size.
+    produced from the separate camera-visible height + validity group. Critic
+    height_scan remains complete and never supplies hidden targets to the CNN.
 
     Unlike the CENet code, the terrain latent is **not** detached: the teacher's
     PPO gradient trains the terrain encoder, which is the point. Once trained,
@@ -111,14 +111,7 @@ class DreamwaqVrlActorCritic(DreamwaqActorCritic):
         )
 
     def normalized_height_scan(self, obs: TensorDict) -> torch.Tensor:
-        """height_scan slice of the critic group, scaled by the critic normalizer's own stats.
-
-        Mirrors ``normalize_latest``'s approach (reuse an existing normalizer's
-        per-feature statistics for a sub-slice) but on the critic side, since the
-        terrain encoder reads privileged critic data. Feeding the raw slice
-        instead would hand the CNN a differently-scaled input than every other
-        consumer of that group sees.
-        """
+        """Return masked height (observation scale 5) + mask, without critic normalization."""
         terrain = obs.get("terrain")
         if terrain is None:
             raise KeyError("VRL observation group 'terrain' is required")

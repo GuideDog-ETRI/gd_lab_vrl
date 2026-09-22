@@ -75,15 +75,6 @@ def apply_vrl_play(cfg):
 
 
 @configclass
-class VrlSceneCfg(BlindRoughSceneCfg):
-    """Four rendered cameras are shared by teacher visibility and student input."""
-    front_depth_camera0 = default_vrl_camera(CAMERA_NAMES[0])
-    front_depth_camera1 = default_vrl_camera(CAMERA_NAMES[1])
-    hind_depth_camera2 = default_vrl_camera(CAMERA_NAMES[2])
-    hind_depth_camera3 = default_vrl_camera(CAMERA_NAMES[3])
-
-
-@configclass
 class VrlTeacherEnvCfg_PLAY(VrlTeacherEnvCfg):
     def __post_init__(self):
         super().__post_init__()

@@ -12,8 +12,8 @@ import sys
 from isaaclab.app import AppLauncher
 
 import cli_args  # isort: skip
-
 from gd_lab.core.experiments import training_arm_overrides
+from vrl_runtime import prepare_vrl_runtime, verify_vrl_runtime
 
 parser = argparse.ArgumentParser(description="Train an RSL-RL agent on a gd_lab task.")
 parser.add_argument("--task", type=str, default="Gd-Vrl-Rbq10-Dreamwaq-v0", help="Name of the task.")
@@ -43,8 +43,10 @@ sys.argv = [sys.argv[0]] + arm_overrides + hydra_args
 if train_arm is not None:
     print(f"[INFO] Training arm: {train_arm} (configs/experiment/arm_{train_arm}.yaml)")
 
+runtime_root = prepare_vrl_runtime(args_cli)
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
+verify_vrl_runtime(runtime_root)
 
 import importlib
 from datetime import datetime

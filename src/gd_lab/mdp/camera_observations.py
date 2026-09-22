@@ -4,14 +4,20 @@ import torch
 from isaaclab.managers import ManagerTermBase
 
 from gd_lab.core.camera_contract import CAMERA_NAMES, load_camera_contract
-from gd_lab.core.camera_geometry import calibrated_resample, camera_visible_points
+from gd_lab.core.camera_geometry import calibrated_resample, camera_visible_points, mounted_camera_world_poses
+from gd_lab.core.camera_timing import camera_refresh_mask
 
 
 def canonical_camera_snapshot(scene, contract):
     """Capture depth + IR proxy and the exact poses used for those images."""
     depths, frames, positions, rotations, intrinsics = [], [], [], [], []
     lo, hi = contract.depth_clip
-    for name in CAMERA_NAMES:
+    robot = scene["robot"]
+    trunk = robot.body_names.index("trunk")
+    camera_pos, camera_quat = mounted_camera_world_poses(
+        robot.data.body_pos_w[:, trunk], robot.data.body_quat_w[:, trunk], contract
+    )
+    for camera_index, name in enumerate(CAMERA_NAMES):
         data = scene[name].data
         target_k = data.intrinsic_matrices.clone()
         target_k[:, 0, 0], target_k[:, 1, 1] = contract.fx, contract.fy
@@ -27,8 +33,8 @@ def canonical_camera_snapshot(scene, contract):
         ir = (rgb[..., 0]*0.299 + rgb[..., 1]*0.587 + rgb[..., 2]*0.114) / 255
         depths.append(depth)
         frames.append(torch.stack(((depth.clamp(lo, hi)-lo)/(hi-lo), ir.clamp(0, 1)), 1))
-        positions.append(data.pos_w.clone())
-        rotations.append(data.quat_w_ros.clone())
+        positions.append(camera_pos[:, camera_index])
+        rotations.append(camera_quat[:, camera_index])
         intrinsics.append(target_k)
     return tuple(torch.stack(items, 1) for items in (frames, depths, positions, rotations, intrinsics))
 
@@ -56,7 +62,7 @@ class CameraVisibleTerrain(ManagerTermBase):
 
     def __call__(self, env):
         step = env.common_step_counter
-        refresh = step - self.last_step >= self.contract.period_steps
+        refresh = camera_refresh_mask(self.last_step, step, self.contract.period_steps)
         if not refresh.any():
             return self.observation.clone()
         snapshot = canonical_camera_snapshot(env.scene, self.contract)
@@ -81,4 +87,5 @@ class CameraVisibleTerrain(ManagerTermBase):
             for buffer, current in zip(self.buffers, snapshot, strict=True):
                 buffer[refresh] = current[refresh]
         env._vrl_camera_snapshot = self.buffers
+        env._vrl_camera_snapshot_steps = self.last_step.clone()
         return self.observation.clone()

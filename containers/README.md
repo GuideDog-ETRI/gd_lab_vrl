@@ -40,3 +40,15 @@ apptainer build --sandbox gd_lab_isaaclab containers/gd_lab_isaaclab.def
 - apptainer가 NVIDIA 드라이버를 자동 주입하지 않는 호스트에서는 `--nv` 추가.
 - venv 스크립트(`ruff`, `pytest` 등)의 shebang은 컨테이너 python을 가리키므로
   호스트에서 직접 실행되지 않는다 — 항상 `apptainer exec` 안에서 실행한다.
+
+## VRL 캐시 격리
+
+VRL train/play 진입점은 `scripts/vrl_runtime.py`를 통해 Kit의 cache/data/logs
+토큰을 이 저장소의 `logs/kit_runtime/<pid>/`로 지정한다. 작은 writable-tmpfs가
+가득 차면서 material cache에 `No space left on device`가 나는 것을 방지한다.
+시작 시 실제 `${cache}` 경로가 적용됐는지도 확인한다. SIF, 공유 venv, 사용자
+전역 설정 및 이미 실행 중인 다른 학습 프로세스는 변경하지 않는다.
+
+프로세스별 캐시는 실행 후에도 남는다. 필요 없는 실행의 PID 디렉터리는 그
+프로세스가 종료된 것을 확인한 후 사람이 정리할 수 있다. 저장소 경로에 공백이
+있으면 IsaacLab의 kit_args 파싱 제약 때문에 실행 전에 오류로 알린다.

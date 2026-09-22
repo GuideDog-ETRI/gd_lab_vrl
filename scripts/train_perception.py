@@ -15,12 +15,14 @@ import sys
 from isaaclab.app import AppLauncher
 
 import cli_args  # isort: skip
+from vrl_runtime import prepare_vrl_runtime, verify_vrl_runtime
 
 parser = argparse.ArgumentParser(description="Distill the vision-RL terrain-encoder teacher into a camera student.")
 parser.add_argument(
     "--task", type=str, default="Gd-Vrl-Rbq10-Dreamwaq-Vision-v0", help="Camera-enabled env task (not the teacher's own training task -- see VisionRoughEnvCfg)."
 )
 parser.add_argument("--agent", type=str, default="rsl_rl_cfg_entry_point", help="Agent config entry-point name.")
+parser.add_argument("--seed", type=int, default=None, help="Environment seed.")
 parser.add_argument(
     "--num_envs", type=int, default=256, help="Number of environments (camera rendering is expensive)."
 )
@@ -52,7 +54,7 @@ parser.add_argument(
     "--no_camera_noise",
     action="store_true",
     default=False,
-    help="Disable depth/IR sensor-noise domain randomization (see CameraNoiseCfg) -- "
+    help="Disable all student sensor noise, including platform-gap depth ghosts -- "
     "off by default means noise IS applied; only disable for an apples-to-apples "
     "comparison against an older noiseless run.",
 )
@@ -67,8 +69,10 @@ args_cli.enable_cameras = True  # this script always renders the belly cameras
 
 sys.argv = [sys.argv[0]] + hydra_args
 
+runtime_root = prepare_vrl_runtime(args_cli)
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
+verify_vrl_runtime(runtime_root)
 
 import importlib
 import os
@@ -84,9 +88,10 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 from torch.utils.tensorboard import SummaryWriter
 
 import gd_lab  # noqa: F401  (registers the tasks)
+from gd_lab.core.camera_contract import load_camera_contract
 from gd_lab.core.paths import LOG_ROOT
 from gd_lab.managers.action_history import ensure_prev_prev_action_tracking
-from gd_lab.mdp.camera_noise import noisy_camera_tensor
+from gd_lab.mdp.camera_noise import augment_student_camera_frames
 from gd_lab.mdp.platform_gap_noise import PlatformGapDepthGhost, PlatformGapDepthGhostCfg
 from gd_lab.mdp.terrain_families import terrain_family_gate
 from gd_lab.rl.actor_critic_vrl import DreamwaqVrlActorCritic
@@ -129,8 +134,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     device = env.unwrapped.device
 
     dt = env.unwrapped.step_dt
-    cam_period = env.unwrapped.scene["front_depth_camera0"].cfg.update_period
-    camera_steps = max(1, round(cam_period / dt))
+    camera_contract = load_camera_contract(env_cfg.camera_profile)
+    camera_steps = camera_contract.period_steps
+    cam_period = camera_steps * dt
     print(f"[INFO] Camera updates every {camera_steps} env steps (update_period={cam_period}s, step_dt={dt}s)")
 
     student = CameraPerceptionEncoder(
@@ -143,6 +149,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     camera_noise_cfg = None if args_cli.no_camera_noise else CameraNoiseCfg()
     gap_ghost = PlatformGapDepthGhost(PlatformGapDepthGhostCfg())
     print(f"[INFO] Camera sensor-noise domain randomization: {'OFF' if camera_noise_cfg is None else camera_noise_cfg}")
+    print("[WARN] IR channel is RGB luminance (ir_proxy), not a physical infrared sensor simulation.")
 
     run_name = args_cli.perception_run_name or time.strftime("%Y-%m-%d_%H-%M-%S") + "_perception"
     log_dir = os.path.join(log_root_path, run_name)
@@ -159,6 +166,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         optimizer.zero_grad()
         window_loss = torch.zeros((), device=device)
         window_mse_sum, window_hazard_sum = 0.0, 0.0
+        window_visible_sum, window_supervised_sum = 0.0, 0.0
 
         # Truncated BPTT window: hidden is NOT detached between these
         # window_len ticks, so one backward() at the end of the window
@@ -181,10 +189,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             if snapshot is None:
                 raise RuntimeError("VRL camera snapshot was not produced by the terrain observation")
             frames = snapshot[0].clone()
-            if camera_noise_cfg is not None:
-                frames = noisy_camera_tensor(frames, camera_noise_cfg)
             gap_envs = terrain_family_gate(env.unwrapped, ("platform_gap",)) == 0
-            frames = gap_ghost(frames, snapshot, env.unwrapped.scene.env_origins, gap_envs)
+            frames = augment_student_camera_frames(
+                frames, snapshot, env.unwrapped.scene.env_origins, gap_envs, camera_noise_cfg, gap_ghost
+            )
             student_latent, hidden = student(frames, hidden)
             hazard_pred = student.hazard_head(hidden).squeeze(-1)
 
@@ -211,6 +219,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             window_loss = window_loss + latent_loss + args_cli.hazard_loss_coef * hazard_loss
             window_mse_sum += latent_loss.item()
             window_hazard_sum += hazard_loss.item()
+            window_visible_sum += visibility.float().mean().item()
+            window_supervised_sum += hazard_supervised.float().mean().item()
 
             it += 1
 
@@ -223,12 +233,21 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         hazard_val = window_hazard_sum / window_len
         writer.add_scalar("perception/mse", mse_val, it)
         writer.add_scalar("perception/hazard_mse", hazard_val, it)
-        if (it // window_len) % 10 == 0:
-            print(f"[INFO] iter {it}/{args_cli.iterations} mse={mse_val:.5f} hazard_mse={hazard_val:.5f}")
+        writer.add_scalar("perception/visible_fraction", window_visible_sum / window_len, it)
+        writer.add_scalar("perception/hazard_supervised_fraction", window_supervised_sum / window_len, it)
+        if (it // window_len) % 10 == 0 or it >= args_cli.iterations:
+            print(f"[INFO] iter {it}/{args_cli.iterations} mse={mse_val:.5f} hazard_mse={hazard_val:.5f} "
+                  f"visible={window_visible_sum / window_len:.4f} "
+                  f"hazard_supervised={window_supervised_sum / window_len:.4f}")
 
         if it % args_cli.save_interval < window_len or it >= args_cli.iterations:
             ckpt_path = os.path.join(log_dir, f"perception_{it}.pt")
-            torch.save({"model": student.state_dict(), "iteration": it}, ckpt_path)
+            torch.save({
+                "model": student.state_dict(), "iteration": it,
+                "camera_contract": camera_contract.manifest(),
+                "camera_noise_enabled": camera_noise_cfg is not None,
+                "teacher_checkpoint": checkpoint_path,
+            }, ckpt_path)
             print(f"[INFO] Saved {ckpt_path}")
 
     writer.close()

@@ -46,3 +46,11 @@ def noisy_camera_tensor(frames, cfg, depth_clip=(0.15, 5.0)):
     ir = ir + dots * intensity * (lo / depth).square()
     ir = (ir + torch.randn_like(ir) * ir_std).clamp(0, 1)
     return torch.stack(((depth - lo) / (hi - lo), ir), dim=2)
+
+
+def augment_student_camera_frames(frames, snapshot, origins, gap_envs, noise_cfg, gap_ghost):
+    """One noise switch controls generic noise AND gap ghosts; teacher stays clean."""
+    if noise_cfg is None:
+        return frames
+    noisy = noisy_camera_tensor(frames, noise_cfg)
+    return gap_ghost(noisy, snapshot, origins, gap_envs)

@@ -15,6 +15,30 @@ def camera_rotation_matrix(quat: torch.Tensor) -> torch.Tensor:
     ), -1).reshape(*quat.shape[:-1], 3, 3)
 
 
+def _camera_quat_product(a, b):
+    aw, ax, ay, az = a.unbind(-1)
+    bw, bx, by, bz = b.unbind(-1)
+    return torch.stack((aw*bw-ax*bx-ay*by-az*bz, aw*bx+ax*bw+ay*bz-az*by,
+                        aw*by-ax*bz+ay*bw+az*bx, aw*bz+ax*by-ay*bx+az*bw), -1)
+
+
+def mounted_camera_world_poses(body_pos, body_quat, contract):
+    """Compose live PhysX trunk pose with vendor OpenGL mounts, return ROS poses.
+
+    Fabric moves rendered articulated links without updating their USD Xforms.
+    Camera.data.pos_w can consequently stay at the spawn location even when
+    update_latest_camera_pose=True. Never use that USD pose for terrain labels.
+    """
+    offsets = body_pos.new_tensor(contract.positions)
+    mount = body_pos.new_tensor(contract.quaternions_opengl)
+    mount = mount / mount.norm(dim=-1, keepdim=True)
+    body_quat = body_quat / body_quat.norm(dim=-1, keepdim=True)
+    positions = body_pos[:, None] + offsets[None] @ camera_rotation_matrix(body_quat).transpose(-1, -2)
+    gl_world = _camera_quat_product(body_quat[:, None], mount[None])
+    ros_world = _camera_quat_product(gl_world, body_pos.new_tensor([0.0, 1.0, 0.0, 0.0]))
+    return positions, ros_world
+
+
 def calibrated_resample(image, source_k, target_k, output_shape, mode="nearest"):
     """NHWC -> NHWC; inverse-map canonical pixels into square-pixel render.
 

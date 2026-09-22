@@ -21,7 +21,7 @@ def default_vrl_camera(name: str) -> TiledCameraCfg:
             clipping_range=contract.depth_clip,
         ),
         width=contract.width, height=contract.render_height,
-        update_period=contract.period_steps * contract.policy_dt, update_latest_camera_pose=True,
+        update_period=0.0, update_latest_camera_pose=True,
     )
 
 def configure_vrl_cameras(cfg):
@@ -32,6 +32,9 @@ def configure_vrl_cameras(cfg):
         raise ValueError("VRL camera contract requires policy_dt=0.02 seconds")
     cfg.sim.render_interval = cfg.decimation * contract.period_steps
     cfg.rerender_on_reset = True
+    # CameraVisibleTerrain owns the global 4-step clock. A per-sensor period
+    # would shift on reset and return stale data at the next global capture.
+    # Zero means lazy data reads are fresh, NOT that we render each physics tick.
     for name, pos, quat in zip(CAMERA_NAMES, contract.positions, contract.quaternions_opengl, strict=True):
         norm = math.sqrt(sum(v*v for v in quat))
         setattr(cfg.scene, name, TiledCameraCfg(
@@ -44,6 +47,6 @@ def configure_vrl_cameras(cfg):
                 clipping_range=contract.depth_clip,
             ),
             width=contract.width, height=contract.render_height,
-            update_period=contract.period_steps * dt,
+            update_period=0.0,
             update_latest_camera_pose=True,
         ))
