@@ -5,7 +5,7 @@ from isaaclab.managers import ManagerTermBase
 
 from gd_lab.core.camera_contract import CAMERA_NAMES, load_camera_contract
 from gd_lab.core.camera_geometry import calibrated_resample, camera_visible_points, mounted_camera_world_poses
-from gd_lab.core.camera_timing import camera_refresh_mask
+from gd_lab.core.camera_timing import camera_period_steps, camera_refresh_mask
 
 
 def canonical_camera_snapshot(scene, contract):
@@ -50,6 +50,11 @@ class CameraVisibleTerrain(ManagerTermBase):
     def __init__(self, cfg, env):
         super().__init__(cfg, env)
         self.contract = load_camera_contract(env.cfg.camera_profile)
+        self.period_steps = camera_period_steps(
+            env.cfg.decimation * env.cfg.sim.dt,
+            self.contract.policy_dt,
+            self.contract.period_steps,
+        )
         n = env.num_envs
         self.last_step = torch.full((n,), -100, device=env.device, dtype=torch.long)
         self.observation = torch.zeros(n, 374, device=env.device)
@@ -62,7 +67,7 @@ class CameraVisibleTerrain(ManagerTermBase):
 
     def __call__(self, env):
         step = env.common_step_counter
-        refresh = camera_refresh_mask(self.last_step, step, self.contract.period_steps)
+        refresh = camera_refresh_mask(self.last_step, step, self.period_steps)
         if not refresh.any():
             return self.observation.clone()
         snapshot = canonical_camera_snapshot(env.scene, self.contract)
