@@ -26,7 +26,7 @@ fi
 
 mkdir -p "$usd_tmp"
 cd "$repo_root"
-echo "Starting VRL arm $train_arm on GPUs 0,1,2: 1365 environments/GPU, $max_iterations iterations"
+echo "Starting VRL arm $train_arm on GPUs 0,1,2: 4096 environments total, $max_iterations iterations"
 echo "Run name: $run_name"
 exec env -u PYTHONPATH \
     CUDA_VISIBLE_DEVICES=0,1,2 TRAIN_ARM="$train_arm" OMNI_KIT_ACCEPT_EULA=YES PYTHONUNBUFFERED=1 \
@@ -35,6 +35,6 @@ exec env -u PYTHONPATH \
     "$sif_path" "$python_path" -m torch.distributed.run \
     --standalone --nnodes=1 --nproc_per_node=3 \
     scripts/train_vrl.py --distributed --task Gd-Vrl-Rbq10-Dreamwaq-v0 \
-    --headless --device cuda:0 --num_envs 1365 --seed 42 \
+    --headless --device cuda:0 --total_envs 4096 --seed 42 \
     --max_iterations "$max_iterations" --logger tensorboard \
     --run_name "$run_name" agent.save_interval=100

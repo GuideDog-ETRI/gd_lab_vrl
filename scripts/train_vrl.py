@@ -18,7 +18,9 @@ from vrl_runtime import prepare_vrl_runtime, verify_vrl_runtime
 parser = argparse.ArgumentParser(description="Train an RSL-RL agent on a gd_lab task.")
 parser.add_argument("--task", type=str, default="Gd-Vrl-Rbq10-Dreamwaq-v0", help="Name of the task.")
 parser.add_argument("--agent", type=str, default="rsl_rl_cfg_entry_point", help="Agent config entry-point name.")
-parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
+env_count_args = parser.add_mutually_exclusive_group()
+env_count_args.add_argument("--num_envs", type=int, default=None, help="Environments per process.")
+env_count_args.add_argument("--total_envs", type=int, default=None, help="Total environments across distributed processes.")
 parser.add_argument("--seed", type=int, default=None, help="Environment seed.")
 parser.add_argument("--max_iterations", type=int, default=None, help="Training iterations.")
 parser.add_argument("--distributed", action="store_true", default=False, help="Multi-GPU / multi-node training.")
@@ -28,6 +30,8 @@ parser.add_argument("--video_interval", type=int, default=2000, help="Interval b
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
+if args_cli.total_envs is not None and (not args_cli.distributed or args_cli.total_envs < int(os.environ.get("WORLD_SIZE", "1"))):
+    parser.error("--total_envs requires --distributed and at least one environment per process")
 
 # The actor terrain target is masked by rendered camera visibility.
 args_cli.enable_cameras = True
@@ -80,6 +84,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
     if args_cli.num_envs is not None:
         env_cfg.scene.num_envs = args_cli.num_envs
+    if args_cli.total_envs is not None:
+        world_size = int(os.environ["WORLD_SIZE"])
+        rank = int(os.environ["RANK"])
+        base, remainder = divmod(args_cli.total_envs, world_size)
+        env_cfg.scene.num_envs = base + (rank < remainder)
+        print(f"[INFO] Distributed environments: rank {rank}/{world_size} has {env_cfg.scene.num_envs} of {args_cli.total_envs}")
     if args_cli.max_iterations is not None:
         agent_cfg.max_iterations = args_cli.max_iterations
 
