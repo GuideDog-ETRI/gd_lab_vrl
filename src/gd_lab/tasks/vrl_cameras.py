@@ -6,6 +6,7 @@ import isaaclab.sim as sim_utils
 from isaaclab.sensors import TiledCameraCfg
 
 from gd_lab.core.camera_contract import CAMERA_NAMES, load_camera_contract
+from gd_lab.core.camera_timing import camera_period_steps
 
 
 def default_vrl_camera(name: str) -> TiledCameraCfg:
@@ -27,12 +28,12 @@ def default_vrl_camera(name: str) -> TiledCameraCfg:
 def configure_vrl_cameras(cfg):
     """Call after Hydra overrides, before gym.make; respects the chosen profile."""
     contract = load_camera_contract(cfg.camera_profile)
-    dt = cfg.decimation * cfg.sim.dt
-    if not math.isclose(dt, contract.policy_dt, abs_tol=1e-8):
-        raise ValueError("VRL camera contract requires policy_dt=0.02 seconds")
-    cfg.sim.render_interval = cfg.decimation * contract.period_steps
+    period_steps = camera_period_steps(
+        cfg.decimation * cfg.sim.dt, contract.policy_dt, contract.period_steps
+    )
+    cfg.sim.render_interval = cfg.decimation * period_steps
     cfg.rerender_on_reset = True
-    # CameraVisibleTerrain owns the global 4-step clock. A per-sensor period
+    # CameraVisibleTerrain owns the global capture clock. A per-sensor period
     # would shift on reset and return stale data at the next global capture.
     # Zero means lazy data reads are fresh, NOT that we render each physics tick.
     for name, pos, quat in zip(CAMERA_NAMES, contract.positions, contract.quaternions_opengl, strict=True):

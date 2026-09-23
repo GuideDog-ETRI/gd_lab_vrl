@@ -9,7 +9,7 @@ import torch
 
 from gd_lab.core.camera_contract import CAMERA_NAMES, load_camera_contract
 from gd_lab.core.camera_geometry import calibrated_resample, camera_rotation_matrix, mounted_camera_world_poses
-from gd_lab.core.camera_timing import camera_refresh_mask
+from gd_lab.core.camera_timing import camera_period_steps, camera_refresh_mask
 from gd_lab.mdp.camera_noise import augment_student_camera_frames
 from gd_lab.mdp.platform_gap_noise import PlatformGapDepthGhost, PlatformGapDepthGhostCfg
 
@@ -153,13 +153,20 @@ def test_partial_reset_rejoins_global_render_clock(reset_step):
     assert calls == [(0, [True, True]), (reset_step, [True, False]), (4, [True, True]), (8, [True, True])]
 
 
+def test_arm4_keeps_the_contract_camera_interval():
+    assert camera_period_steps(0.02, 0.02, 4) == 4
+    assert camera_period_steps(0.01, 0.02, 4) == 8
+    with pytest.raises(ValueError, match="integer number"):
+        camera_period_steps(0.03, 0.02, 4)
+
+
 def test_actual_observation_adapter_keeps_images_and_targets_on_same_clock():
     # Exercise production state/buffer code without starting Kit.
     path = Path(__file__).parents[1] / "src/gd_lab/mdp/camera_observations.py"
     tree = ast.parse(path.read_text())
     tree.body = [node for node in tree.body if isinstance(node, ast.ClassDef)]
     scan = NS(pos_w=torch.zeros(2, 3), ray_hits_w=torch.zeros(2, 187, 3))
-    env = NS(num_envs=2, device="cpu", cfg=NS(camera_profile="test"), common_step_counter=0,
+    env = NS(num_envs=2, device="cpu", cfg=NS(camera_profile="test", decimation=4, sim=NS(dt=0.005)), common_step_counter=0,
              scene={"height_scanner": NS(data=scan)})
     captures = []
     def capture(*args):
@@ -170,8 +177,9 @@ def test_actual_observation_adapter_keeps_images_and_targets_on_same_clock():
         return tuple(torch.full(shape, float(step)) for shape in
                      ((2, 4, 2, 3, 3), (2, 4, 3, 3), (2, 4, 3), (2, 4, 4), (2, 4, 3, 3)))
     ns = dict(torch=torch, ManagerTermBase=type("Base", (), {"__init__": lambda self, cfg, env: None}),
-              camera_refresh_mask=camera_refresh_mask, canonical_camera_snapshot=capture,
-              load_camera_contract=lambda profile: NS(period_steps=4, depth_clip=(0.15, 5.0)),
+              camera_period_steps=camera_period_steps, camera_refresh_mask=camera_refresh_mask,
+              canonical_camera_snapshot=capture,
+              load_camera_contract=lambda profile: NS(period_steps=4, policy_dt=0.02, depth_clip=(0.15, 5.0)),
               camera_visible_points=lambda points, *args: torch.ones(points.shape[:2], dtype=torch.bool))
     exec(compile(tree, str(path), "exec"), ns)
     term = ns["CameraVisibleTerrain"](None, env)
