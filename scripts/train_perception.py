@@ -1,12 +1,7 @@
-"""Vision-RL stage 3: distill the frozen terrain-encoder teacher into the
-4-camera CNN-GRU student (``gd_lab.rl.perception.CameraPerceptionEncoder``).
+"""Distill a frozen teacher into a four-camera CNN-GRU student.
 
-Rolls out the trained stage-1/2 teacher (frozen, in inference mode). Camera
-captures and their teacher targets are queued together under randomized timing,
-transport delay and packet loss. On delivery the student's latent is regressed
-onto the teacher terrain_encoder's privileged latent at CAPTURE time. This mirrors
-APT-RL's teacher-student split (Fig. 2iii): the actor and terrain_encoder are
-never touched here, only the student's own weights are trained.
+Images and teacher targets are queued together with timing jitter, delay and
+packet loss. Targets use capture time; only student weights receive gradients.
 """
 
 import argparse
@@ -216,12 +211,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         window_updates = 0
         window_delay_sum = 0.0
 
-        # Truncated BPTT window: hidden is NOT detached between these
-        # window_len ticks, so one backward() at the end of the window
-        # propagates gradient through the GRU across all of them -- unlike
-        # detaching every tick (bptt_steps=1), this actually trains the
-        # recurrence to integrate/remember across time, not just "given
-        # whatever hidden happens to be, fit this one frame."
+        # Keep hidden states in-graph across delivered frames in this BPTT window.
         for _ in range(window_len):
             capture_step = transport.next_capture(env.unwrapped.common_step_counter)
             env.unwrapped._vrl_camera_capture_step = capture_step
@@ -265,13 +255,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                     window_updates += 1
 
             it += 1
-
         if window_updates:
             (window_loss / window_updates).backward()
             torch.nn.utils.clip_grad_norm_(student.parameters(), 1.0, error_if_nonfinite=True)
             optimizer.step()
-        hidden = hidden.detach()  # window boundary: gradient stops here, not mid-window
-
+        hidden = hidden.detach()  # stop gradients at the BPTT window boundary
         count = max(window_updates, 1)
         mse_val = window_mse_sum / count
         hazard_val = window_hazard_sum / count

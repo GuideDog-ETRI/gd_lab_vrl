@@ -1,7 +1,120 @@
-# gd_lab
+# gd_lab_vrl
 
 RBQ10 사족보행 로봇 강화학습 프레임워크. IsaacSim 5.1.0 + IsaacLab 2.3.1 위에서
-blind DreamWaQ(고유수용 감각 기반 rough-terrain 보행)를 학습한다.
+DreamWaQ 및 카메라 기반 VRL 선생·학생을 학습한다.
+
+## Arm4 VRL: 선생 PT → 학생 PT → ONNX → MuJoCo
+
+배포 저장소는 [gd_rbq10_deploy_vrl](https://github.com/GuideDog-ETRI/gd_rbq10_deploy_vrl/tree/vrl)이다.
+이 절의 명령은 이 저장소 루트에서 실행한다. 아래 Quick start는 환경 설치와 blind 경로를 설명한다.
+진행 중인 선생/학생 작업이 있으면 새 학습을 중복 실행하지 않는다.
+
+| 파일 | 용도 |
+|---|---|
+| `model_3700.pt` | 선생 PPO 체크포인트. 증류의 고정된 정답 및 배포 actor의 출처 |
+| `perception_N.pt` | 학생 CNN·GRU 체크포인트. 카메라 입력을 선생 지형 latent로 변환 |
+| `policy_vrl.onnx` | 선생에서 내보낸 actor·CENet. 학생 latent를 입력으로 받음 |
+| `policy_vrl_student.onnx` | 선택한 학생에서 내보낸 카메라 인코더 |
+| export 폴더의 `policy_vrl*.pt` | TorchScript 추론 파일. 원래 학습 체크포인트와 구별 |
+
+### 1. 선생 학습과 체크포인트 선택
+
+```bash
+./scripts/start_vrl_3gpu_tmux.sh 4 40000
+```
+
+GPU 0·1·2가 총 4096 env로 하나의 정책을 학습하며 100 iteration마다 저장한다.
+Arm4는 제어 100 Hz, Kp hip/thigh 123.39·knee 127.77, Kd 2.4이다.
+선생의 원래 실행 폴더와 `params/agent.yaml`, `params/env.yaml`을 함께 보관한다.
+Top5는 해당 실행의 `best_top5/`와 `leaderboard.json`에 저장되며, gap 평균 난이도 8 이상을
+포함한 온라인 선정 조건을 적용한다. 별도 평가로 선정한 최적 모델이라는 의미는 아니다.
+
+이후 예시는 아래 선생을 고정해서 사용한다. 다른 선생으로 바꿀 때는 증류·평가·export 모두 같이 바꾼다.
+
+```bash
+teacher_run=2026-09-26_17-03-13_arm4_3gpu_top5_resume_model3000
+teacher_dir="$PWD/logs/vision_rbq10_dreamwaq/arm_4/$teacher_run"
+```
+
+### 2. 학생 증류
+
+아래 전용 실행기는 위 `model_3700.pt`를 고정해 사용한다. 인자는 GPU 번호·캡처 횟수·env 수이다.
+이 서버에서 64 env 검증 시 학생 프로세스는 GPU 약 7.5 GiB, RAM 약 15.7 GiB를 사용했다.
+다른 머신의 용량·속도는 짧은 실행으로 먼저 측정한다.
+
+```bash
+./scripts/start_arm4_student_tmux.sh 0 20000 64
+tmux attach -t vrl_arm4_student3700
+```
+
+Ctrl-b 다음 d로 화면에서 나가도 학습은 계속된다. 학생은 200회 캡처마다 저장한다.
+`--iterations`는 누락을 포함한 카메라 캡처 시도 횟수이며 PPO iteration과 다르다.
+기본 증류 조건은 70~100 ms 캡처 간격, 0~50 ms 전송 지연, 5% 프레임 세트 누락이다.
+영상과 선생 정답은 촬영 시점으로 짝지으며, 리셋 이전/역순 도착 패킷은 폐기한다.
+명목 카메라 계약은 Arm4의 8 제어 스텝·80 ms이며, 시간 변동 설정은 학생 PT에 별도로 기록한다.
+
+### 3. 학생으로 보행 평가
+
+다음 함수는 이 서버와 같은 Apptainer 설치를 사용한다. 다른 PC에서는 두 경로를 조정한다.
+
+```bash
+gd_sif="${GD_LAB_SIF:-$HOME/workspace/gd_lab_isaaclab.sif}"
+gd_python="${GD_LAB_PYTHON:-$HOME/workspace/venv/bin/python}"
+mkdir -p logs/usd_tmp/student_readme
+vrl_run() {
+  env -u PYTHONPATH CUDA_VISIBLE_DEVICES="${VRL_GPU:-0}" TRAIN_ARM=4 OMNI_KIT_ACCEPT_EULA=YES \
+    apptainer exec --nv --writable-tmpfs --bind "$PWD/logs/usd_tmp/student_readme:/tmp/IsaacLab" \
+    "$gd_sif" "$gd_python" "$@"
+}
+student_run="$(cat logs/arm4_student3700_latest_run.txt)"
+student_pt="$PWD/logs/vision_rbq10_dreamwaq/arm_4/$student_run/perception_20000.pt"
+vrl_run scripts/play_student.py --headless --device cuda:0 --num_envs 20 \
+  --load_run "$teacher_run" --checkpoint model_3700.pt --student_checkpoint "$student_pt" \
+  --max_steps 20000 --diag_every 25 \
+  --camera_interval_ms 70 100 --camera_delay_ms 0 50 --camera_drop_prob 0.05
+```
+
+`perception_20000.pt`는 완료 후 생기는 예시다. 같은 선생에 대해 여러 학생 저장본을 비교해 선택한다.
+기본 주기 비교는 `--camera_interval_ms 80 80 --camera_delay_ms 0 0 --camera_drop_prob 0`으로 실행한다.
+증류 MSE와 함께 지형별 낙상·gap 통과·속도 추종을 평가한다. 지연된 latent를 쓰는 actor의 성능은
+이 보행 평가로 확인해야 하며, 증류 MSE 감소만으로 배포 성능을 확정하지 않는다.
+
+### 4. 선생 actor와 학생을 함께 ONNX로 내보내기
+
+앞 단계의 변수/함수를 정의한 셸에서 실행한다. export에는 시뮬레이터 실행이 필요 없다.
+
+```bash
+export_dir="$PWD/exported/arm4_teacher3700"
+vrl_run scripts/export_vrl.py "$teacher_dir/model_3700.pt" --out "$export_dir"
+vrl_run scripts/export_student_vrl.py "$student_pt" --actor-onnx "$export_dir/policy_vrl.onnx"
+sha256sum "$export_dir/policy_vrl.onnx" "$export_dir/policy_vrl_student.onnx" > "$export_dir/SHA256SUMS.txt"
+```
+
+학생 ONNX는 배우는 동안 사용한 선생 actor와 한 쌍이다. 다른 선생의 actor와 섞지 않는다.
+현재 VRL exporter는 완전한 주기·게인·보정 계약을 ONNX에 내장하지 않으므로
+선생/학생 PT, 선생 params, 코드 커밋, 카메라 계약과 실행 조건도 함께 보관한다.
+
+### 5. 다른 PC로 전달하고 MuJoCo 실행
+
+대상 PC의 배포 저장소에 `resources/policy/vrl/arm4_teacher3700/` 폴더를 만든 뒤 복사한다.
+아래 사용자·주소·경로는 대상 PC에 맞춰 바꾼다.
+
+```bash
+scp "$export_dir/policy_vrl.onnx" "$export_dir/policy_vrl_student.onnx" \
+  user@target-host:/absolute/path/gd_rbq10_deploy_vrl/resources/policy/vrl/arm4_teacher3700/
+```
+
+대상 PC에서는 배포 README의 의존성 설치·빌드를 마친 뒤 다음을 실행한다.
+
+```bash
+RBQ_WALK=ours RBQ_POLICY_FILE=vrl/arm4_teacher3700/policy_vrl.onnx \
+  RBQ_SIM_VISION=1 bash scripts/run_sim_vrl.sh
+```
+
+원본 PT를 Pilot에 직접 넣지 않는다. 두 ONNX의 sibling 파일명을 유지하고,
+Pilot에서 학생 로드·카메라 수신·latent 갱신을 확인한다. 배포 코드 수정 후에는 재빌드가 필요하다.
+다른 PC에서 **증류도** 하려면 ONNX 두 개 대신 학습 저장소·assets·선생 PT/params·Isaac Lab 환경이 필요하다.
+설정, 검증 범위와 리소스 측정은 [Arm4 학생 증류 안내](docs/training/arm4-student-deployment.md)를 참고한다.
 
 ## Quick start
 
