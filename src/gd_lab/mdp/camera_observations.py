@@ -67,7 +67,13 @@ class CameraVisibleTerrain(ManagerTermBase):
 
     def __call__(self, env):
         step = env.common_step_counter
-        refresh = camera_refresh_mask(self.last_step, step, self.period_steps)
+        capture_step = getattr(env, "_vrl_camera_capture_step", None)
+        if capture_step is None:
+            refresh = camera_refresh_mask(self.last_step, step, self.period_steps)
+        else:
+            # Student transport simulation schedules fresh captures explicitly.
+            # Resets still acquire their own snapshot immediately.
+            refresh = (self.last_step < 0) | ((step == capture_step) & (self.last_step != step))
         if not refresh.any():
             return self.observation.clone()
         snapshot = canonical_camera_snapshot(env.scene, self.contract)

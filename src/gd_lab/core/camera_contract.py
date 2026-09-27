@@ -5,12 +5,21 @@ Numbers are transcribed from the vendor MuJoCo BT0..BT3 bodies, not guessed
 from camera link names. The two vendor releases are deliberately distinct.
 """
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from math import atan, degrees
 
 CAMERA_NAMES = ("front_depth_camera0", "front_depth_camera1", "hind_depth_camera2", "hind_depth_camera3")
 DEFAULT_CAMERA_PROFILE = "vendor_legacy"
 TERRAIN_OBSERVATION_VERSION = 2
+
+
+def camera_contract_for_policy(profile: str, policy_dt: float):
+    """Record the actual control rate while preserving the physical camera interval."""
+    from gd_lab.core.camera_timing import camera_period_steps
+
+    contract = load_camera_contract(profile)
+    steps = camera_period_steps(policy_dt, contract.policy_dt, contract.period_steps)
+    return replace(contract, policy_dt=policy_dt, period_steps=steps)
 
 
 @dataclass(frozen=True)
