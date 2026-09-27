@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import importlib
+from pathlib import Path
 
 import torch
+import torch.distributed as dist
 from rsl_rl.algorithms import PPO
 from rsl_rl.modules import resolve_rnd_config, resolve_symmetry_config
 from rsl_rl.runners import OnPolicyRunner
 from tensordict import TensorDict
 
 from .actor_critic import DreamwaqActorCritic
+from .online_rollout import install_episode_collector
+from .online_top5 import rank_and_save_top5
 
 
 def _resolve_class(name: str) -> type:
@@ -49,6 +53,57 @@ class DreamwaqRunner(OnPolicyRunner):
     #: script (this layer is env-agnostic and cannot reach ``gd_lab.deploy``).
     #: Carried in every checkpoint because export runs without a simulator.
     deploy_context: dict | None = None
+
+    def configure_online_top5(
+        self, family_columns: dict[str, list[int]], spacing: int = 100,
+        min_platform_gap_mean_level: float = 8.0,
+    ) -> None:
+        """Enable rollout-only ranking for Vision runs; blind runs stay unchanged."""
+        self._top5_records = install_episode_collector(self.env, family_columns)
+        self._top5_spacing = spacing
+        self._top5_min_platform_gap_mean_level = min_platform_gap_mean_level
+
+    def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False):
+        if not hasattr(self, "_top5_records"):
+            return super().learn(num_learning_iterations, init_at_random_ep_len)
+        original_update = self.alg.update
+        next_iteration = self.current_learning_iteration
+
+        def update_and_rank():
+            nonlocal next_iteration
+            result = original_update()
+            self.current_learning_iteration = next_iteration
+            records = self._top5_records
+            local = list(records)
+            records.clear()
+            if self.is_distributed:
+                gathered = [None] * self.gpu_world_size
+                dist.all_gather_object(gathered, local)
+                rank = dist.get_rank()
+                episodes = [row for batch in gathered for row in batch] if rank == 0 else []
+            else:
+                rank = 0
+                episodes = local
+            status = {"selected": False, "saved": False, "error": None}
+            if rank == 0 and not self.disable_logs and self.log_dir is not None:
+                status = rank_and_save_top5(
+                    rank, episodes, Path(self.log_dir) / "best_top5", next_iteration, self._top5_spacing, self.save,
+                    self._top5_min_platform_gap_mean_level,
+                )
+            if self.is_distributed:
+                message = [status]
+                dist.broadcast_object_list(message, src=0)
+                status = message[0]
+            if status["error"]:
+                raise RuntimeError(status["error"])
+            next_iteration += 1
+            return result
+
+        self.alg.update = update_and_rank
+        try:
+            return super().learn(num_learning_iterations, init_at_random_ep_len)
+        finally:
+            self.alg.update = original_update
 
     def save(self, path: str, infos: dict | None = None) -> None:
         extra = {"learning_rate": self.alg.learning_rate}

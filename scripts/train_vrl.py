@@ -68,6 +68,7 @@ import gd_lab  # noqa: F401  (registers the tasks)
 from gd_lab.core.paths import LOG_ROOT
 from gd_lab.deploy.metadata import capture_context
 from gd_lab.managers.action_history import ensure_prev_prev_action_tracking
+from gd_lab.mdp.terrain_families import family_column_masks
 from gd_lab.tasks.vrl_cameras import configure_vrl_cameras
 
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -133,6 +134,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
 
     runner_class = _resolve(agent_cfg.class_name)
     runner: OnPolicyRunner = runner_class(env, agent_cfg.to_dict(), log_dir=log_dir, device=agent_cfg.device)
+    columns = {name: indices.cpu().tolist() for name, indices in family_column_masks(env.unwrapped).items()}
+    runner.configure_online_top5(
+        columns, spacing=agent_cfg.top5_min_spacing,
+        min_platform_gap_mean_level=agent_cfg.top5_min_platform_gap_mean_level,
+    )
     # A capture failure must not cost a training run; export refuses later
     # rather than guessing.
     try:

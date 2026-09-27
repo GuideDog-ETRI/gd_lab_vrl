@@ -160,7 +160,8 @@ def test_arm4_keeps_the_contract_camera_interval():
         camera_period_steps(0.03, 0.02, 4)
 
 
-def test_actual_observation_adapter_keeps_images_and_targets_on_same_clock():
+@pytest.mark.parametrize("scheduled", [False, True])
+def test_actual_observation_adapter_keeps_images_and_targets_on_same_clock(scheduled):
     # Exercise production state/buffer code without starting Kit.
     path = Path(__file__).parents[1] / "src/gd_lab/mdp/camera_observations.py"
     tree = ast.parse(path.read_text())
@@ -171,7 +172,7 @@ def test_actual_observation_adapter_keeps_images_and_targets_on_same_clock():
     captures = []
     def capture(*args):
         step = env.common_step_counter
-        assert step in (0, 1, 4, 8)
+        assert step in ((0, 1, 3, 9) if scheduled else (0, 1, 4, 8))
         captures.append(step)
         scan.ray_hits_w[..., 2] = -0.5 - step / 100
         return tuple(torch.full(shape, float(step)) for shape in
@@ -185,10 +186,12 @@ def test_actual_observation_adapter_keeps_images_and_targets_on_same_clock():
     term = ns["CameraVisibleTerrain"](None, env)
     for step in range(10):
         env.common_step_counter = step
+        if scheduled:
+            env._vrl_camera_capture_step = 3 if step <= 3 else 9
         if step == 1:
             term.reset(torch.tensor([0]))
         obs = term(env)
         stamps = env._vrl_camera_snapshot_steps
         assert torch.equal(env._vrl_camera_snapshot[0][:, 0, 0, 0, 0], stamps.float())
         assert torch.allclose(obs[:, 0], stamps.float() / 20, atol=1e-6)
-    assert captures == [0, 1, 4, 8]
+    assert captures == ([0, 1, 3, 9] if scheduled else [0, 1, 4, 8])

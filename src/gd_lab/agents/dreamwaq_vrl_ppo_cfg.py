@@ -56,4 +56,7 @@ def _vrl_algorithm():
 class DreamwaqVrlRunnerCfg(DreamwaqRunnerCfg):
     algorithm = _vrl_algorithm()
     experiment_name = "vision_rbq10_dreamwaq"
+    save_interval = 100
+    top5_min_spacing: int = 100
+    top5_min_platform_gap_mean_level: float = 8.0
     policy = _vrl_policy()

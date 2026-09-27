@@ -1,20 +1,23 @@
 """Vision-RL stage 3: distill the frozen terrain-encoder teacher into the
 4-camera CNN-GRU student (``gd_lab.rl.perception.CameraPerceptionEncoder``).
 
-Rolls out the trained stage-1/2 policy (frozen, in inference mode -- it
-decides the robot's motion, exactly like deployment will) and, every time the
-belly cameras refresh, regresses the student's latent onto the teacher
-terrain_encoder's privileged latent for that same instant. This mirrors
+Rolls out the trained stage-1/2 teacher (frozen, in inference mode). Camera
+captures and their teacher targets are queued together under randomized timing,
+transport delay and packet loss. On delivery the student's latent is regressed
+onto the teacher terrain_encoder's privileged latent at CAPTURE time. This mirrors
 APT-RL's teacher-student split (Fig. 2iii): the actor and terrain_encoder are
 never touched here, only the student's own weights are trained.
 """
 
 import argparse
+import os
 import sys
 
 from isaaclab.app import AppLauncher
 
 import cli_args  # isort: skip
+from gd_lab.core.camera_transport import CameraTransport, CameraTransportConfig, delivery_mask
+from gd_lab.core.experiments import training_arm_overrides
 from vrl_runtime import prepare_vrl_runtime, verify_vrl_runtime
 
 parser = argparse.ArgumentParser(description="Distill the vision-RL terrain-encoder teacher into a camera student.")
@@ -26,7 +29,7 @@ parser.add_argument("--seed", type=int, default=None, help="Environment seed.")
 parser.add_argument(
     "--num_envs", type=int, default=256, help="Number of environments (camera rendering is expensive)."
 )
-parser.add_argument("--iterations", type=int, default=2000, help="Camera ticks; one optimizer update per BPTT window.")
+parser.add_argument("--iterations", type=int, default=2000, help="Capture attempts including drops; optimize per nonempty BPTT window.")
 parser.add_argument("--lr", type=float, default=1.0e-3, help="Student optimizer learning rate.")
 parser.add_argument("--save_interval", type=int, default=200, help="Iterations between student checkpoints.")
 parser.add_argument("--gru_hidden_dim", type=int, default=64, help="Student GRU hidden size.")
@@ -50,6 +53,9 @@ parser.add_argument(
     "the (possibly noise-hotspot-corrupted) camera frames alone wouldn't give a clean signal.",
 )
 parser.add_argument("--perception_run_name", type=str, default=None, help="Perception log subfolder name.")
+parser.add_argument("--camera_interval_ms", type=float, nargs=2, default=(70.0, 100.0), metavar=("MIN", "MAX"))
+parser.add_argument("--camera_delay_ms", type=float, nargs=2, default=(0.0, 50.0), metavar=("MIN", "MAX"))
+parser.add_argument("--camera_drop_prob", type=float, default=0.05, help="Probability of dropping a complete four-camera set.")
 parser.add_argument(
     "--no_camera_noise",
     action="store_true",
@@ -65,9 +71,19 @@ if min(args_cli.iterations, args_cli.bptt_steps, args_cli.save_interval, args_cl
     parser.error("iterations, bptt_steps, save_interval and num_envs must be positive")
 if args_cli.lr <= 0 or args_cli.hazard_loss_coef < 0:
     parser.error("lr must be positive and hazard_loss_coef nonnegative")
+try:
+    transport_config = CameraTransportConfig(tuple(args_cli.camera_interval_ms),
+                                            tuple(args_cli.camera_delay_ms), args_cli.camera_drop_prob)
+except ValueError as exc:
+    parser.error(str(exc))
 args_cli.enable_cameras = True  # this script always renders the belly cameras
 
-sys.argv = [sys.argv[0]] + hydra_args
+try:
+    arm_overrides = training_arm_overrides(os.environ.get("TRAIN_ARM"))
+except ValueError as exc:
+    parser.error(str(exc))
+arm_overrides = [item.replace("agent.experiment_name=blind_", "agent.experiment_name=vision_") for item in arm_overrides]
+sys.argv = [sys.argv[0]] + arm_overrides + hydra_args
 
 runtime_root = prepare_vrl_runtime(args_cli)
 app_launcher = AppLauncher(args_cli)
@@ -75,7 +91,6 @@ simulation_app = app_launcher.app
 verify_vrl_runtime(runtime_root)
 
 import importlib
-import os
 import time
 
 import gymnasium as gym
@@ -88,7 +103,7 @@ from isaaclab_tasks.utils.hydra import hydra_task_config
 from torch.utils.tensorboard import SummaryWriter
 
 import gd_lab  # noqa: F401  (registers the tasks)
-from gd_lab.core.camera_contract import load_camera_contract
+from gd_lab.core.camera_contract import camera_contract_for_policy
 from gd_lab.core.paths import LOG_ROOT
 from gd_lab.managers.action_history import ensure_prev_prev_action_tracking
 from gd_lab.mdp.camera_noise import augment_student_camera_frames
@@ -105,6 +120,28 @@ def _resolve(path: str):
     return getattr(importlib.import_module(module_name), attr)
 
 
+@torch.no_grad()
+def capture_teacher_packet(env, obs, teacher, episode_ids, noise_cfg, gap_ghost):
+    """Freeze images AND supervision at capture time, before simulated transit."""
+    snapshot = getattr(env.unwrapped, "_vrl_camera_snapshot", None)
+    stamps = getattr(env.unwrapped, "_vrl_camera_snapshot_steps", None)
+    if snapshot is None or stamps is None or not (stamps == env.unwrapped.common_step_counter).all():
+        raise RuntimeError("Scheduled camera capture did not produce fresh images for every environment")
+    gap_envs = terrain_family_gate(env.unwrapped, ("platform_gap",)) == 0
+    frames = augment_student_camera_frames(
+        snapshot[0].clone(), snapshot, env.unwrapped.scene.env_origins, gap_envs, noise_cfg, gap_ghost
+    )
+    latent = teacher.terrain_latent(obs).clone()
+    terrain = obs["terrain"]
+    cells = teacher._height_scan_slice.stop - teacher._height_scan_slice.start
+    visibility = terrain[..., cells:].bool()
+    hazard = height_discontinuity_metres(terrain[..., :cells], 5.0, teacher.terrain_encoder.grid_shape, visibility)
+    grid = visibility.reshape(-1, *teacher.terrain_encoder.grid_shape)
+    supervised = ((grid[:, 1:, :] & grid[:, :-1, :]).flatten(1).any(1)
+                  | (grid[:, :, 1:] & grid[:, :, :-1]).flatten(1).any(1))
+    return frames.clone(), latent, hazard, supervised, visibility.float().mean(-1), episode_ids.clone()
+
+
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
@@ -112,12 +149,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     env_cfg.scene.num_envs = args_cli.num_envs
     if args_cli.device is not None:
         env_cfg.sim.device = args_cli.device
+        agent_cfg.device = args_cli.device
 
     log_root_path = os.path.abspath(os.path.join(LOG_ROOT, agent_cfg.experiment_name))
     checkpoint_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
     print(f"[INFO] Teacher checkpoint: {checkpoint_path}")
 
     configure_vrl_cameras(env_cfg)
+    # A capture may fall on any policy tick. Render at policy boundaries so
+    # scheduled camera reads are current, including asynchronous reset rows.
+    env_cfg.sim.render_interval = env_cfg.decimation
+    transport = CameraTransport(transport_config, env_cfg.decimation * env_cfg.sim.dt, agent_cfg.seed)
     env = gym.make(args_cli.task, cfg=env_cfg)
     ensure_prev_prev_action_tracking(env.unwrapped)
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
@@ -134,10 +176,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     device = env.unwrapped.device
 
     dt = env.unwrapped.step_dt
-    camera_contract = load_camera_contract(env_cfg.camera_profile)
+    camera_contract = camera_contract_for_policy(env_cfg.camera_profile, dt)
     camera_steps = camera_contract.period_steps
     cam_period = camera_steps * dt
-    print(f"[INFO] Camera updates every {camera_steps} env steps (update_period={cam_period}s, step_dt={dt}s)")
+    print(f"[INFO] Nominal camera contract: {camera_steps} env steps ({cam_period}s), step_dt={dt}s")
+    print(f"[INFO] Camera transport: {transport_config.manifest(dt)}; interval_steps={transport.interval}, delay_steps={transport.delay}")
 
     student = CameraPerceptionEncoder(
         num_cameras=4,
@@ -159,6 +202,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
 
     obs = env.get_observations()
     hidden = student.init_hidden(env.unwrapped.num_envs, device)
+    episode_ids = torch.zeros(env.unwrapped.num_envs, device=device, dtype=torch.long)
+    last_delivered = torch.full_like(episode_ids, -1)
+    learning_started = time.perf_counter()
 
     it = 0
     while it < args_cli.iterations:
@@ -167,6 +213,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         window_loss = torch.zeros((), device=device)
         window_mse_sum, window_hazard_sum = 0.0, 0.0
         window_visible_sum, window_supervised_sum = 0.0, 0.0
+        window_updates = 0
+        window_delay_sum = 0.0
 
         # Truncated BPTT window: hidden is NOT detached between these
         # window_len ticks, so one backward() at the end of the window
@@ -175,7 +223,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         # recurrence to integrate/remember across time, not just "given
         # whatever hidden happens to be, fit this one frame."
         for _ in range(window_len):
-            for _ in range(camera_steps):
+            capture_step = transport.next_capture(env.unwrapped.common_step_counter)
+            env.unwrapped._vrl_camera_capture_step = capture_step
+            # Drain the final capture's transit time before saving the last student.
+            stop_step = capture_step + (transport.delay[1] if it + 1 == args_cli.iterations else 0)
+            while env.unwrapped.common_step_counter < stop_step:
                 with torch.no_grad():
                     actions = teacher.act_inference(obs)
                 obs, _, dones, _ = env.step(actions)
@@ -183,62 +235,59 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                     done_rows = dones.reshape(-1).bool()
                     keep = (~done_rows).unsqueeze(-1).to(hidden.dtype)
                     hidden = hidden * keep  # stays in-graph on purpose; see module docstring
+                    episode_ids += done_rows.long()
                     gap_ghost.reset(done_rows.nonzero(as_tuple=False).flatten())
 
-            snapshot = getattr(env.unwrapped, "_vrl_camera_snapshot", None)
-            if snapshot is None:
-                raise RuntimeError("VRL camera snapshot was not produced by the terrain observation")
-            frames = snapshot[0].clone()
-            gap_envs = terrain_family_gate(env.unwrapped, ("platform_gap",)) == 0
-            frames = augment_student_camera_frames(
-                frames, snapshot, env.unwrapped.scene.env_origins, gap_envs, camera_noise_cfg, gap_ghost
-            )
-            student_latent, hidden = student(frames, hidden)
-            hazard_pred = student.hazard_head(hidden).squeeze(-1)
-
-            with torch.no_grad():
-                teacher_latent = teacher.terrain_latent(obs)
-                terrain = obs["terrain"]
-                scan_cells = teacher._height_scan_slice.stop - teacher._height_scan_slice.start
-                visible_height = terrain[..., :scan_cells]
-                visibility = terrain[..., scan_cells:].bool()
-                hazard_label = height_discontinuity_metres(
-                    visible_height, 5.0, teacher.terrain_encoder.grid_shape, visibility
-                )
-                valid_grid = visibility.reshape(-1, *teacher.terrain_encoder.grid_shape)
-                hazard_supervised = (
-                    (valid_grid[:, 1:, :] & valid_grid[:, :-1, :]).flatten(1).any(1)
-                    | (valid_grid[:, :, 1:] & valid_grid[:, :, :-1]).flatten(1).any(1)
-                )
-
-            latent_loss = F.mse_loss(student_latent, teacher_latent)
-            if hazard_supervised.any():
-                hazard_loss = F.mse_loss(hazard_pred[hazard_supervised], hazard_label[hazard_supervised])
-            else:
-                hazard_loss = hazard_pred.sum() * 0.0
-            window_loss = window_loss + latent_loss + args_cli.hazard_loss_coef * hazard_loss
-            window_mse_sum += latent_loss.item()
-            window_hazard_sum += hazard_loss.item()
-            window_visible_sum += visibility.float().mean().item()
-            window_supervised_sum += hazard_supervised.float().mean().item()
+                step = env.unwrapped.common_step_counter
+                if step == capture_step:
+                    payload = capture_teacher_packet(env, obs, teacher, episode_ids, camera_noise_cfg, gap_ghost)
+                    transport.capture(step, payload)
+                for packet in transport.receive(step):
+                    frames, teacher_latent, hazard_label, hazard_supervised, visible, captured_episodes = packet.payload
+                    valid = delivery_mask(packet.capture_step, captured_episodes, episode_ids, last_delivered)
+                    if not valid.any():
+                        continue
+                    rows = valid.nonzero(as_tuple=False).flatten()
+                    student_latent, new_hidden = student(frames[rows], hidden[rows])
+                    hidden = hidden.index_copy(0, rows, new_hidden)
+                    last_delivered[rows] = packet.capture_step
+                    hazard_pred = student.hazard_head(new_hidden).squeeze(-1)
+                    supervised = hazard_supervised[rows]
+                    latent_loss = F.mse_loss(student_latent, teacher_latent[rows])
+                    hazard_loss = (F.mse_loss(hazard_pred[supervised], hazard_label[rows][supervised])
+                                   if supervised.any() else hazard_pred.sum() * 0.0)
+                    window_loss = window_loss + latent_loss + args_cli.hazard_loss_coef * hazard_loss
+                    window_mse_sum += latent_loss.item()
+                    window_hazard_sum += hazard_loss.item()
+                    window_visible_sum += visible[rows].mean().item()
+                    window_supervised_sum += supervised.float().mean().item()
+                    window_delay_sum += (step - packet.capture_step) * dt * 1000
+                    window_updates += 1
 
             it += 1
 
-        (window_loss / window_len).backward()
-        torch.nn.utils.clip_grad_norm_(student.parameters(), 1.0, error_if_nonfinite=True)
-        optimizer.step()
+        if window_updates:
+            (window_loss / window_updates).backward()
+            torch.nn.utils.clip_grad_norm_(student.parameters(), 1.0, error_if_nonfinite=True)
+            optimizer.step()
         hidden = hidden.detach()  # window boundary: gradient stops here, not mid-window
 
-        mse_val = window_mse_sum / window_len
-        hazard_val = window_hazard_sum / window_len
-        writer.add_scalar("perception/mse", mse_val, it)
-        writer.add_scalar("perception/hazard_mse", hazard_val, it)
-        writer.add_scalar("perception/visible_fraction", window_visible_sum / window_len, it)
-        writer.add_scalar("perception/hazard_supervised_fraction", window_supervised_sum / window_len, it)
+        count = max(window_updates, 1)
+        mse_val = window_mse_sum / count
+        hazard_val = window_hazard_sum / count
+        if window_updates:
+            writer.add_scalar("perception/mse", mse_val, it)
+            writer.add_scalar("perception/hazard_mse", hazard_val, it)
+            writer.add_scalar("perception/visible_fraction", window_visible_sum / count, it)
+            writer.add_scalar("perception/hazard_supervised_fraction", window_supervised_sum / count, it)
+        writer.add_scalar("transport/updates", window_updates, it)
+        writer.add_scalar("transport/delay_ms", window_delay_sum / count, it)
+        writer.add_scalar("transport/dropped", transport.dropped, it)
         if (it // window_len) % 10 == 0 or it >= args_cli.iterations:
             print(f"[INFO] iter {it}/{args_cli.iterations} mse={mse_val:.5f} hazard_mse={hazard_val:.5f} "
-                  f"visible={window_visible_sum / window_len:.4f} "
-                  f"hazard_supervised={window_supervised_sum / window_len:.4f}")
+                  f"updates={window_updates} delay_ms={window_delay_sum / count:.1f} dropped={transport.dropped} "
+                  f"visible={window_visible_sum / count:.4f} "
+                  f"hazard_supervised={window_supervised_sum / count:.4f}")
 
         if it % args_cli.save_interval < window_len or it >= args_cli.iterations:
             ckpt_path = os.path.join(log_dir, f"perception_{it}.pt")
@@ -247,9 +296,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                 "camera_contract": camera_contract.manifest(),
                 "camera_noise_enabled": camera_noise_cfg is not None,
                 "teacher_checkpoint": checkpoint_path,
+                "camera_transport": transport_config.manifest(dt),
+                "camera_transport_seed": agent_cfg.seed,
             }, ckpt_path)
             print(f"[INFO] Saved {ckpt_path}")
 
+    print(f"[INFO] Distillation complete: captures={transport.captured} dropped={transport.dropped} "
+          f"delivered_packets={transport.delivered} learning_wall_seconds={time.perf_counter() - learning_started:.2f}")
     writer.close()
     env.close()
 
