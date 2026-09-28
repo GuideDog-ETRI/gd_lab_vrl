@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import os
 from pathlib import Path
 
 import torch
@@ -14,7 +15,7 @@ from tensordict import TensorDict
 
 from .actor_critic import DreamwaqActorCritic
 from .online_rollout import install_episode_collector
-from .online_top5 import rank_and_save_top5
+from .online_top5 import DEFAULT_TOP5_CRITERIA, Top5CriteriaReloader, rank_and_save_top5
 
 
 def _resolve_class(name: str) -> type:
@@ -66,6 +67,14 @@ class DreamwaqRunner(OnPolicyRunner):
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False):
         if not hasattr(self, "_top5_records"):
             return super().learn(num_learning_iterations, init_at_random_ep_len)
+        defaults = dict(DEFAULT_TOP5_CRITERIA)
+        defaults["top5_min_spacing"] = self._top5_spacing
+        defaults["min_platform_gap_mean_level"] = self._top5_min_platform_gap_mean_level
+        criteria_file = os.environ.get("GD_LAB_TOP5_CRITERIA_FILE")
+        if criteria_file is None:
+            criteria_file = Path(__file__).resolve().parents[3] / "configs/online_top5.json"
+        self._top5_criteria_reloader = Top5CriteriaReloader(criteria_file, defaults)
+
         original_update = self.alg.update
         next_iteration = self.current_learning_iteration
 
@@ -86,9 +95,13 @@ class DreamwaqRunner(OnPolicyRunner):
                 episodes = local
             status = {"selected": False, "saved": False, "error": None}
             if rank == 0 and not self.disable_logs and self.log_dir is not None:
+                criteria, criteria_message = self._top5_criteria_reloader.refresh()
+                if criteria_message:
+                    level = "INFO" if criteria_message.startswith("Reloaded") else "WARN"
+                    print(f"[{level}] {criteria_message}", flush=True)
                 status = rank_and_save_top5(
-                    rank, episodes, Path(self.log_dir) / "best_top5", next_iteration, self._top5_spacing, self.save,
-                    self._top5_min_platform_gap_mean_level,
+                    rank, episodes, Path(self.log_dir) / "best_top5", next_iteration,
+                    criteria["top5_min_spacing"], self.save, criteria=criteria,
                 )
             if self.is_distributed:
                 message = [status]

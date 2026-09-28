@@ -7,8 +7,14 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).parents[1] / "src/gd_lab/rl"))
-from online_top5 import (gates, meets_minimum_gap_difficulty, rank_and_save_top5, rotate_top5,
-                         score_episodes, select_top5)  # noqa: E402
+from online_top5 import (
+    gates,
+    meets_minimum_gap_difficulty,
+    rank_and_save_top5,
+    rotate_top5,
+    score_episodes,  # noqa: E402
+    select_top5,
+)
 
 
 def episode(family="platform_gap", level=0, **changes):
@@ -18,8 +24,14 @@ def episode(family="platform_gap", level=0, **changes):
 
 
 def candidate(iteration, score):
-    return {"iteration": iteration, "score": score, "components": {"G": 0.8, "B": 0.9},
-            "curriculum_snapshot": {}, "sample_counts": {}, "gate_results": {}, "score_is_online_proxy": True}
+    return {
+        "iteration": iteration, "score": score, "components": {"G": 0.8, "B": 0.9},
+        "criteria_metrics": {
+            "mean_terrain_level": 9.0, "base_contact_rate": 0.0,
+            "platform_gap_termination_rate": 0.0, "stairs_termination_rate": 0.0,
+        },
+        "curriculum_snapshot": {}, "sample_counts": {}, "gate_results": {}, "score_is_online_proxy": True,
+    }
 
 
 def test_score_macro_averages_family_and_level():
@@ -44,6 +56,17 @@ def test_gates_exact_thresholds():
     assert not gates(passing, reference)["gap_success_pass"]
     assert not gates(passing, reference)["base_contact_pass"]
 
+
+
+def test_absolute_terrain_and_termination_gates():
+    rows = [episode(family="platform_gap", level=9, base_contact=0.06),
+            episode(family="pyramid_stairs", level=9, base_contact=0.06)]
+    scored = score_episodes(rows)
+    results = gates(scored, None)
+    assert results["terrain_mean_level_pass"]
+    assert results["base_contact_rate_pass"]
+    assert results["platform_gap_termination_pass"]
+    assert results["stairs_termination_pass"]
 def test_gap_difficulty_gate_requires_mean_level_eight():
     low = score_episodes([episode(level=7)])
     high = score_episodes([episode(level=8)])
@@ -107,6 +130,7 @@ def test_only_rank_zero_reads_and_writes_top5(tmp_path: Path):
 
     (directory / "leaderboard.json").unlink()
     directory.rmdir()
-    success = rank_and_save_top5(0, [episode()], directory, 100, 100, save, 0)
+    success = rank_and_save_top5(0, [episode(family="platform_gap", level=9),
+                                     episode(family="pyramid_stairs", level=9)], directory, 100, 100, save, 0)
     assert success == {"selected": True, "saved": True, "error": None}
     assert len(saves) == 1
