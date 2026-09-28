@@ -16,6 +16,11 @@ from tensordict import TensorDict
 from .actor_critic import DreamwaqActorCritic
 from .online_rollout import install_episode_collector
 from .online_top5 import DEFAULT_TOP5_CRITERIA, Top5CriteriaReloader, rank_and_save_top5
+from .terrain_resume import (
+    capture_family_level_means,
+    read_family_level_means_from_tensorboard,
+    restore_family_start_levels,
+)
 
 
 def _resolve_class(name: str) -> type:
@@ -61,6 +66,7 @@ class DreamwaqRunner(OnPolicyRunner):
     ) -> None:
         """Enable rollout-only ranking for Vision runs; blind runs stay unchanged."""
         self._top5_records = install_episode_collector(self.env, family_columns)
+        self._top5_family_columns = {name: list(columns) for name, columns in family_columns.items()}
         self._top5_spacing = spacing
         self._top5_min_platform_gap_mean_level = min_platform_gap_mean_level
 
@@ -119,13 +125,21 @@ class DreamwaqRunner(OnPolicyRunner):
             self.alg.update = original_update
 
     def save(self, path: str, infos: dict | None = None) -> None:
-        extra = {"learning_rate": self.alg.learning_rate}
+        infos = dict(infos or {})
+        extra = dict(infos.get("gd_lab", {}))
+        extra["learning_rate"] = self.alg.learning_rate
         policy = self.alg.policy
         if isinstance(policy, DreamwaqActorCritic):
             extra["cenet_optimizer_state_dict"] = policy.cenet.optimizer.state_dict()
         if self.deploy_context is not None:
             extra["deploy_context"] = self.deploy_context
-        infos = {**(infos or {}), "gd_lab": extra}
+        family_columns = getattr(self, "_top5_family_columns", None)
+        if family_columns:
+            means = capture_family_level_means(self.env.unwrapped.scene.terrain, family_columns)
+            if means:
+                extra["terrain_level_means_by_family"] = means
+                extra["terrain_level_resume_rule"] = "floor_family_mean"
+        infos["gd_lab"] = extra
         super().save(path, infos)
 
     def load(self, path: str, load_optimizer: bool = True, map_location: str | None = None) -> dict:
@@ -135,6 +149,31 @@ class DreamwaqRunner(OnPolicyRunner):
             self.alg.learning_rate = extra["learning_rate"]
             for group in self.alg.optimizer.param_groups:
                 group["lr"] = self.alg.learning_rate
+        family_columns = getattr(self, "_top5_family_columns", None)
+        if family_columns:
+            means = extra.get("terrain_level_means_by_family") or {}
+            if not means:
+                means = read_family_level_means_from_tensorboard(
+                    path, self.current_learning_iteration, family_columns
+                )
+            if means:
+                scene = self.env.unwrapped.scene
+                restored = restore_family_start_levels(
+                    scene.terrain, scene.env_origins, family_columns, means
+                )
+                if restored:
+                    self.env.reset()
+                    print(
+                        "[INFO] Resumed terrain levels using floor(family mean): "
+                        f"{restored}",
+                        flush=True,
+                    )
+            else:
+                print(
+                    "[WARN] No saved terrain curriculum levels found; "
+                    "using fresh environment initialization",
+                    flush=True,
+                )
         policy = self.alg.policy
         if load_optimizer and isinstance(policy, DreamwaqActorCritic) and "cenet_optimizer_state_dict" in extra:
             policy.cenet.optimizer.load_state_dict(extra["cenet_optimizer_state_dict"])
