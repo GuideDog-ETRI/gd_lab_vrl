@@ -3,9 +3,55 @@
 RBQ10 사족보행 로봇 강화학습 프레임워크. IsaacSim 5.1.0 + IsaacLab 2.3.1 위에서
 DreamWaQ 및 카메라 기반 VRL 선생·학생을 학습한다.
 
+## 서버 역할
+
+- **학습 main 서버:** `10.77.32.231` (`onvlm2`), SSH 포트 `20022`, 사용자 `bsseo`.
+  다중 GPU 학습 및 이 저장소(`gd_lab_vrl`)의 학습 코드 작업은 이 서버를 기준으로 한다.
+- **배포·시뮬레이터 실험 main 서버:** `10.254.90.20` (RTX 5090).
+  자리에 있어 시뮬레이터를 바로 확인할 수 있으므로 배포 관련 실험 코드는 이 서버에서 실행한다.
+- GitHub에서 push/pull하거나 배포 저장소와 연동할 때 위 서버 역할을 기준으로 작업한다.
+
+두 서버는 서로 다른 머신이다. 학습은 학습 서버에서, 배포 및 시뮬레이터 검증은 배포 서버에서
+수행한다. 한쪽 서버의 변경 사항이 다른 쪽에 자동 반영된다고 가정하지 말고 GitHub 동기화
+대상을 확인한다.
+
+## 2026-09-27~28 작업 인계: 이 PC의 Arm2 학습
+
+이 PC는 RTX 5090 1장이다. 실행 중인 `gd-vrl-arm2-40k` 세션은 Arm2 비전 RL,
+1024 env, rollout 100 step, 목표 40,000 iteration으로, 이전 실행의 `model_4200.pt`에서
+재개했다. 일반 체크포인트는 100 iteration 간격이다. 실행 상태와 실제 로그 경로는
+`logs/vision_rbq10_dreamwaq/arm_2/current_arm2_run.json`을 기준으로 확인한다.
+기존 실행명에 붙은 `8step`은 실제 rollout 길이를 뜻하지 않는다. 학습 프로세스를
+중단·재시작하거나 실행 중인 설정을 변경하지 않았다.
+
+온라인 Top-5는 학습 rollout에서 계산하는 **후보 선정용 proxy**이며, 별도 held-out
+평가나 배포 성능 순위가 아니다. 일반 `model_<iteration>.pt`와 별개로 해당 실행의
+`best_top5/leaderboard.json` 및 `<iteration>_top<rank>.pt`가 실제로 있을 때만
+Top-5가 저장된 것이다. 2026-09-28 오전 확인 시 현재 Arm2 실행에는 아직
+`best_top5/`가 없었다. 이 상태를 일반 체크포인트가 Top-5라는 뜻으로 해석하지 않는다.
+
+현재 Arm4 Top-5는 매 iteration rollout 완료 에피소드로 계산하는 **후보 선정용 online proxy**다.
+기존 기준(gap 평균 레벨 ≥8, 1위 대비 gap 성공률 하락 ≤2%p, base-contact 성능 하락
+≤1%p, 후보 간격 100 iteration)에 더해 전체 rollout 평균 지형 레벨 ≥9, base-contact·
+platform-gap·계단 지형 종료율 각각 ≤6%를 추가로 요구한다.
+계단 종료율은 `pyramid_stairs*` family의 (family, level) macro-average다. 필수 지형군
+표본이 없으면 후보는 통과하지 못하며, 측정치와 gate 결과는 리더보드 metadata에 저장한다.
+
+9월 27일 MuJoCo 배포 시험의 모델, 영상 입력·지연, 평지/갭/계단 결과 및 한계는
+[배포 저장소 README](https://github.com/GuideDog-ETRI/gd_rbq10_deploy_vrl/blob/vrl/README.md)에 정리했다.
+
 ## Arm4 VRL: 선생 PT → 학생 PT → ONNX → MuJoCo
 
 배포 저장소는 [gd_rbq10_deploy_vrl](https://github.com/GuideDog-ETRI/gd_rbq10_deploy_vrl/tree/vrl)이다.
+
+Top-5 기준은 학습 저장소의 `configs/online_top5.json`에서 읽는다. 학습 runner의 rank-0가
+매 iteration 파일의 수정 시각(ns)과 크기만 확인하고, 변경된 경우에만 JSON을 다시 읽어 다음
+후보 선정부터 적용한다. 파싱/검증 실패 또는 파일 삭제 시 마지막 정상 기준을 유지하고 경고만
+기록하므로 학습을 중단하지 않는다. 임시 파일을 쓴 뒤 원자적 rename으로 교체하는 방식을 권장한다.
+`GD_LAB_TOP5_CRITERIA_FILE` 환경 변수로 파일 경로를 지정할 수도 있다. 이 코드는 현재 이미
+실행 중인 프로세스에는 주입되지 않으며, **다음 학습 재개/시작 때부터** 동작한다. 따라서 코드와
+기준 파일은 학습 main 서버 `10.77.32.231`에 반영한다. 배포 실험은 RTX 5090 서버
+`10.254.90.20`에서 별도로 수행한다.
 이 절의 명령은 이 저장소 루트에서 실행한다. 아래 Quick start는 환경 설치와 blind 경로를 설명한다.
 진행 중인 선생/학생 작업이 있으면 새 학습을 중복 실행하지 않는다.
 
