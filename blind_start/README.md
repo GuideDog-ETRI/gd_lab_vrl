@@ -8,6 +8,7 @@ gd_lab의 잘 걷는 **블라인드 DreamWaQ 체크포인트에서 출발**해 V
 |---|---|---|---|
 | 2-A | `Gd-VrlBlindStart-Rbq10-Dreamwaq-v0` | 전체 높이맵(모두 보임) + blackout | 없음 (빠름) |
 | 2-B | `Gd-VrlBlindStart-Rbq10-Dreamwaq-Vision-v0` | 카메라 가시 높이맵(기존 VRL 선생과 동일) + blackout | 있음 |
+| 2-R | `Gd-VrlBlindStartRaycast-Rbq10-Dreamwaq-v0` | raycast로 계산한 카메라 가시 높이맵 + blackout | 없음 (빠름) |
 
 ## 구성
 
@@ -18,6 +19,13 @@ gd_lab의 잘 걷는 **블라인드 DreamWaQ 체크포인트에서 출발**해 V
 - `gd_lab_blind_start/actor_critic.py`: 유효 셀이 하나도 없으면 지형 latent를 0으로 만든다.
   카메라가 끊긴 상태는 항상 "latent = 0"으로 actor에 들어가고, blackout 학습으로 이 입력에서
   블라인드 보행을 유지한다. **배포에서도 카메라 미수신 시 0 latent를 보내야 한다.**
+- `gd_lab_blind_start/raycast_visibility.py`, `raycast_terrain.py`: 렌더링 없는 카메라 가시성.
+  렌더링 판정(`camera_visible_points`)과 같은 pinhole·프레임·depth clip·인접 4픽셀 depth 일치 조건을,
+  픽셀마다 지형 mesh에 광선을 쏴서 재현한다. 다리는 capsule(허벅지 5 cm, 종아리 3 cm)로 가린다.
+  몸통 등 나머지 몸체의 가림은 없다.
+- `scripts/compare_visibility.py`: 렌더링 태스크에서 선생을 걷게 하며 두 mask를 capture마다 비교한다.
+  2026-09-30 선생 `model_7400`, 64 env, 11,980 capture: 렌더링 가시 8.7%, raycast 12.3%,
+  칸 일치율 93.0%, IoU 0.50, raycast 정밀도 0.57, 재현율 0.81.
 - `scripts/train_blind_start.py`: `scripts/train_vrl.py` 사본. 위 태스크 등록, 2-A 카메라 끄기,
   `--blind_init` 추가만 다르다.
 

@@ -41,8 +41,9 @@ args_cli, hydra_args = parser.parse_known_args()
 if args_cli.total_envs is not None and (not args_cli.distributed or args_cli.total_envs < int(os.environ.get("WORLD_SIZE", "1"))):
     parser.error("--total_envs requires --distributed and at least one environment per process")
 
-# Only the camera-free 2-A task runs without rendered cameras.
-args_cli.enable_cameras = args_cli.task != "Gd-VrlBlindStart-Rbq10-Dreamwaq-v0"
+# Only the camera-free tasks (2-A, 2-R) run without rendered cameras.
+CAMERA_FREE_TASKS = ("Gd-VrlBlindStart-Rbq10-Dreamwaq-v0", "Gd-VrlBlindStartRaycast-Rbq10-Dreamwaq-v0")
+args_cli.enable_cameras = args_cli.task not in CAMERA_FREE_TASKS
 if args_cli.blind_init is not None and args_cli.resume:
     parser.error("--blind_init starts a new run; it cannot be combined with --resume")
 

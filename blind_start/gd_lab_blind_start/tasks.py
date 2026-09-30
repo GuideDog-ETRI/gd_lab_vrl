@@ -2,6 +2,7 @@
 
 2-A  camera-free: fully visible height scan (fast, no rendering).
 2-B  camera-visible: the regular teacher observation.
+2-R  camera-free, raycast camera visibility (no rendering; mask close to 2-B).
 Both add terrain blackouts; ``BLACKOUT`` holds the defaults (100 Hz policy).
 """
 
@@ -10,6 +11,7 @@ from gd_lab.tasks.vrl_teacher import VrlTeacherEnvCfg
 from isaaclab.managers import ObservationTermCfg
 from isaaclab.utils import configclass
 
+from .raycast_terrain import RaycastVisibleTerrainDropout
 from .terrain_dropout import CameraVisibleTerrainDropout, FullVisibleTerrainDropout
 
 # ~0.5-3 s segments starting about once per 10 s, plus 5% fully blind episodes:
@@ -36,3 +38,11 @@ class BlindStartCameraEnvCfg(VrlTeacherEnvCfg):
         super().__post_init__()
         self.observations.terrain.camera_visible = ObservationTermCfg(
             func=CameraVisibleTerrainDropout, params=dict(BLACKOUT))
+
+
+@configclass
+class BlindStartRaycastEnvCfg(BlindStartEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.observations.terrain.camera_visible = ObservationTermCfg(
+            func=RaycastVisibleTerrainDropout, params=dict(BLACKOUT))
