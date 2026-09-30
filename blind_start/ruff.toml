@@ -1,0 +1,6 @@
+extend = "../pyproject.toml"
+src = ["gd_lab_blind_start", "scripts", "tests"]
+
+[lint.per-file-ignores]
+# Entry scripts must launch the simulator app before importing isaaclab modules.
+"scripts/*" = ["E402"]
