@@ -108,6 +108,8 @@ from torch.utils.tensorboard import SummaryWriter
 
 import gd_lab  # noqa: F401  (registers the tasks)
 import gd_lab.gast.tasks
+import gd_lab.gast.cvtt_student_task
+import gd_lab.gast.bivt_student_task
 from gd_lab.gast.student import GastStudent
 from gd_lab.gast.distillation import GastDistillation
 if args_cli.task == 'Gd-VrlRayStudent-Rbq10-Dreamwaq-Vision-v0':
@@ -187,6 +189,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     teacher.eval()
     for p in teacher.parameters():
         p.requires_grad_(False)
+    print(f'[INFO] Frozen teacher class={type(teacher).__name__} sha256={teacher_sha256}', flush=True)
     device = env.unwrapped.device
 
     dt = env.unwrapped.step_dt
@@ -314,11 +317,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         writer.add_scalar("transport/updates", window_updates, it)
         writer.add_scalar("transport/delay_ms", window_delay_sum / count, it)
         writer.add_scalar("transport/dropped", transport.dropped, it)
-        if (it // window_len) % 10 == 0 or it >= args_cli.iterations:
+        if (it // window_len) % 2 == 0 or it >= args_cli.iterations:
             print(f"[INFO] iter {it}/{args_cli.iterations} mse={mse_val:.5f} hazard_mse={hazard_val:.5f} "
                   f"updates={window_updates} delay_ms={window_delay_sum / count:.1f} dropped={transport.dropped} "
                   f"visible={window_visible_sum / count:.4f} "
-                  f"hazard_supervised={window_supervised_sum / count:.4f}")
+                  f"hazard_supervised={window_supervised_sum / count:.4f} "
+                  f"learning_wall_seconds={time.perf_counter()-learning_started:.2f}")
 
         if it % args_cli.save_interval < window_len or it >= args_cli.iterations:
             ckpt_path = os.path.join(log_dir, f"perception_{it}.pt")

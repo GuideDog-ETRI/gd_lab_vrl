@@ -321,3 +321,35 @@ Arm4 설정을 독립 gast/ 디렉토리로 복사한다. 물리 dt 0.005초, �
 - [Cheng et al., Extreme Parkour with Legged Robots, 2023](https://arxiv.org/abs/2309.14341): scandots 교사, Depth CNN-GRU 학생, 학생 상태에서 교사 행동 증류.
 - [Masked Sensory-Temporal Attention for Sensor Generalization in Quadruped Locomotion, 2024](https://arxiv.org/abs/2409.03332): 센서·시간 attention과 masking 참고.
 - [Learning Locomotion on Complex Terrain for Quadrupedal Robots with Foot Position Maps and Stability Rewards, 2026](https://arxiv.org/abs/2604.02744): 발 위치·지형 결합과 안정성 보상 참고. GAST의 효과를 입증하는 근거로 인용하는 것은 아니다.
+
+<!-- pagebreak -->
+
+## 현행 실험 설정 - 2026-10-01
+
+본 절이 앞 절의 과거 실행 상태보다 우선한다. GAST는 교사와 학생을 포함한 전체 설계이다. 이번 실험은 GAST 교사를 새로 학습하지 않고, 기존 BIVT-Ray 교사에 GAST 학생만 연결하는 혼합 실험이다.
+
+### DWB-38000 → BIVT-Ray-4500 → GAST 학생
+
+| 항목 | 현재 설정 |
+| --- | --- |
+| 고정 교사 | DWB-38000에서 초기화해 학습한 BIVT-Ray model_4500.pt |
+| 교사 입력·동결 | 원래 raycast 가시 지형 관측 유지; CENet·Actor·지형 encoder 고정 |
+| 학생 입력 | 4카메라 Depth + IR proxy, simulator pose, 영상 나이·유효성 |
+| 학생 구조 | 공간 격자 Cross-Attention + 이동 정렬 격자 GRU + 시간 Attention |
+| 환경 수 | 516 env (512가 아님), Arm4, seed 42 |
+| 목표·시간 학습 | 20,000 영상 캡처 시도, BPTT 16, 학생 신규 초기화 |
+| 최적화 | Adam, 학습률 0.0003; 약 200회 간격 저장 (BPTT 경계에 맞춤) |
+| 영상 조건 | 캡처 70-100 ms, 전달 지연 0-150 ms, 패킷 누락 5% |
+| 손실·rollout | latent·행동·공간 복원·hazard·품질; 1,000회 후 학생 rollout, 4,000회 동안 비중 증가 |
+| 외부 갭 신호 | 사용하지 않음; 깨끗한 지형은 학습 전용 보조 정답 |
+
+실행: gast/scripts/train_bivt4500_env516_bptt16.sh. BPTT 16은 명목상 약 1.36초 구간의 역전파이며 기억 자체를 그 시점마다 지우는 설정은 아니다. 516 env 사전 검증은 32회 학습·저장에 성공했다(학습 37.96초, 초기화 제외). 20,000회 단순 환산 약 6시간 35분으로, 10월 1일 17:36경 본 실행 시작 기준 10월 2일 00:15 전후 예상이다. 짧은 표본이라 초기 잠정 범위는 자정-02시이며, 실제 속도로 갱신해야 한다.
+
+### 기존 실험 및 비교 주의
+
+- CVTT-7761 → RVLD 및 기존 GAVD: 각각 20,000회 완료. BIVT-Ray-4500 → 기존 GAVD도 64 env·BPTT 8로 20,000회 완료.
+- CVTT-7761 → GAST 학생: 16 env·BPTT 64 실행을 사용자 요청으로 중단. 마지막 저장 perception_3200.pt 보존. 본 조합은 현재 우선순위에서 제외.
+- 1,024 env 계획은 중단했고, 이번 우선 실행은 516 env이다. 다른 교사/학생 조합을 동시에 실행하지 않는다.
+- 기존 GAVD 대비 env 수는 64 → 516으로 8.0625배다. 동일 20,000회여도 데이터량·최적화 조건이 달라 구조 효과만의 공정 비교는 아니다.
+- 시공간 기억은 미래 착지점 계획과 다르다. 명시적인 미래 발 디딤 예측 목표는 없으며, 교사의 늦은 갭 대응이 학생에게 전달될 수 있다.
+- simulator pose 기반 기억 정렬과 강화된 학생 입출력은 실기 및 별도 배포 검증이 필요하다. 학습 완료는 갭·계단 통과 성능을 보장하지 않는다.
