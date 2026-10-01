@@ -8,3 +8,9 @@ wandb/
 .pytest_cache/
 .ruff_cache/
 .vscode/
+# Model weights are transferred separately; existing tracked files are unchanged.
+*.pt
+*.pth
+*.onnx
+*.ckpt
+*.safetensors

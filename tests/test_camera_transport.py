@@ -92,7 +92,7 @@ def test_delay_does_not_relabel_and_resets_and_reordering_are_rejected():
 
 def test_capture_function_freezes_frames_and_teacher_labels():
     # Load the production capture function without booting Isaac's CLI.
-    path = Path(__file__).parents[1] / "scripts/train_perception.py"
+    path = Path(__file__).parents[1] / "scripts/distill_student.py"
     tree = ast.parse(path.read_text())
     tree.body = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "capture_teacher_packet"]
     frame = torch.ones(2, 4, 2, 3, 3)

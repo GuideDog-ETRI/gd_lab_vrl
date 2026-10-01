@@ -1,5 +1,5 @@
 """Deploy export for the vision-RL stage-3 camera student
-(``gd_lab.rl.perception.CameraPerceptionEncoder``): JIT + ONNX with an
+(``gd_lab.students.rvld.model.CameraPerceptionEncoder``): JIT + ONNX with an
 explicit GRU hidden-state input/output pair.
 
 ONNX Runtime has no persistent state across ``Run()`` calls, so the deploy
@@ -22,9 +22,10 @@ from __future__ import annotations
 import copy
 import os
 
+import onnx
 import torch
 
-from gd_lab.rl.perception import CameraPerceptionEncoder
+from gd_lab.students.rvld.model import CameraPerceptionEncoder
 
 
 def export_student_vrl(
@@ -68,4 +69,11 @@ def export_student_vrl(
         input_names=["frames", "hidden_in"],
         output_names=["terrain_latent", "hidden_out"],
     )
+    graph = onnx.load(onnx_path)
+    architecture = getattr(student, "architecture", "cnn_gru")
+    metadata = {"camel.student_arch": architecture}
+    if architecture == "grid_attention_v1":
+        metadata["camel.student_age"] = "hidden63_seconds_clipped_0_1"
+    onnx.helper.set_model_props(graph, metadata)
+    onnx.save(graph, onnx_path)
     return jit_path, onnx_path

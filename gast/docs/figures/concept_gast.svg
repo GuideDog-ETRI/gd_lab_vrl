@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="500" height="620" preserveAspectRatio="xMinYMin meet" viewBox="0 0 500 620" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="500" height="620"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-620)" style="clip-path: url(#clip)">
+		<g transform="">
+			<text x="0" y="594" style="font-family: KR; font-size: 18px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,1188) scale(1,-1)">GAST | 교사와 학생의 시공간 지형 기억</text>
+			<text x="0" y="573" style="font-family: KR; font-size: 10px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,1146) scale(1,-1)">설계안 v1 · Arm4 · 외부 갭 신호 없음 · 2026-10-01</text>
+			<text x="0" y="540" style="font-family: KR; font-size: 12px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,1080) scale(1,-1)">STAGE 1  교사: 렌더링 없이 처음부터 PPO 학습</text>
+			<rect x="0" y="452" width="143" height="64" rx="5" ry="5" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1; fill: rgb(86%,94%,91%); fill-rule: evenodd;"/>
+			<text x="8" y="498" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,996) scale(1,-1)">노이즈 높이 + 유효성</text>
+			<text x="8" y="483" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,966) scale(1,-1)">11×17 격자 이력</text>
+			<text x="8" y="468" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,936) scale(1,-1)">이동·yaw 보정 / 약 5초</text>
+			<rect x="166" y="452" width="170" height="64" rx="5" ry="5" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1; fill: rgb(86%,94%,91%); fill-rule: evenodd;"/>
+			<text x="174" y="498" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,996) scale(1,-1)">공유 CNN + 시간 Attention</text>
+			<text x="174" y="483" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,966) scale(1,-1)">GRU → 지형 latent 32</text>
+			<text x="174" y="468" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,936) scale(1,-1)">현재·과거 지형 특징 압축</text>
+			<rect x="359" y="452" width="141" height="64" rx="5" ry="5" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1; fill: rgb(86%,94%,91%); fill-rule: evenodd;"/>
+			<text x="367" y="498" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,996) scale(1,-1)">Actor + CENet [학습]</text>
+			<text x="367" y="483" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,966) scale(1,-1)">기존 CENet 구조 유지</text>
+			<text x="367" y="468" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,936) scale(1,-1)">출력: 관절 행동 12</text>
+			<path d="M 144,484 L 164,484 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="164 484, 159 487, 159 481" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<path d="M 337,484 L 357,484 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="357 484, 352 487, 352 481" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<rect x="166" y="359" width="170" height="64" rx="5" ry="5" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1; fill: rgb(86%,94%,91%); fill-rule: evenodd;"/>
+			<text x="174" y="405" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,810) scale(1,-1)">학습 전용 Decoder</text>
+			<text x="174" y="390" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,780) scale(1,-1)">깨끗한 높이·갭·단차</text>
+			<text x="174" y="375" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,750) scale(1,-1)">지지면 복원 / 경계 가중</text>
+			<path d="M 251,451 L 251,425 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="251 425, 248 430, 254 430" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<text x="0" y="337" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,674) scale(1,-1)">Critic: 깨끗한 특권 상태 | PPO + 지형 복원 손실 + 기존 CENet 손실</text>
+			<text x="0" y="315" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,630) scale(1,-1)">고유감각 이력 → 기존 CENet → Actor. 지형 blackout으로 블라인드 경로 학습.</text>
+			<text x="0" y="283" style="font-family: KR; font-size: 12px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,566) scale(1,-1)">STAGE 2  학생: 교사 CENet·Actor·지형 Encoder 고정</text>
+			<rect x="0" y="191" width="143" height="64" rx="5" ry="5" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1; fill: rgb(86%,94%,91%); fill-rule: evenodd;"/>
+			<text x="8" y="237" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,474) scale(1,-1)">4카메라 Depth + IR</text>
+			<text x="8" y="222" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,444) scale(1,-1)">자세·이동량·영상 나이</text>
+			<text x="8" y="207" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,414) scale(1,-1)">누락·지연·블러 증강</text>
+			<rect x="166" y="191" width="170" height="64" rx="5" ry="5" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1; fill: rgb(86%,94%,91%); fill-rule: evenodd;"/>
+			<text x="174" y="237" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,474) scale(1,-1)">CNN + 격자 Cross-Attention</text>
+			<text x="174" y="222" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,444) scale(1,-1)">시간 Attention + 공간 GRU</text>
+			<text x="174" y="207" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,414) scale(1,-1)">학생 자체의 시공간 기억</text>
+			<rect x="359" y="191" width="141" height="64" rx="5" ry="5" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1; fill: rgb(89%,91%,98%); fill-rule: evenodd;"/>
+			<text x="367" y="237" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,474) scale(1,-1)">품질 gate × latent 32</text>
+			<text x="367" y="222" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,444) scale(1,-1)">고정 CENet + Actor</text>
+			<text x="367" y="207" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,414) scale(1,-1)">출력: 관절 행동 12</text>
+			<path d="M 144,223 L 164,223 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="164 223, 159 226, 159 220" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<path d="M 337,223 L 357,223 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="357 223, 352 226, 352 220" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<rect x="166" y="97" width="170" height="64" rx="5" ry="5" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1; fill: rgb(86%,94%,91%); fill-rule: evenodd;"/>
+			<text x="174" y="143" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,286) scale(1,-1)">학생 보조 Head</text>
+			<text x="174" y="128" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,256) scale(1,-1)">갭·상승/하강·지지면</text>
+			<text x="174" y="113" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,226) scale(1,-1)">품질 / 지형 복원</text>
+			<path d="M 251,190 L 251,164 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="251 164, 248 169, 254 169" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<text x="0" y="75" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,150) scale(1,-1)">증류: latent + 행동 + 공간 복원 | 학생 rollout 상태에도 교사 정답 제공</text>
+			<text x="0" y="53" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,106) scale(1,-1)">누락·stale: 지형 기여 0. 블러: 품질 gate. 기존 DWB와 동일 행동 보장은 아님.</text>
+			<text x="0" y="31" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,62) scale(1,-1)">초기안: 교사 20,000 PPO 업데이트 → 학생 20,000 캡처. 짧은 검증 후 실행.</text>
+		</g>
+	</g>
+</svg>

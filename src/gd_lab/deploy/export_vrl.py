@@ -20,7 +20,7 @@ simulation-only privileged signal that does not exist on hardware/Mujoco. At
 deploy time gd_rbq10_deploy must supply the stage-3 camera student's own
 output here instead. This module deliberately does NOT compute that itself
 -- the student is a separate, lower-rate async model (APT-RL's own
-deployment split; see ``gd_lab.rl.perception.CameraPerceptionEncoder``), so
+deployment split; see ``gd_lab.students.rvld.model.CameraPerceptionEncoder``), so
 folding it into this same traced graph would force it to run at the actor's
 full control rate for no benefit. Pilot integration is maintained separately
 in the vision deployment tree.
@@ -34,7 +34,7 @@ import os
 import torch
 import torch.nn as nn
 
-from gd_lab.rl.actor_critic_vrl import DreamwaqVrlActorCritic
+from gd_lab.teachers.cvtt.actor_critic import DreamwaqVrlActorCritic
 
 
 def _time_major_to_term_major_index(term_dims: list[int], history: int) -> torch.Tensor:

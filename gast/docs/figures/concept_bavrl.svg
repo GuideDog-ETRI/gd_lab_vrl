@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="500" height="615" preserveAspectRatio="xMinYMin meet" viewBox="0 0 500 615" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="500" height="615"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-615)" style="clip-path: url(#clip)">
+		<g transform="">
+			<text x="0" y="590" style="font-family: KR; font-size: 22px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,1180) scale(1,-1)">BAVRL</text>
+			<text x="0" y="566" style="font-family: KR; font-size: 12px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,1132) scale(1,-1)">블라인드는 고정하고 시각 행동 보정만 학습</text>
+			<rect x="0" y="526" width="150" height="27" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(86%,94%,91%); fill-rule: evenodd;"/>
+			<text x="9" y="536" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,1072) scale(1,-1)">초록: 학습하는 모델</text>
+			<rect x="164" y="526" width="150" height="27" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(89%,91%,98%); fill-rule: evenodd;"/>
+			<text x="173" y="536" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,1072) scale(1,-1)">파랑: 고정하는 모델</text>
+			<text x="330" y="535" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,1070) scale(1,-1)">회색: 입력 / 출력</text>
+			<text x="0" y="497" style="font-family: KR; font-size: 12px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,994) scale(1,-1)">STAGE 1  |  교사 정책 학습</text>
+			<rect x="0" y="411" width="137" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(94%,95%,96%); fill-rule: evenodd;"/>
+			<text x="9" y="459" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,918) scale(1,-1)">관절·자세·명령 등</text>
+			<text x="9" y="444" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,888) scale(1,-1)">고유감각 5시점 이력</text>
+			<text x="9" y="429" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,858) scale(1,-1)">영상 입력 없음</text>
+			<rect x="165" y="411" width="185" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(86%,94%,91%); fill-rule: evenodd;"/>
+			<text x="174" y="459" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,918) scale(1,-1)">DWB 교사 [학습]</text>
+			<text x="174" y="444" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,888) scale(1,-1)">CENet + Actor MLP</text>
+			<text x="174" y="429" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,858) scale(1,-1)">PPO + CENet 보조 학습</text>
+			<rect x="378" y="411" width="122" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(94%,95%,96%); fill-rule: evenodd;"/>
+			<text x="387" y="459" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,918) scale(1,-1)">출력: 행동 12</text>
+			<text x="387" y="444" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,888) scale(1,-1)">관절 목표각 보정</text>
+			<text x="387" y="429" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,858) scale(1,-1)">블라인드 보행</text>
+			<path d="M 139,443 L 162,443 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="162 443, 157 446, 157 440" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<path d="M 352,443 L 375,443 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="375 443, 370 446, 370 440" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<text x="0" y="388" style="font-family: KR; font-size: 8.7px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,776) scale(1,-1)">학습 전용 Critic은 특권 관측298(지형 포함)을 사용. 배포 Actor에는 지형 없음.</text>
+			<text x="0" y="341" style="font-family: KR; font-size: 12px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,682) scale(1,-1)">STAGE 2  |  고정 블라인드 + 학습하는 영상 잔차</text>
+			<rect x="0" y="257" width="137" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(94%,95%,96%); fill-rule: evenodd;"/>
+			<text x="9" y="305" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,610) scale(1,-1)">고유감각 이력230</text>
+			<rect x="165" y="257" width="185" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(89%,91%,98%); fill-rule: evenodd;"/>
+			<text x="174" y="305" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,610) scale(1,-1)">DWB CENet + Actor [고정]</text>
+			<text x="174" y="290" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,580) scale(1,-1)">학습된 블라인드 보행 유지</text>
+			<rect x="378" y="257" width="122" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(94%,95%,96%); fill-rule: evenodd;"/>
+			<text x="387" y="305" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,610) scale(1,-1)">기준 행동 a0</text>
+			<path d="M 139,289 L 162,289 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="162 289, 157 292, 157 286" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<path d="M 352,289 L 375,289 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="375 289, 370 292, 370 286" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<rect x="0" y="151" width="137" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(94%,95%,96%); fill-rule: evenodd;"/>
+			<text x="9" y="199" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,398) scale(1,-1)">4카메라 IR + Depth</text>
+			<text x="9" y="184" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,368) scale(1,-1)">고유감각 특징·이전잔차</text>
+			<text x="9" y="169" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,338) scale(1,-1)">영상 나이·유효성</text>
+			<rect x="165" y="151" width="185" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(86%,94%,91%); fill-rule: evenodd;"/>
+			<text x="174" y="199" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,398) scale(1,-1)">CNN + 격자 Attention + GRU</text>
+			<text x="174" y="184" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,368) scale(1,-1)">잔차 Actor MLP [학습]</text>
+			<text x="174" y="169" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,338) scale(1,-1)">환경 보상으로 잔차 PPO</text>
+			<rect x="378" y="151" width="122" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(94%,95%,96%); fill-rule: evenodd;"/>
+			<text x="387" y="199" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,398) scale(1,-1)">행동 보정 delta</text>
+			<text x="387" y="184" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,368) scale(1,-1)">크기·변화율 제한</text>
+			<text x="387" y="169" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,338) scale(1,-1)">영상 장애: delta=0</text>
+			<path d="M 139,183 L 162,183 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="162 183, 157 186, 157 180" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<path d="M 352,183 L 375,183 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="375 183, 370 186, 370 180" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<path d="M 439,257 L 439,232 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="439 232, 436 237, 442 237" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<text x="7" y="232" style="font-family: KR; font-size: 8.8px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,464) scale(1,-1)">두 경로의 출력을 합산한다. 교사 행동 모방 손실에 의한 증류가 아니다.</text>
+			<rect x="0" y="41" width="137" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(94%,95%,96%); fill-rule: evenodd;"/>
+			<text x="9" y="89" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,178) scale(1,-1)">기준 행동 a0</text>
+			<text x="9" y="74" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,148) scale(1,-1)">+ 제한된 보정 delta</text>
+			<rect x="165" y="41" width="185" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(89%,91%,98%); fill-rule: evenodd;"/>
+			<text x="174" y="89" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,178) scale(1,-1)">최종 행동 = a0 + delta</text>
+			<text x="174" y="74" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,148) scale(1,-1)">영상 없음 / 오래됨: a0만 사용</text>
+			<rect x="378" y="41" width="122" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(94%,95%,96%); fill-rule: evenodd;"/>
+			<text x="387" y="89" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,178) scale(1,-1)">최종 행동 12</text>
+			<text x="387" y="74" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,148) scale(1,-1)">실제 보행에 적용</text>
+			<path d="M 139,73 L 162,73 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="162 73, 157 76, 157 70" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<path d="M 352,73 L 375,73 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="375 73, 370 76, 370 70" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<text x="0" y="17" style="font-family: KR; font-size: 8px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,34) scale(1,-1)">Critic은 별도 학습. 영상 장애 시 같은 관측의 블라인드 행동과 동일(궤적 동일 보장 아님).</text>
+		</g>
+	</g>
+</svg>

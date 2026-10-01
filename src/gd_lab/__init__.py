@@ -31,21 +31,21 @@ registry.register_task(
 #                               belly cameras through PPO would be pure waste.
 #   Vrl-Vision / Vrl-VisionPlay stage 3 distillation and student validation.
 #                               Same observation contract, cameras added.
-_VRL_AGENT = "gd_lab.agents.dreamwaq_vrl_ppo_cfg:DreamwaqVrlRunnerCfg"
+_VRL_AGENT = "gd_lab.teachers.cvtt.agent_cfg:DreamwaqVrlRunnerCfg"
 
 registry.register_task(
     task="Vrl", robot="Rbq10", method="Dreamwaq",
-    env_cfg="gd_lab.tasks.vrl_teacher:VrlTeacherEnvCfg", agent_cfg=_VRL_AGENT,
+    env_cfg="gd_lab.teachers.cvtt.tasks:VrlTeacherEnvCfg", agent_cfg=_VRL_AGENT,
 )
 registry.register_task(
     task="Vrl", robot="Rbq10", method="Dreamwaq", mode="Play",
-    env_cfg="gd_lab.tasks.vrl_teacher:VrlTeacherEnvCfg_PLAY", agent_cfg=_VRL_AGENT,
+    env_cfg="gd_lab.teachers.cvtt.tasks:VrlTeacherEnvCfg_PLAY", agent_cfg=_VRL_AGENT,
 )
 registry.register_task(
     task="Vrl", robot="Rbq10", method="Dreamwaq", mode="Vision",
-    env_cfg="gd_lab.tasks.vrl_rough:VisionRoughEnvCfg", agent_cfg=_VRL_AGENT,
+    env_cfg="gd_lab.teachers.cvtt.student_env:VisionRoughEnvCfg", agent_cfg=_VRL_AGENT,
 )
 registry.register_task(
     task="Vrl", robot="Rbq10", method="Dreamwaq", mode="VisionPlay",
-    env_cfg="gd_lab.tasks.vrl_rough:VisionRoughEnvCfg_PLAY", agent_cfg=_VRL_AGENT,
+    env_cfg="gd_lab.teachers.cvtt.student_env:VisionRoughEnvCfg_PLAY", agent_cfg=_VRL_AGENT,
 )

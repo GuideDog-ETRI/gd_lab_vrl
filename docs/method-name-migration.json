@@ -1,0 +1,14 @@
+{
+  "src/gd_lab/teachers/vision": "src/gd_lab/teachers/cvtt",
+  "src/gd_lab/teachers/blind_start": "src/gd_lab/teachers/bivt",
+  "src/gd_lab/students/cnn_gru": "src/gd_lab/students/rvld",
+  "src/gd_lab/students/attention": "src/gd_lab/students/gavd",
+  "tests/teachers/blind_start": "tests/teachers/bivt",
+  "tests/students/test_attention.py": "tests/students/test_gavd.py",
+  "docs/teachers/blind_start.md": "docs/teachers/bivt.md",
+  "docs/students/attention.md": "docs/students/gavd.md",
+  "scripts/train_teacher.py": "scripts/train_cvtt.py",
+  "scripts/train_blind_start.py": "scripts/train_bivt.py",
+  "scripts/run_blind_start.sh": "scripts/run_bivt.sh",
+  "scripts/train_attention_5090.sh": "scripts/train_gavd_5090.sh"
+}

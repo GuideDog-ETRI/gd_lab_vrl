@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="500" height="615" preserveAspectRatio="xMinYMin meet" viewBox="0 0 500 615" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="500" height="615"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-615)" style="clip-path: url(#clip)">
+		<g transform="">
+			<text x="0" y="590" style="font-family: KR; font-size: 22px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,1180) scale(1,-1)">BIVT-Render</text>
+			<text x="0" y="566" style="font-family: KR; font-size: 12px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,1132) scale(1,-1)">렌더 카메라 가시 영역에 적응</text>
+			<rect x="0" y="526" width="150" height="27" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(86%,94%,91%); fill-rule: evenodd;"/>
+			<text x="9" y="536" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,1072) scale(1,-1)">초록: 학습하는 모델</text>
+			<rect x="164" y="526" width="150" height="27" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(89%,91%,98%); fill-rule: evenodd;"/>
+			<text x="173" y="536" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,1072) scale(1,-1)">파랑: 고정하는 모델</text>
+			<text x="330" y="535" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,1070) scale(1,-1)">회색: 입력 / 출력</text>
+			<text x="0" y="497" style="font-family: KR; font-size: 12px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,994) scale(1,-1)">STAGE 1  |  교사 정책 학습</text>
+			<rect x="0" y="411" width="137" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(94%,95%,96%); fill-rule: evenodd;"/>
+			<text x="9" y="459" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,918) scale(1,-1)">고유감각 이력230</text>
+			<text x="9" y="444" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,888) scale(1,-1)">렌더 가시 지형 + blackout</text>
+			<text x="9" y="429" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,858) scale(1,-1)">높이187 + 유효성187</text>
+			<rect x="165" y="411" width="185" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(86%,94%,91%); fill-rule: evenodd;"/>
+			<text x="174" y="459" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,918) scale(1,-1)">BIVT 교사 [학습]</text>
+			<text x="174" y="444" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,888) scale(1,-1)">CENet + 지형 CNN + Actor</text>
+			<text x="174" y="429" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,858) scale(1,-1)">PPO / 지형 latent32</text>
+			<rect x="378" y="411" width="122" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(94%,95%,96%); fill-rule: evenodd;"/>
+			<text x="387" y="459" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,918) scale(1,-1)">출력: 행동 12</text>
+			<text x="387" y="444" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,888) scale(1,-1)">교사 지형 latent32</text>
+			<text x="387" y="429" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,858) scale(1,-1)">학생 정답에 활용</text>
+			<path d="M 139,443 L 162,443 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="162 443, 157 446, 157 440" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<path d="M 352,443 L 375,443 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="375 443, 370 446, 370 440" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<text x="0" y="388" style="font-family: KR; font-size: 8.7px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,776) scale(1,-1)">교사는 IR·Depth 화소 자체가 아니라 지형 격자를 입력받음. Critic은 학습 전용.</text>
+			<text x="0" y="371" style="font-family: KR; font-size: 8.7px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,742) scale(1,-1)">시작: DWB 가중치 복사 + 추가 지형 입력 가중치0. 이후 교사 정책은 학습됨.</text>
+			<text x="0" y="341" style="font-family: KR; font-size: 12px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,682) scale(1,-1)">STAGE 2  |  교사 고정 + GAVD 학생 (연결 예시)</text>
+			<rect x="0" y="257" width="137" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(94%,95%,96%); fill-rule: evenodd;"/>
+			<text x="9" y="305" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,610) scale(1,-1)">교사의 지형 격자</text>
+			<text x="9" y="290" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,580) scale(1,-1)">같은 시점 로봇 상태</text>
+			<rect x="165" y="257" width="185" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(89%,91%,98%); fill-rule: evenodd;"/>
+			<text x="174" y="305" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,610) scale(1,-1)">교사 CENet·Actor·지형 CNN</text>
+			<text x="174" y="290" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,580) scale(1,-1)">가중치 고정 / 정답 생성</text>
+			<rect x="378" y="257" width="122" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(94%,95%,96%); fill-rule: evenodd;"/>
+			<text x="387" y="305" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,610) scale(1,-1)">정답 latent32</text>
+			<text x="387" y="290" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,580) scale(1,-1)">정답 행동12</text>
+			<path d="M 139,289 L 162,289 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="162 289, 157 292, 157 286" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<path d="M 352,289 L 375,289 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="375 289, 370 292, 370 286" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<rect x="0" y="151" width="137" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(94%,95%,96%); fill-rule: evenodd;"/>
+			<text x="9" y="199" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,398) scale(1,-1)">4카메라 IR + Depth</text>
+			<text x="9" y="184" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,368) scale(1,-1)">각 영상 2 x 45 x 80</text>
+			<text x="9" y="169" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,338) scale(1,-1)">GAVD: 기하·영상 나이</text>
+			<rect x="165" y="151" width="185" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(86%,94%,91%); fill-rule: evenodd;"/>
+			<text x="174" y="199" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,398) scale(1,-1)">GAVD 학생 [학습]</text>
+			<text x="174" y="184" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,368) scale(1,-1)">공간 CNN &gt; 격자 Attention</text>
+			<text x="174" y="169" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,338) scale(1,-1)">GRU &gt; 지형 latent32</text>
+			<rect x="378" y="151" width="122" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(94%,95%,96%); fill-rule: evenodd;"/>
+			<text x="387" y="199" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,398) scale(1,-1)">학생 latent32</text>
+			<text x="387" y="184" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,368) scale(1,-1)">교사 지형 표현을</text>
+			<text x="387" y="169" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,338) scale(1,-1)">영상으로 추정</text>
+			<path d="M 139,183 L 162,183 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="162 183, 157 186, 157 180" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<path d="M 352,183 L 375,183 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="375 183, 370 186, 370 180" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<path d="M 439,257 L 439,220 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1; stroke-dasharray: 3, 3;"/>
+			<polygon points="439 220, 436 225, 442 225" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<text x="0" y="230" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,460) scale(1,-1)">증류 목표: latent + 행동 일치 + 공간 지형·경계 + 단차 보조 손실</text>
+			<rect x="0" y="41" width="137" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(94%,95%,96%); fill-rule: evenodd;"/>
+			<text x="9" y="89" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,178) scale(1,-1)">고유감각 특징203</text>
+			<text x="9" y="74" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,148) scale(1,-1)">+ 학생 latent32</text>
+			<rect x="165" y="41" width="185" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(89%,91%,98%); fill-rule: evenodd;"/>
+			<text x="174" y="89" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,178) scale(1,-1)">교사 CENet·Actor [고정]</text>
+			<text x="174" y="74" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,148) scale(1,-1)">지형 CNN 대신 학생을 연결</text>
+			<rect x="378" y="41" width="122" height="65" rx="6" ry="6" style="stroke: rgb(67%,75%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(94%,95%,96%); fill-rule: evenodd;"/>
+			<text x="387" y="89" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,178) scale(1,-1)">출력: 행동 12</text>
+			<text x="387" y="74" style="font-family: KR; font-size: 9px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,148) scale(1,-1)">카메라 기반 보행</text>
+			<path d="M 139,73 L 162,73 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="162 73, 157 76, 157 70" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<path d="M 352,73 L 375,73 Z" style="stroke: rgb(9%,21%,29%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="375 73, 370 76, 370 70" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(9%,21%,29%); fill-rule: evenodd;"/>
+			<text x="0" y="17" style="font-family: KR; font-size: 8.5px;fill: rgb(9%,21%,29%); stroke:none;" transform="translate(0,34) scale(1,-1)">주의: 가능한 연결 구조이며 해당 BIVT 학생 학습 완료를 의미하지 않음.</text>
+		</g>
+	</g>
+</svg>

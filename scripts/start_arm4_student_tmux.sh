@@ -31,7 +31,7 @@ if (( ! worker )); then
         echo "Already running. Attach: tmux attach -t $session_name" >&2
         exit 1
     fi
-    if pgrep -f 'scripts/train_perception.py' >/dev/null; then
+    if pgrep -f 'scripts/distill_student.py' >/dev/null; then
         echo "A student distillation process already exists; refusing a duplicate." >&2
         exit 1
     fi
@@ -56,7 +56,7 @@ set +e
 env -u PYTHONPATH CUDA_VISIBLE_DEVICES="$gpu_index" TRAIN_ARM=4 \
     OMNI_KIT_ACCEPT_EULA=YES PYTHONUNBUFFERED=1 \
     apptainer exec --nv --writable-tmpfs --bind "$usd_tmp:/tmp/IsaacLab" \
-    "$sif_path" "$python_path" scripts/train_perception.py \
+    "$sif_path" "$python_path" scripts/distill_student.py \
     --headless --device cuda:0 --num_envs "$num_envs" --seed 42 \
     --load_run "$teacher_run" --checkpoint model_3700.pt \
     --iterations "$iterations" --save_interval 200 --bptt_steps 8 \
