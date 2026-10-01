@@ -5,7 +5,8 @@ repo="$PWD"
 count=${1:-20000}
 envs=${2:-64}
 run=${3:-bivt_ray4500_gavd_20000_20261001}
-[[ $count =~ ^[1-9][0-9]*$ && $envs =~ ^[1-9][0-9]*$ && $run =~ ^[a-zA-Z0-9_-]+$ ]] || exit 2
+bptt=${4:-8}
+[[ $count =~ ^[1-9][0-9]*$ && $envs =~ ^[1-9][0-9]*$ && $bptt =~ ^[1-9][0-9]*$ && $run =~ ^[a-zA-Z0-9_-]+$ ]] || exit 2
 teacher="$repo/checkpoints/teachers/bivt/ray_4500_20261001"
 (cd "$teacher" && sha256sum -c SHA256SUMS.txt)
 mkdir "logs/$run.launch"
@@ -21,5 +22,5 @@ exec apptainer exec --nv --writable-tmpfs --bind "$repo/logs/usd_tmp/$run:/tmp/I
  scripts/distill_student.py --task Gd-VrlRayStudent-Rbq10-Dreamwaq-Vision-v0 \
  --headless --device cuda:0 --num_envs "$envs" --seed 42 \
  --teacher_checkpoint "$repo/logs/$run.launch/teacher.pt" --student_arch grid_attention_v1 \
- --iterations "$count" --save_interval 200 --lr .0003 --bptt_steps 8 --perception_run_name "$run" \
+ --iterations "$count" --save_interval 200 --lr .0003 --bptt_steps "$bptt" --perception_run_name "$run" \
  --camera_interval_ms 70 100 --camera_delay_ms 0 150 --camera_drop_prob .05
