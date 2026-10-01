@@ -7,6 +7,20 @@ from gd_lab.gast.student import GastStudent
 torch.set_num_threads(2)
 
 class GastTests(unittest.TestCase):
+    def test_chunked_encoder_preserves_outputs_and_gradients(self):
+        model = TemporalTerrainEncoder()
+        x = torch.randn(5, 8*375)
+        direct = model(x)
+        direct.square().sum().backward()
+        expected = [p.grad.clone() for p in model.parameters()]
+        model.zero_grad()
+        model.execution_chunk_size = 2
+        chunked = model(x)
+        torch.testing.assert_close(chunked, direct, atol=1e-6, rtol=1e-5)
+        chunked.square().sum().backward()
+        for p, gradient in zip(model.parameters(), expected):
+            torch.testing.assert_close(p.grad, gradient, atol=1e-5, rtol=1e-4)
+
     def test_warp_translation(self):
         memory = torch.zeros(1, 11, 17, 1)
         memory[0, 5, 10] = 1

@@ -7,10 +7,17 @@ from gd_lab.teachers.cvtt.agent_cfg import DreamwaqVrlRunnerCfg
 from gd_lab.rl.ppo import DreamwaqPPO
 from gd_lab.gast.geometry import reconstruction_loss
 from gd_lab.gast.temporal import TemporalTerrainEncoder
+from gd_lab.rl.distributed import average_gradients, update_normalizer
 from gd_lab.methods.dreamwaq.vrl_symmetry import mirror_vrl_observations
 
 
 class GastActorCritic(DreamwaqVrlActorCritic):
+    def update_normalization(self, obs):
+        if self.actor_obs_normalization:
+            update_normalizer(self.actor_obs_normalizer, self.get_actor_obs(obs))
+        if self.critic_obs_normalization:
+            update_normalizer(self.critic_obs_normalizer, self.get_critic_obs(obs))
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.terrain_encoder = TemporalTerrainEncoder()
@@ -49,6 +56,7 @@ class GastPPO(DreamwaqPPO):
         loss = reconstruction_loss(pred, clean[idx])
         self.optimizer.zero_grad()
         (.1 * loss).backward()
+        average_gradients(self.policy.parameters())
         nn.utils.clip_grad_norm_(self.policy.parameters(), 1., error_if_nonfinite=True)
         self.optimizer.step()
         metrics['gast_reconstruction'] = loss.item()

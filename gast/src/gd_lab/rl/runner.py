@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib
 import os
+import json
+import signal
 from pathlib import Path
 
 import torch
@@ -69,6 +71,10 @@ class DreamwaqRunner(OnPolicyRunner):
         self._top5_family_columns = {name: list(columns) for name, columns in family_columns.items()}
         self._top5_spacing = spacing
         self._top5_min_platform_gap_mean_level = min_platform_gap_mean_level
+        count = torch.tensor(self.env.num_envs, device=self.device)
+        if self.is_distributed:
+            dist.all_reduce(count)
+        self._global_env_count = int(count.item())
 
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False):
         if not hasattr(self, "_top5_records"):
@@ -83,11 +89,37 @@ class DreamwaqRunner(OnPolicyRunner):
 
         original_update = self.alg.update
         next_iteration = self.current_learning_iteration
+        stop_requested = False
+        self.stopped_early = False
+        class GracefulStop(Exception):
+            pass
+        def request_stop(signum, frame):
+            nonlocal stop_requested
+            stop_requested = True
+        previous_handlers = {s: signal.getsignal(s) for s in (signal.SIGUSR1,)}
+        for s in previous_handlers:
+            signal.signal(s, request_stop)
 
         def update_and_rank():
             nonlocal next_iteration
             result = original_update()
             self.current_learning_iteration = next_iteration
+            terrain_term = getattr(self.env.unwrapped, '_gast_terrain_term', None)
+            if terrain_term is not None and hasattr(terrain_term, 'diagnostic_counts'):
+                counts = terrain_term.diagnostic_counts.clone()
+                terrain_term.diagnostic_counts.zero_()
+                if self.is_distributed:
+                    dist.all_reduce(counts)
+                result.update(gast_blackout_fraction=(counts[0]/counts[1].clamp_min(1)).item(),
+                              gast_valid_cell_fraction=(counts[2]/counts[3].clamp_min(1)).item(),
+                              gast_noise_strength=(counts[4]/counts[1].clamp_min(1)).item())
+            from .distributed import assert_synchronized, any_rank
+            interval = int(os.environ.get('GAST_VERIFY_SYNC_EVERY', '100'))
+            if interval > 0 and next_iteration % interval == 0:
+                fingerprint = assert_synchronized(self.alg.policy, [self.alg.optimizer, self.alg.policy.cenet.optimizer])
+                if not self.disable_logs:
+                    print(f'[GAST_SYNC_OK] iteration={next_iteration} sha256={fingerprint}', flush=True)
+            self._latest_diagnostics = {k: float(v) for k, v in result.items()}
             records = self._top5_records
             local = list(records)
             records.clear()
@@ -107,27 +139,44 @@ class DreamwaqRunner(OnPolicyRunner):
                     print(f"[{level}] {criteria_message}", flush=True)
                 status = rank_and_save_top5(
                     rank, episodes, Path(self.log_dir) / "best_top5", next_iteration,
-                    criteria["top5_min_spacing"], self.save, criteria=criteria,
+                    criteria["top5_min_spacing"], self.save, criteria=criteria, diagnostics=self._latest_diagnostics,
                 )
+                with open(Path(self.log_dir) / 'top5_decisions.jsonl', 'a') as stream:
+                    stream.write(json.dumps({'iteration': next_iteration, **status})+'\n')
             if self.is_distributed:
                 message = [status]
                 dist.broadcast_object_list(message, src=0)
                 status = message[0]
             if status["error"]:
                 raise RuntimeError(status["error"])
+            if any_rank(stop_requested, self.device):
+                if not self.disable_logs:
+                    self.save(os.path.join(self.log_dir, f'model_{next_iteration}.pt'))
+                    print(f'[GAST_STOPPED_SAVED] iteration={next_iteration}', flush=True)
+                if self.is_distributed:
+                    dist.barrier()
+                self.stopped_early = True
+                raise GracefulStop()
             next_iteration += 1
             return result
 
         self.alg.update = update_and_rank
         try:
             return super().learn(num_learning_iterations, init_at_random_ep_len)
+        except GracefulStop:
+            return
         finally:
             self.alg.update = original_update
+            for s, handler in previous_handlers.items():
+                signal.signal(s, handler)
 
     def save(self, path: str, infos: dict | None = None) -> None:
         infos = dict(infos or {})
         extra = dict(infos.get("gd_lab", {}))
         extra["learning_rate"] = self.alg.learning_rate
+        extra["training_diagnostics"] = getattr(self, '_latest_diagnostics', {})
+        extra["total_envs"] = getattr(self, '_global_env_count', self.env.num_envs)
+        extra["total_timesteps"] = (self.current_learning_iteration + 1) * extra["total_envs"] * self.num_steps_per_env
         policy = self.alg.policy
         if isinstance(policy, DreamwaqActorCritic):
             extra["cenet_optimizer_state_dict"] = policy.cenet.optimizer.state_dict()
@@ -140,7 +189,9 @@ class DreamwaqRunner(OnPolicyRunner):
                 extra["terrain_level_means_by_family"] = means
                 extra["terrain_level_resume_rule"] = "floor_family_mean"
         infos["gd_lab"] = extra
-        super().save(path, infos)
+        temporary = str(path) + '.partial'
+        super().save(temporary, infos)
+        os.replace(temporary, path)
 
     def load(self, path: str, load_optimizer: bool = True, map_location: str | None = None) -> dict:
         infos = super().load(path, load_optimizer=load_optimizer, map_location=map_location)
@@ -184,3 +235,16 @@ class DreamwaqRunner(OnPolicyRunner):
     def export_inference_state(self) -> dict[str, torch.Tensor]:
         self.eval_mode()
         return self.alg.policy.state_dict()
+
+    def log(self, locs: dict, width: int = 80, pad: int = 35):
+        # Upstream assumes identical rank sizes. Correct the cumulative count
+        # when 4096 environments are split 1366/1365/1365.
+        total_envs = getattr(self, '_global_env_count', self.env.num_envs * self.gpu_world_size)
+        actual = self.num_steps_per_env * total_envs
+        assumed = self.num_steps_per_env * self.env.num_envs * self.gpu_world_size
+        self.tot_timesteps = (locs['it'] + 1) * actual - assumed
+        super().log(locs, width, pad)
+        elapsed = locs['collection_time'] + locs['learn_time']
+        print(f'[GAST_PROGRESS] iteration={locs["it"]} total_envs={total_envs} '
+              f'timesteps={self.tot_timesteps} seconds={elapsed:.3f} '
+              f'remaining_seconds_estimate={elapsed * (locs["tot_iter"]-locs["it"]-1):.0f}', flush=True)

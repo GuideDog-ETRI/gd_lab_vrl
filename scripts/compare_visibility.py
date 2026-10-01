@@ -49,6 +49,7 @@ import gd_lab  # noqa: F401  (registers the tasks)
 import gd_lab.teachers.bivt  # noqa: F401
 import gymnasium as gym
 import torch
+import time
 from gd_lab.core.camera_contract import load_camera_contract
 from gd_lab.core.paths import LOG_ROOT
 from gd_lab.managers.action_history import ensure_prev_prev_action_tracking
@@ -93,6 +94,20 @@ def main(env_cfg, agent_cfg):
     scanner = base.scene["height_scanner"]
     cast = warp_mesh_cast(scanner.meshes[scanner.cfg.mesh_prim_paths[0]])
     totals = dict(render=0, ray=0, both=0, cells=0, captures=0)
+    baseline = dict(render=0, ray=0, both=0, cells=0, captures=0)
+    groups = {}
+    from gd_lab.mdp.terrain_families import family_column_masks
+    column_family = {int(c): name for name, cols in family_column_masks(base).items() for c in cols.tolist()}
+    def accumulate(counter, r, q):
+        for key, value in (("render", r.sum()), ("ray", q.sum()), ("both", (r&q).sum()),
+                           ("cells", r.numel()), ("captures", r.shape[0])):
+            counter[key] = counter.get(key, 0) + int(value)
+    def metrics(counter):
+        tp=counter['both']; fp=counter['ray']-tp; fn=counter['render']-tp
+        return dict(**counter, false_visible_cells=fp, missed_visible_cells=fn,
+                    precision=tp/max(counter['ray'],1), recall=tp/max(counter['render'],1),
+                    iou=tp/max(tp+fp+fn,1), false_positive_rate=fp/max(counter['cells']-counter['render'],1))
+    started = time.perf_counter()
     per_row = torch.zeros(11, 3, device=base.device)  # render, ray, both by scan row (y)
     for _ in range(args_cli.steps):
         with torch.inference_mode():
@@ -102,13 +117,25 @@ def main(env_cfg, agent_cfg):
                 continue
             rendered = obs["terrain"][:, 187:] > 0.5
             ray = raycast_visible_mask(base, contract, intrinsic, cast)
+            old = raycast_visible_mask(base, contract, intrinsic, cast, enhanced=False)
             r, q = rendered[captured], ray[captured]
+            accumulate(baseline, r, old[captured])
+            for column in terrain.terrain_types[captured].unique().tolist():
+                subset = captured & (terrain.terrain_types == column)
+                name = column_family.get(column, str(column))
+                counters = groups.setdefault(name, {'baseline': {}, 'enhanced': {}})
+                accumulate(counters['baseline'], rendered[subset], old[subset])
+                accumulate(counters['enhanced'], rendered[subset], ray[subset])
             for key, value in (("render", r.sum()), ("ray", q.sum()), ("both", (r & q).sum()),
                                ("cells", r.numel()), ("captures", captured.sum())):
                 totals[key] += int(value)
             per_row += torch.stack([m.reshape(-1, 11, 17).sum((0, 2)).float() for m in (r, q, r & q)], -1)
     union = totals["render"] + totals["ray"] - totals["both"]
     summary = {
+        "baseline": metrics(baseline), "enhanced": metrics(totals),
+        "per_family": {name: {version: metrics(counter) for version,counter in versions.items()} for name,versions in groups.items()},
+        "wall_seconds": time.perf_counter()-started,
+        "comparison_time": "same capture pose, before transport latency or blackout",
         "checkpoint": checkpoint, "captures": totals["captures"],
         "render_visible_fraction": totals["render"] / max(totals["cells"], 1),
         "raycast_visible_fraction": totals["ray"] / max(totals["cells"], 1),

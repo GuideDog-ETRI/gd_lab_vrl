@@ -83,6 +83,8 @@ class DreamwaqRunner(OnPolicyRunner):
 
         original_update = self.alg.update
         next_iteration = self.current_learning_iteration
+        class SavedStop(Exception):
+            pass
 
         def update_and_rank():
             nonlocal next_iteration
@@ -115,12 +117,27 @@ class DreamwaqRunner(OnPolicyRunner):
                 status = message[0]
             if status["error"]:
                 raise RuntimeError(status["error"])
+            stop_file = os.environ.get('GD_LAB_STOP_FILE')
+            requested = bool(stop_file and Path(stop_file).exists()) if rank == 0 else False
+            if self.is_distributed:
+                message = [requested]
+                dist.broadcast_object_list(message, src=0)
+                requested = message[0]
+            if requested:
+                if rank == 0:
+                    self.save(os.path.join(self.log_dir, f'model_{next_iteration}.pt'))
+                    print(f'[SAVED_STOP] iteration={next_iteration}', flush=True)
+                if self.is_distributed:
+                    dist.barrier()
+                raise SavedStop()
             next_iteration += 1
             return result
 
         self.alg.update = update_and_rank
         try:
             return super().learn(num_learning_iterations, init_at_random_ep_len)
+        except SavedStop:
+            return
         finally:
             self.alg.update = original_update
 
@@ -128,6 +145,8 @@ class DreamwaqRunner(OnPolicyRunner):
         infos = dict(infos or {})
         extra = dict(infos.get("gd_lab", {}))
         extra["learning_rate"] = self.alg.learning_rate
+        if hasattr(self, 'observation_context'):
+            extra['observation_context'] = self.observation_context
         policy = self.alg.policy
         if isinstance(policy, DreamwaqActorCritic):
             extra["cenet_optimizer_state_dict"] = policy.cenet.optimizer.state_dict()
@@ -140,7 +159,9 @@ class DreamwaqRunner(OnPolicyRunner):
                 extra["terrain_level_means_by_family"] = means
                 extra["terrain_level_resume_rule"] = "floor_family_mean"
         infos["gd_lab"] = extra
-        super().save(path, infos)
+        temporary = str(path) + '.partial'
+        super().save(temporary, infos)
+        os.replace(temporary, path)
 
     def load(self, path: str, load_optimizer: bool = True, map_location: str | None = None) -> dict:
         infos = super().load(path, load_optimizer=load_optimizer, map_location=map_location)

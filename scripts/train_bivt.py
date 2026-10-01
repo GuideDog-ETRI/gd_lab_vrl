@@ -35,9 +35,15 @@ parser.add_argument("--video", action="store_true", default=False, help="Record 
 parser.add_argument("--video_length", type=int, default=200, help="Recorded video length (steps).")
 parser.add_argument("--video_interval", type=int, default=2000, help="Interval between recordings (steps).")
 parser.add_argument("--blind_init", type=str, default=None, help="Blind DreamWaQ model_*.pt to warm-start the policy from.")
+parser.add_argument('--resume_checkpoint', type=str, help='Absolute checkpoint path, including Top5 checkpoints.')
+parser.add_argument('--target_iterations', type=int, help='Total completed PPO updates, not additional updates.')
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
+if args_cli.resume_checkpoint:
+    if not Path(args_cli.resume_checkpoint).is_file():
+        parser.error('Resume checkpoint does not exist')
+    args_cli.resume = True
 if args_cli.total_envs is not None and (not args_cli.distributed or args_cli.total_envs < int(os.environ.get("WORLD_SIZE", "1"))):
     parser.error("--total_envs requires --distributed and at least one environment per process")
 
@@ -134,7 +140,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     ensure_prev_prev_action_tracking(env.unwrapped)
 
     if agent_cfg.resume:
-        resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
+        resume_path = args_cli.resume_checkpoint or get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
 
     if args_cli.video:
         video_kwargs = {
@@ -154,6 +160,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         columns, spacing=agent_cfg.top5_min_spacing,
         min_platform_gap_mean_level=agent_cfg.top5_min_platform_gap_mean_level,
     )
+    if args_cli.task == 'Gd-VrlBlindStartRaycast-Rbq10-Dreamwaq-v0':
+        from gd_lab.core.camera_transport import CameraTransportConfig
+        runner.observation_context = dict(version='bivt_ray_occlusion_v2',
+            occlusion='terrain + leg capsules + trunk OBB + foot spheres',
+            boundary='four-neighbour depth spread <= tolerance',
+            transport=CameraTransportConfig().manifest(env.unwrapped.step_dt),
+            proxy_caveat='Foot collision spheres are conservative, not exact rendered visual meshes')
     # A capture failure must not cost a training run; export refuses later
     # rather than guessing.
     try:
@@ -172,6 +185,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                 group["lr"] = runner.alg.learning_rate
         print(f"[INFO] Warm-started from blind checkpoint: {args_cli.blind_init}", flush=True)
 
+    if args_cli.target_iterations is not None:
+        agent_cfg.max_iterations = args_cli.target_iterations - runner.current_learning_iteration
+        if agent_cfg.max_iterations <= 0:
+            raise ValueError('Checkpoint has already reached the requested target')
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
 

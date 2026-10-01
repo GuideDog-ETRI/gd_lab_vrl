@@ -112,7 +112,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         agent_cfg.seed = seed
 
     log_root_path = os.path.abspath(os.path.join(LOG_ROOT, agent_cfg.experiment_name))
-    log_dir = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    log_dir = os.environ.get("GAST_RUN_ID", datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
     if agent_cfg.run_name:
         log_dir += f"_{agent_cfg.run_name}"
     log_dir = os.path.join(log_root_path, log_dir)
@@ -156,17 +156,21 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         print(f"[INFO] Loading checkpoint: {resume_path}")
         runner.load(resume_path)
 
-    dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
-    dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
+    if not runner.disable_logs:
+        dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
+        dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
 
     started = time.perf_counter()
     runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
     completion = {'completed_updates': agent_cfg.max_iterations, 'wall_seconds': time.perf_counter()-started,
                   'checkpoint': os.path.join(log_dir, f'model_{runner.current_learning_iteration}.pt'),
-                  'num_envs': env.unwrapped.num_envs, 'horizon': agent_cfg.num_steps_per_env}
-    with open(os.path.join(log_dir, 'completion.json'), 'w') as handle:
-        json.dump(completion, handle, indent=2)
-    print('[GAST_COMPLETE] '+json.dumps(completion), flush=True)
+                  'num_envs_per_rank0': env.unwrapped.num_envs,
+                  'total_envs': getattr(runner, '_global_env_count', env.unwrapped.num_envs),
+                  'horizon': agent_cfg.num_steps_per_env}
+    if not runner.disable_logs and not getattr(runner, 'stopped_early', False):
+        with open(os.path.join(log_dir, 'completion.json'), 'w') as handle:
+            json.dump(completion, handle, indent=2)
+        print('[GAST_COMPLETE] '+json.dumps(completion), flush=True)
     env.close()
 
 

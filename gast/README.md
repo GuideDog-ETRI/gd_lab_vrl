@@ -82,3 +82,43 @@ export/deployment scripts. No robot deployment is performed by this pipeline.
 - No 20,000-update teacher or student has been launched. Destination smoke also
   checks student resume; local optimizer-resume and production BPTT64 simulation
   remain unverified. Smoke checkpoints are intentionally not versioned.
+
+## OnVLM2 three-GPU teacher (2026-10-01)
+
+The single-GPU validation above is historical. The OnVLM2 launcher is
+`bash scripts/train_teacher_3gpu.sh smoke|benchmark|train` and uses GPUs 0,1,2
+only; GPU3's existing vLLM service is not touched. Production runs inside tmux
+session `gast_teacher_3gpu`, independently of the SSH client.
+
+- Teacher only, from scratch; Arm4 seed42; 30,000 PPO updates.
+- Total 4096 environments split 1366/1365/1365; horizon100, epochs5,
+  minibatches4; 200Hz physics/100Hz control; original eleven terrains including gap.
+- Ordinary checkpoints every1000 iterations (and initial/final saves).
+- Top5 eligibility checked EVERY iteration starting at iteration5000, with
+  spacing1 (adjacent iterations allowed), using `configs/online_top5.json`.
+  Mean terrain >=9, gap >=8, base/gap/stairs base-contact termination <=9%,
+  gap-success regression <=2 percentage points and base-contact deterioration
+  <=1 percentage point versus current Top1. Existing weighted online score is
+  unchanged. This is rollout ranking, not separate held-out evaluation.
+- GAST reconstruction, blackout fraction, valid-cell fraction and noise strength
+  are diagnostics only; they do not introduce extra admission gates.
+- CENet optimizer gradients/skip decisions and terrain reconstruction gradients
+  are synchronized, as are observation normalization and AdaBoot state.
+  Smoke runs compare model and optimizer hashes after EVERY update; production
+  checks every100 updates. This changes the historical CENet source hash above.
+- Large symmetry-augmented batches exceed a CUDA attention launch limit.
+  Independent encoder samples are executed in chunks with activation
+  recomputation, preserving the four PPO minibatches and optimizer-step count.
+- Rank0 owns configuration/metadata/checkpoint writes. Checkpoint publication is
+  atomic; loss diagnostics and curriculum means are retained. Completed-run
+  metadata is not written when an early-stop checkpoint was requested.
+- To stop safely, send SIGUSR1 to a VERIFIED teacher worker PID (not torchrun).
+  All ranks finish the current update, rank0 saves, then all workers exit.
+  Do not use SIGKILL or assume tmux alone can save on a power failure.
+- Each launch stores source/config snapshots in `logs/launches/<run-id>/`.
+  Raw upstream console metrics are rank0 unless explicitly marked global;
+  Top5 gathers completed episodes across all three ranks. `GAST_PROGRESS`
+  reports exact global timesteps and an ETA in seconds without 24-hour wrapping.
+
+Validation commands: `python tests/test_gast.py`, `python tests/test_top5_schedule.py`,
+and `python -m torch.distributed.run --standalone --nproc_per_node=3 tests/test_distributed_sync.py`.
