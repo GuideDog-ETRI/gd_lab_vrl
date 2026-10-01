@@ -1,0 +1,91 @@
+{
+  "entries": [
+    {
+      "score": 0.9449391933161341,
+      "components": {
+        "G": 0.9907407407407407,
+        "B": 1.0,
+        "P": 0.8875713455060962,
+        "T": 0.9249894498844132,
+        "E": 0.7972363849977672,
+        "Q": 0.6629286191118704
+      },
+      "criteria_metrics": {
+        "mean_terrain_level": 9.251162790697675,
+        "base_contact_rate": 0.0,
+        "platform_gap_termination_rate": 0.0,
+        "stairs_termination_rate": 0.0
+      },
+      "sample_counts": {
+        "hf_pyramid_slope:9": 8,
+        "hf_pyramid_slope_inv:8": 1,
+        "hf_pyramid_slope_inv:9": 14,
+        "platform_gap:8": 1,
+        "platform_gap:9": 22,
+        "platform_gap:10": 54,
+        "platform_gap:11": 3,
+        "pyramid_stairs:8": 2,
+        "pyramid_stairs:9": 15,
+        "pyramid_stairs:10": 1,
+        "pyramid_stairs_inv:9": 9,
+        "pyramid_stairs_inv:10": 1,
+        "pyramid_stairs_inv_nose:7": 1,
+        "pyramid_stairs_inv_nose:8": 1,
+        "pyramid_stairs_inv_nose:9": 10,
+        "pyramid_stairs_inv_nose:10": 2,
+        "pyramid_stairs_inv_wide:9": 15,
+        "pyramid_stairs_inv_wide:10": 1,
+        "pyramid_stairs_nose:8": 1,
+        "pyramid_stairs_nose:9": 11,
+        "pyramid_stairs_nose:10": 1,
+        "pyramid_stairs_wide:8": 5,
+        "pyramid_stairs_wide:9": 9,
+        "random_rough:9": 8,
+        "random_rough:10": 2,
+        "ring_fence:8": 3,
+        "ring_fence:9": 12,
+        "ring_fence:10": 2
+      },
+      "curriculum_snapshot": {
+        "mean_level_by_family": {
+          "hf_pyramid_slope": 9.0,
+          "hf_pyramid_slope_inv": 8.933333333333334,
+          "platform_gap": 9.7375,
+          "pyramid_stairs": 8.944444444444445,
+          "pyramid_stairs_inv": 9.1,
+          "pyramid_stairs_inv_nose": 8.928571428571429,
+          "pyramid_stairs_inv_wide": 9.0625,
+          "pyramid_stairs_nose": 9.0,
+          "pyramid_stairs_wide": 8.642857142857142,
+          "random_rough": 9.2,
+          "ring_fence": 8.941176470588236
+        }
+      },
+      "score_is_online_proxy": true,
+      "iteration": 1046,
+      "eligibility": {
+        "minimum_platform_gap_mean_level": 8.0,
+        "platform_gap_mean_level_pass": true
+      },
+      "criteria": {
+        "top5_min_spacing": 100,
+        "min_platform_gap_mean_level": 8.0,
+        "min_terrain_mean_level": 9.0,
+        "max_base_contact_rate": 0.09,
+        "max_platform_gap_termination_rate": 0.09,
+        "max_stairs_termination_rate": 0.09,
+        "max_gap_success_regression": 0.02,
+        "max_base_contact_regression": 0.01
+      },
+      "gate_results": {
+        "gap_success_pass": true,
+        "base_contact_pass": true,
+        "terrain_mean_level_pass": true,
+        "base_contact_rate_pass": true,
+        "platform_gap_termination_pass": true,
+        "stairs_termination_pass": true,
+        "reference_iteration": 1028
+      }
+    }
+  ]
+}
