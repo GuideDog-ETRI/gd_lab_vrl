@@ -22,7 +22,7 @@ if tmux has-session -t "$session_name" 2>/dev/null; then
     echo "Attach with: tmux attach -t $session_name" >&2
     exit 1
 fi
-if pgrep -f 'torch.distributed.run.*scripts/train_vrl.py.*--distributed' >/dev/null; then
+if pgrep -f 'torch.distributed.run.*scripts/train_cvtt.py.*--distributed' >/dev/null; then
     echo "A distributed VRL training process is already running; refusing to start a second one." >&2
     tmux list-sessions 2>/dev/null || true
     exit 1

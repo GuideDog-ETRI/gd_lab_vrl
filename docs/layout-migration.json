@@ -1,0 +1,394 @@
+[
+  {
+    "repo": "gd_lab_vrl",
+    "old": "src/gd_lab/rl/actor_critic_vrl.py",
+    "new": "src/gd_lab/teachers/cvtt/actor_critic.py",
+    "sha256_before": "f5c1b11657c9a0d208515f1fea219252a6de28d0887c1f329a78a0b748b57072",
+    "sha256_after": "79361d0fa9d4a8c93052267c925a98ce6dc8f0d122d98962e29e7fbfe2d0c47d"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "src/gd_lab/tasks/vrl_teacher.py",
+    "new": "src/gd_lab/teachers/cvtt/tasks.py",
+    "sha256_before": "26ff8d94402e5394db3fc3d7c72f38c9816872e431e4dc200385c440978c2cec",
+    "sha256_after": "26ff8d94402e5394db3fc3d7c72f38c9816872e431e4dc200385c440978c2cec"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "src/gd_lab/tasks/vrl_rough.py",
+    "new": "src/gd_lab/teachers/cvtt/student_env.py",
+    "sha256_before": "33a9aa97a7163fa3c8f5c4ec79bf00820e17e53bc6dd6439db7336a2154b931e",
+    "sha256_after": "28211a9cead72ef93140bf96ce848bb771160c12d865351c3fa610939d81c641"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "src/gd_lab/agents/dreamwaq_vrl_ppo_cfg.py",
+    "new": "src/gd_lab/teachers/cvtt/agent_cfg.py",
+    "sha256_before": "97a6b27cbe7b7855a81f3396fbfe5d1286fa01e5e6e9963823cff4980756cdb5",
+    "sha256_after": "90f11bba5c0796fd16f57f9334a5179a79a1ca9f0a22d3e3f50c8d01428a8512"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "src/gd_lab/rl/perception.py",
+    "new": "src/gd_lab/students/rvld/model.py",
+    "sha256_before": "8adc41dd1d46658ebd4891ec23358a363aa82d6f34b7c8f9dd09ecf0690cf5cb",
+    "sha256_after": "8adc41dd1d46658ebd4891ec23358a363aa82d6f34b7c8f9dd09ecf0690cf5cb"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "src/gd_lab/rl/perception_attention.py",
+    "new": "src/gd_lab/students/gavd/model.py",
+    "sha256_before": "e3ba2dc450d7c950dee723019c416e584a5538ea02197384812af22d01c819e5",
+    "sha256_after": "e3ba2dc450d7c950dee723019c416e584a5538ea02197384812af22d01c819e5"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "src/gd_lab/rl/attention_distillation.py",
+    "new": "src/gd_lab/students/gavd/distillation.py",
+    "sha256_before": "dc699c3111501b1193a231da4b98880d9d2e10502aeebe5d107af482635818eb",
+    "sha256_after": "c5ef6a3444d1970d448ef83792899fde510fcf9da09fe49934c04f66d258a4cf"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "blind_start/gd_lab_blind_start/actor_critic.py",
+    "new": "src/gd_lab/teachers/bivt/actor_critic.py",
+    "sha256_before": "a909e919f3865ded7ebfa1fb503d51723a93e6a89515054342388551cdc709df",
+    "sha256_after": "f372b119ab4f85a821ca61a7aca8593bf119523d670575ab018589370a5800f6"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "blind_start/gd_lab_blind_start/agent_cfg.py",
+    "new": "src/gd_lab/teachers/bivt/agent_cfg.py",
+    "sha256_before": "8b778d94c880122f8411ff91dfc00209e299f24924bdb5e13994675e75bfbba8",
+    "sha256_after": "c740e303f4c38a169058af174a3153a391ef8a55ff6cde286b37cc2cce7385af"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "blind_start/gd_lab_blind_start/blackout.py",
+    "new": "src/gd_lab/teachers/bivt/blackout.py",
+    "sha256_before": "37bc42d56edefb8d6507f477b7fed2d257d72ce33ca2076e125f823e4f46d16f",
+    "sha256_after": "37bc42d56edefb8d6507f477b7fed2d257d72ce33ca2076e125f823e4f46d16f"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "blind_start/gd_lab_blind_start/blind_init.py",
+    "new": "src/gd_lab/teachers/bivt/blind_init.py",
+    "sha256_before": "43a98600fc2137774c14efbd731530fdf21958fee39218ebea6af1739c8833ec",
+    "sha256_after": "43a98600fc2137774c14efbd731530fdf21958fee39218ebea6af1739c8833ec"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "blind_start/gd_lab_blind_start/raycast_visibility.py",
+    "new": "src/gd_lab/teachers/bivt/raycast_visibility.py",
+    "sha256_before": "63379aa70f7fb2a59002ac62fcd6e8fc3a17f0ac245554c69d67da7c8074db21",
+    "sha256_after": "63379aa70f7fb2a59002ac62fcd6e8fc3a17f0ac245554c69d67da7c8074db21"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "blind_start/gd_lab_blind_start/raycast_terrain.py",
+    "new": "src/gd_lab/teachers/bivt/raycast_terrain.py",
+    "sha256_before": "39731ce875ed24fc78dc0ba653b2e6ea44db06e2b4ae953ba7640ea205154454",
+    "sha256_after": "39731ce875ed24fc78dc0ba653b2e6ea44db06e2b4ae953ba7640ea205154454"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "blind_start/gd_lab_blind_start/terrain_dropout.py",
+    "new": "src/gd_lab/teachers/bivt/terrain_dropout.py",
+    "sha256_before": "44a1e64c14016ad119abc2d2643c42a453b8f29be746f1dcabb6894d3bef68ca",
+    "sha256_after": "44a1e64c14016ad119abc2d2643c42a453b8f29be746f1dcabb6894d3bef68ca"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "blind_start/gd_lab_blind_start/__init__.py",
+    "new": "src/gd_lab/teachers/bivt/__init__.py",
+    "sha256_before": "daf7064d155a71d9299053853b92d68a187c7e128aa1300c764be22ca0094bbe",
+    "sha256_after": "e39303f3ac380a2ed5c356ea6834d0b2ba5ab11da185893434c5f1f6c76c3a54"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "blind_start/gd_lab_blind_start/tasks.py",
+    "new": "src/gd_lab/teachers/bivt/tasks.py",
+    "sha256_before": "0552059df406b314dc0e7252a4ed4768a11f1511eddd395091f7282f460629c0",
+    "sha256_after": "249ce3bf0c3faf0a439b63c07bca8a0dd9380e284f3f49451893e3ca7504f469"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "blind_start/scripts/train_blind_start.py",
+    "new": "scripts/train_bivt.py",
+    "sha256_before": "cdf497d52819d4cf5234dc294be622b85a6a61c96c762897eace3d9ccf795f21",
+    "sha256_after": "243a64943168dece2fd8b6768d29e1948c777681f33558e7323430066897cddf"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "blind_start/scripts/compare_visibility.py",
+    "new": "scripts/compare_visibility.py",
+    "sha256_before": "f93381082a80580148a334aa32b4a018782a04b4ec25f7d37e762163bf7f4a74",
+    "sha256_after": "51e0c5a0569dcd67f5beb75e10c67394b52411f7f4800706fdcbe3837286fad2"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "blind_start/scripts/run_blind_start.sh",
+    "new": "scripts/run_bivt.sh",
+    "sha256_before": "145f483e6658506f372d259aacac562e310b4c89f491d78ce77dfbecd5132a44",
+    "sha256_after": "7332bd0513aa27794207c45098860dd1298ec6d0c6ac6fa2eb84d11f0cea04c1"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "blind_start/tests/test_raycast_visibility.py",
+    "new": "tests/teachers/bivt/test_raycast_visibility.py",
+    "sha256_before": "8dc4aad76bb707c427064f4a048656cb84e2ea2c246c119b44d8a317f0d4f2e2",
+    "sha256_after": "b9d6fd88bdbc634162bafaf878437bb9621db3c40deb546f317852769583cbd9"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "blind_start/tests/test_blind_init.py",
+    "new": "tests/teachers/bivt/test_blind_init.py",
+    "sha256_before": "a8f21dd46c2ab28be75a3d041166b7126a97c91986d1ee9f8539451d99cc6fb4",
+    "sha256_after": "bc898b9a67971d65402a34b94d494e5942511fd69b9ea688b7d60ddbecefb912"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "blind_start/tests/conftest.py",
+    "new": "tests/teachers/bivt/conftest.py",
+    "sha256_before": "8659c4f6af34a32f61ecc29774fd873cf628e7e0828ce9ff04773418357a6cc6",
+    "sha256_after": "8659c4f6af34a32f61ecc29774fd873cf628e7e0828ce9ff04773418357a6cc6"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "blind_start/tests/test_blackout.py",
+    "new": "tests/teachers/bivt/test_blackout.py",
+    "sha256_before": "d662e89ba1b2317e3db80713cfbf8ad6e8d6050f094520b890597921b54bcb4f",
+    "sha256_after": "0b2ff6550f97c5e27dce746ca0d24547211eab3bd8203cf0b65126b9d9ed6203"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "blind_start/README.md",
+    "new": "docs/teachers/bivt.md",
+    "sha256_before": "a90715a3bda1fcc1f7d54237cee1745d217ba46db74c09bb00b2f8d7eb0459c0",
+    "sha256_after": "54f076b40a33cee9475dc3a0f0c8b32f1739539651ae0209bf69ce39cb220cfb"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "blind_start/ruff.toml",
+    "new": "docs/archive/blind_start_ruff.toml",
+    "sha256_before": "333b2c1a0ad703864e163717c79380c895b2d48df9e83eab4b9616ff8be0b982",
+    "sha256_after": "333b2c1a0ad703864e163717c79380c895b2d48df9e83eab4b9616ff8be0b982"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "scripts/train_vrl.py",
+    "new": "scripts/train_cvtt.py",
+    "sha256_before": "6120c212c72c40f07925c16d19efe95e6e9e12744977fbe950d8ac8f71a9873f",
+    "sha256_after": "6120c212c72c40f07925c16d19efe95e6e9e12744977fbe950d8ac8f71a9873f"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "scripts/train_perception.py",
+    "new": "scripts/distill_student.py",
+    "sha256_before": "f1c18099a1067a3679420f89a23dcedec1e0d46838ef9c55d818ec07c7e205f2",
+    "sha256_after": "782a496781fdc6da6e787e3617fe96f0f7c47e308b2c18767de4857e7e934ab4"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "scripts/export_student_vrl.py",
+    "new": "scripts/export_student.py",
+    "sha256_before": "2d826f19102b9a7d5e4cc936e89094d39ef5f5b7474a1e9bf3b225de1f0729d7",
+    "sha256_after": "af7d6c3c5a639ad8995ded583093d51207eb245fe4b5409e8876e8db63a8decf"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "tests/test_perception_attention.py",
+    "new": "tests/students/test_gavd.py",
+    "sha256_before": "22fe90fa512898f08e7f4bd4804a9bb056136107074a55041572e2fa77e9c647",
+    "sha256_after": "3f652ee6b954a497e938ad2a38add24d7ceefad04abe0220d71772c593d15b2d"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "tests/test_vrl_pipeline.py",
+    "new": "tests/integration/test_vrl_pipeline.py",
+    "sha256_before": "25f5f63064d14e75726f7668943348d86f778a5122dca478f4478355c578cce9",
+    "sha256_after": "3255f7d43048b0ce5f72086b9c278c5070d5eaf1025f38f0a38350e70fc4d4bf"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "docs/training/attention-student-5090.md",
+    "new": "docs/students/gavd.md",
+    "sha256_before": "b166ac5cec3c0c75157d92b3531352976b9410dc690ab3cdae5d7c2e975f4971",
+    "sha256_after": "511b94065658ee6b3767db5734d04cf1bcda48bdbc870fd07f341136abdabf0c"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "attention_student/README.md",
+    "new": "docs/archive/attention_student_handoff/README.md",
+    "sha256_before": "3897000c927ae02be8cb55ff287d430d1992c6089b1da17b51429edf98f3e63a",
+    "sha256_after": "3897000c927ae02be8cb55ff287d430d1992c6089b1da17b51429edf98f3e63a"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "attention_student/tests/test_perception_attention.py",
+    "new": "docs/archive/attention_student_handoff/tests/test_perception_attention.py",
+    "sha256_before": "22fe90fa512898f08e7f4bd4804a9bb056136107074a55041572e2fa77e9c647",
+    "sha256_after": "22fe90fa512898f08e7f4bd4804a9bb056136107074a55041572e2fa77e9c647"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "attention_student/scripts/train_attention_5090.sh",
+    "new": "docs/archive/attention_student_handoff/scripts/train_attention_5090.sh",
+    "sha256_before": "3c81bcffb81b58dd8fa5f8eeed0f69f356dd9a47421c6dcee215247c6b81ec6c",
+    "sha256_after": "3c81bcffb81b58dd8fa5f8eeed0f69f356dd9a47421c6dcee215247c6b81ec6c"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "attention_student/src/gd_lab/rl/attention_distillation.py",
+    "new": "docs/archive/attention_student_handoff/src/gd_lab/rl/attention_distillation.py",
+    "sha256_before": "dc699c3111501b1193a231da4b98880d9d2e10502aeebe5d107af482635818eb",
+    "sha256_after": "dc699c3111501b1193a231da4b98880d9d2e10502aeebe5d107af482635818eb"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "attention_student/src/gd_lab/rl/perception_attention.py",
+    "new": "docs/archive/attention_student_handoff/src/gd_lab/rl/perception_attention.py",
+    "sha256_before": "e3ba2dc450d7c950dee723019c416e584a5538ea02197384812af22d01c819e5",
+    "sha256_after": "e3ba2dc450d7c950dee723019c416e584a5538ea02197384812af22d01c819e5"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "attention_student/docs/training/attention-student-5090.md",
+    "new": "docs/archive/attention_student_handoff/docs/training/attention-student-5090.md",
+    "sha256_before": "b166ac5cec3c0c75157d92b3531352976b9410dc690ab3cdae5d7c2e975f4971",
+    "sha256_after": "b166ac5cec3c0c75157d92b3531352976b9410dc690ab3cdae5d7c2e975f4971"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "attention_student/integration/scripts/export_student_vrl.py",
+    "new": "docs/archive/attention_student_handoff/integration/scripts/export_student_vrl.py",
+    "sha256_before": "2d826f19102b9a7d5e4cc936e89094d39ef5f5b7474a1e9bf3b225de1f0729d7",
+    "sha256_after": "2d826f19102b9a7d5e4cc936e89094d39ef5f5b7474a1e9bf3b225de1f0729d7"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "attention_student/integration/scripts/train_perception.py",
+    "new": "docs/archive/attention_student_handoff/integration/scripts/train_perception.py",
+    "sha256_before": "f1c18099a1067a3679420f89a23dcedec1e0d46838ef9c55d818ec07c7e205f2",
+    "sha256_after": "f1c18099a1067a3679420f89a23dcedec1e0d46838ef9c55d818ec07c7e205f2"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "attention_student/integration/src/gd_lab/deploy/export_student_vrl.py",
+    "new": "docs/archive/attention_student_handoff/integration/src/gd_lab/deploy/export_student_vrl.py",
+    "sha256_before": "c69eddc2a90da02bc1bb8bd287c07cc1b86469cf8b2e9f7b877ee90cc742a049",
+    "sha256_after": "c69eddc2a90da02bc1bb8bd287c07cc1b86469cf8b2e9f7b877ee90cc742a049"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "checkpoints/arm4_blind_teacher38000/blind_start_README.md",
+    "new": "checkpoints/teachers/blind/arm4_38000/blind_start_README.md",
+    "sha256_before": "a90715a3bda1fcc1f7d54237cee1745d217ba46db74c09bb00b2f8d7eb0459c0",
+    "sha256_after": "a90715a3bda1fcc1f7d54237cee1745d217ba46db74c09bb00b2f8d7eb0459c0"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "checkpoints/arm4_blind_teacher38000/teacher/source_commit.sha",
+    "new": "checkpoints/teachers/blind/arm4_38000/teacher/source_commit.sha",
+    "sha256_before": "648e7cde7e212b7c4e677b9396d170cd4c4a11a377eab5d28c5af42eb8153b73",
+    "sha256_after": "648e7cde7e212b7c4e677b9396d170cd4c4a11a377eab5d28c5af42eb8153b73"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "checkpoints/arm4_blind_teacher38000/teacher/gd_lab.diff",
+    "new": "checkpoints/teachers/blind/arm4_38000/teacher/gd_lab.diff",
+    "sha256_before": "c5036f565133551c80314001117e9da35feaacbc637028c41313ab0e26903293",
+    "sha256_after": "c5036f565133551c80314001117e9da35feaacbc637028c41313ab0e26903293"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "checkpoints/arm4_blind_teacher38000/teacher/model_38000.pt",
+    "new": "checkpoints/teachers/blind/arm4_38000/teacher/model_38000.pt",
+    "sha256_before": "c6cfe178cc069766f9543fb5fba983eb05a322d507e4302ee2495d4d26d2d46b",
+    "sha256_after": "c6cfe178cc069766f9543fb5fba983eb05a322d507e4302ee2495d4d26d2d46b"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "checkpoints/arm4_blind_teacher38000/teacher/params/agent.yaml",
+    "new": "checkpoints/teachers/blind/arm4_38000/teacher/params/agent.yaml",
+    "sha256_before": "44162e686e56079ddf689fcdb3573f08add13df0e6a23c9c334479c13ee62a57",
+    "sha256_after": "44162e686e56079ddf689fcdb3573f08add13df0e6a23c9c334479c13ee62a57"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "checkpoints/arm4_blind_teacher38000/teacher/params/env.yaml",
+    "new": "checkpoints/teachers/blind/arm4_38000/teacher/params/env.yaml",
+    "sha256_before": "316f8d03b0f709a991e53ecde1e2b36a76f362f6c635820028ad1c41f34c2426",
+    "sha256_after": "316f8d03b0f709a991e53ecde1e2b36a76f362f6c635820028ad1c41f34c2426"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "checkpoints/arm4_teacher_top5_resume4800_20260930/5975_top4.pt",
+    "new": "checkpoints/teachers/vision/arm4_top5_20260930/5975_top4.pt",
+    "sha256_before": "5fde2996da972fb7d689792849e8b11a2ec0041511a5fd4f0f688e8651516b0c",
+    "sha256_after": "5fde2996da972fb7d689792849e8b11a2ec0041511a5fd4f0f688e8651516b0c"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "checkpoints/arm4_teacher_top5_resume4800_20260930/6987_top1.pt",
+    "new": "checkpoints/teachers/vision/arm4_top5_20260930/6987_top1.pt",
+    "sha256_before": "c153e0d3d18ce023b6b1dba4651cf9e01d3eb38b62a651c8ebeb2bb5f3236edd",
+    "sha256_after": "c153e0d3d18ce023b6b1dba4651cf9e01d3eb38b62a651c8ebeb2bb5f3236edd"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "checkpoints/arm4_teacher_top5_resume4800_20260930/6193_top3.pt",
+    "new": "checkpoints/teachers/vision/arm4_top5_20260930/6193_top3.pt",
+    "sha256_before": "26f6a8486c258bc363d56836c787983d3dfc328aaf7376244fe9ba2582a7054c",
+    "sha256_after": "26f6a8486c258bc363d56836c787983d3dfc328aaf7376244fe9ba2582a7054c"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "checkpoints/arm4_teacher_top5_resume4800_20260930/6717_top5.pt",
+    "new": "checkpoints/teachers/vision/arm4_top5_20260930/6717_top5.pt",
+    "sha256_before": "0b3efc3411e40946a2882d29262b5c922e337236be530e05bbac30ae125843e2",
+    "sha256_after": "0b3efc3411e40946a2882d29262b5c922e337236be530e05bbac30ae125843e2"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "checkpoints/arm4_teacher_top5_resume4800_20260930/teacher_source.txt",
+    "new": "checkpoints/teachers/vision/arm4_top5_20260930/teacher_source.txt",
+    "sha256_before": "f986879e4e19274c88955c42e698a21460fde46942fd53b564b650ea2f6d3720",
+    "sha256_after": "f986879e4e19274c88955c42e698a21460fde46942fd53b564b650ea2f6d3720"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "checkpoints/arm4_teacher_top5_resume4800_20260930/5674_top2.pt",
+    "new": "checkpoints/teachers/vision/arm4_top5_20260930/5674_top2.pt",
+    "sha256_before": "ab48e0cb24cc98070269391a2758bef6f0fbcf706995ead389a4f1afa7990e3a",
+    "sha256_after": "ab48e0cb24cc98070269391a2758bef6f0fbcf706995ead389a4f1afa7990e3a"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "checkpoints/arm4_teacher_top5_resume4800_20260930/SHA256SUMS.txt",
+    "new": "checkpoints/teachers/vision/arm4_top5_20260930/SHA256SUMS.txt",
+    "sha256_before": "54a67bdb988ae07866c21ead266c3264370a83dd3666e975ff33619fdb304b2e",
+    "sha256_after": "54a67bdb988ae07866c21ead266c3264370a83dd3666e975ff33619fdb304b2e"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "checkpoints/arm4_teacher_top5_resume4800_20260930/leaderboard.json",
+    "new": "checkpoints/teachers/vision/arm4_top5_20260930/leaderboard.json",
+    "sha256_before": "0c7c2430bdf9bb095666116ede538225eeb269231820596915c3d12711ad5f96",
+    "sha256_after": "0c7c2430bdf9bb095666116ede538225eeb269231820596915c3d12711ad5f96"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "checkpoints/arm4_teacher_top5_resume4800_20260930/params/agent.yaml",
+    "new": "checkpoints/teachers/vision/arm4_top5_20260930/params/agent.yaml",
+    "sha256_before": "ed11745d5b1c48d4419a452b6d5c5107e57a8ff7e7d2a245e7eb2adca6214462",
+    "sha256_after": "ed11745d5b1c48d4419a452b6d5c5107e57a8ff7e7d2a245e7eb2adca6214462"
+  },
+  {
+    "repo": "gd_lab_vrl",
+    "old": "checkpoints/arm4_teacher_top5_resume4800_20260930/params/env.yaml",
+    "new": "checkpoints/teachers/vision/arm4_top5_20260930/params/env.yaml",
+    "sha256_before": "3204fdb4941a4eba7ca10b2934e1b9f3e738d9d3899e43e9314622142f7c1cc0",
+    "sha256_after": "3204fdb4941a4eba7ca10b2934e1b9f3e738d9d3899e43e9314622142f7c1cc0"
+  }
+]

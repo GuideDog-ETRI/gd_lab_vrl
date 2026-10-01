@@ -153,7 +153,7 @@ Blind actor(203 입력)와 VRL actor(235 입력)는 체크포인트를 그대로
 Ruff, 프로젝트 convention 검사, import 계층 검사(3개 계약), `git diff --check`도 통과했다.
 ONNX exporter deprecation warning 4건은 있었으며 테스트 실패는 없었다.
 
-검사 코드는 `tests/test_platform_gap.py`, `tests/test_vrl_pipeline.py`에 있다.
+검사 코드는 `tests/test_platform_gap.py`, `tests/integration/test_vrl_pipeline.py`에 있다.
 실제 네트워크의 계층별 forward 출력, gradient 경로, 실제 RSL-RL PPO의 더미 rollout/저장/재개,
 좌우 대칭 증강, JIT/ONNX 수치 parity와 GRU 연속 실행을 CPU에서 검사한다.
 지형 mesh 형상 및 seed 재현성, 지형 열 비율, 발 빠짐, 성공 중복 방지, row별 reset,

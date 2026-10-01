@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="500" height="340" preserveAspectRatio="xMinYMin meet" viewBox="0 0 500 340" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="500" height="340"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-340)" style="clip-path: url(#clip)">
+		<g transform="">
+			<text x="0" y="316" style="font-family: KR; font-size: 10px;fill: rgb(14%,29%,38%); stroke:none;" transform="translate(0,632) scale(1,-1)">RVLD / shared camera CNN</text>
+			<rect x="0.0" y="274" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="26.212" y="285" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,570) scale(1,-1)">4 x (2 x 45 x 80)</text>
+			<path d="M 115,289 L 126,289 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="126 289, 122 292, 122 286" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="129.0" y="274" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="152.476" y="285" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,570) scale(1,-1)">CNN 16 &gt; 32 &gt; 32</text>
+			<path d="M 244,289 L 255,289 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="255 289, 251 292, 251 286" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="258.0" y="274" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="281.808" y="285" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,570) scale(1,-1)">Pool / 4 x 32 &gt; 64</text>
+			<path d="M 373,289 L 384,289 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="384 289, 380 292, 380 286" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="387.0" y="274" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="407.896" y="285" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,570) scale(1,-1)">GRU 64 &gt; latent 32</text>
+			<text x="0" y="233" style="font-family: KR; font-size: 10px;fill: rgb(14%,29%,38%); stroke:none;" transform="translate(0,466) scale(1,-1)">GAVD / spatial tokens</text>
+			<rect x="0.0" y="191" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="26.212" y="202" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,404) scale(1,-1)">4 x (2 x 45 x 80)</text>
+			<path d="M 115,206 L 126,206 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="126 206, 122 209, 122 203" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="129.0" y="191" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="161.752" y="202" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,404) scale(1,-1)">CNN 16 &gt; 32</text>
+			<path d="M 244,206 L 255,206 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="255 206, 251 209, 251 203" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="258.0" y="191" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="290.38" y="202" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,404) scale(1,-1)">Resize 9 x 16</text>
+			<path d="M 373,206 L 384,206 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="384 206, 380 209, 380 203" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="387.0" y="191" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="413.724" y="202" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,404) scale(1,-1)">576 tokens x 32</text>
+			<text x="0" y="150" style="font-family: KR; font-size: 10px;fill: rgb(14%,29%,38%); stroke:none;" transform="translate(0,300) scale(1,-1)">GAVD / queries attend to tokens</text>
+			<rect x="0.0" y="108" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="26.396" y="119" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,238) scale(1,-1)">187 grid queries</text>
+			<path d="M 115,123 L 126,123 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="126 123, 122 126, 122 120" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="129.0" y="108" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="145.348" y="119" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,238) scale(1,-1)">Cross-attention + FFN</text>
+			<path d="M 244,123 L 255,123 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="255 123, 251 126, 251 120" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="258.0" y="108" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="280.344" y="119" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,238) scale(1,-1)">5984 &gt; 63 + age 1</text>
+			<path d="M 373,123 L 384,123 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="384 123, 380 126, 380 120" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="387.0" y="108" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="407.896" y="119" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,238) scale(1,-1)">GRU 63 &gt; latent 32</text>
+			<text x="0" y="67" style="font-family: KR; font-size: 10px;fill: rgb(14%,29%,38%); stroke:none;" transform="translate(0,134) scale(1,-1)">Distillation / frozen teacher</text>
+			<rect x="0.0" y="25" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="24.22" y="36" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,72) scale(1,-1)">Student latent 32</text>
+			<path d="M 115,40 L 126,40 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="126 40, 122 43, 122 37" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="129.0" y="25" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="146.856" y="36" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,72) scale(1,-1)">Frozen teacher Actor</text>
+			<path d="M 244,40 L 255,40 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="255 40, 251 43, 251 37" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="258.0" y="25" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="267.916" y="36" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,72) scale(1,-1)">Action MSE + latent MSE</text>
+			<path d="M 373,40 L 384,40 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="384 40, 380 43, 380 37" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="387.0" y="25" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="411.56" y="36" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,72) scale(1,-1)">+ spatial / hazard</text>
+		</g>
+	</g>
+</svg>

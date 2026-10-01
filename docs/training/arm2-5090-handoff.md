@@ -39,7 +39,7 @@ PYTHON=/path/to/venv/bin/python
 env -u PYTHONPATH CUDA_VISIBLE_DEVICES=0 TRAIN_ARM=2 OMNI_KIT_ACCEPT_EULA=YES \
   apptainer exec --nv --writable-tmpfs \
   --bind "$PWD/logs/usd_tmp/arm2_5090:/tmp/IsaacLab" \
-  "$SIF" "$PYTHON" scripts/train_vrl.py \
+  "$SIF" "$PYTHON" scripts/train_cvtt.py \
   --task Gd-Vrl-Rbq10-Dreamwaq-v0 --headless --device cuda:0 \
   --num_envs 1024 --seed 42 --max_iterations 1 --logger tensorboard \
   --run_name arm2_5090_smoke agent.save_interval=1

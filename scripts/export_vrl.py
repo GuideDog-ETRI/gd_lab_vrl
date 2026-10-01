@@ -21,7 +21,7 @@ from tensordict import TensorDict
 
 from gd_lab.deploy.export_vrl import export_policy_vrl
 from gd_lab.methods.dreamwaq.spec import DREAMWAQ_SPEC, POLICY_OBS_DIM
-from gd_lab.rl.actor_critic_vrl import DreamwaqVrlActorCritic
+from gd_lab.teachers.cvtt.actor_critic import DreamwaqVrlActorCritic
 
 
 class _RunConfigLoader(yaml.SafeLoader):

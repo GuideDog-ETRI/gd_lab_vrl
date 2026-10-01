@@ -5,7 +5,7 @@ Teacher checkpoint:
 
 ## Timing and gains
 
-Set `TRAIN_ARM=4` for both `scripts/train_perception.py` and
+Set `TRAIN_ARM=4` for both `scripts/distill_student.py` and
 `scripts/play_student.py`. These scripts now apply the experiment defaults
 before explicit Hydra overrides. Play keeps its fixed command/curriculum settings.
 Arm4 uses a 0.01 s policy step, hip/thigh Kp 123.39, knee Kp 127.77, Kd 2.4.
@@ -72,7 +72,7 @@ env -u PYTHONPATH CUDA_VISIBLE_DEVICES=GPU_INDEX TRAIN_ARM=4 \
   apptainer exec --nv --writable-tmpfs \
   --bind "$PWD/logs/usd_tmp/student_arm4:/tmp/IsaacLab" \
   /data/users/bsseo/gd_lab_isaaclab.sif /data/users/bsseo/venv/bin/python \
-  scripts/train_perception.py --headless --device cuda:0 --num_envs 64 \
+  scripts/distill_student.py --headless --device cuda:0 --num_envs 64 \
   --load_run 2026-09-26_17-03-13_arm4_3gpu_top5_resume_model3000 \
   --checkpoint model_3700.pt --iterations 20000 --save_interval 200 \
   --bptt_steps 8 --perception_run_name arm4_teacher3700_student \
@@ -101,7 +101,7 @@ behavior. A window with no deliveries skips the optimizer update.
 
 Using the training Python environment, export the teacher with
 `scripts/export_vrl.py CHECKPOINT --out exported/arm4_teacher3700` and the chosen
-student with `scripts/export_student_vrl.py STUDENT_CHECKPOINT --actor-onnx
+student with `scripts/export_student.py STUDENT_CHECKPOINT --actor-onnx
 exported/arm4_teacher3700/policy_vrl.onnx`.
 Copy both `policy_vrl.onnx` and `policy_vrl_student.onnx` to the target deployment
 repo at `resources/policy/vrl/arm4_teacher3700/`.

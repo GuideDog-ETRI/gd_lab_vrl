@@ -34,7 +34,7 @@ exec env -u PYTHONPATH \
     --bind "$usd_tmp:/tmp/IsaacLab" \
     "$sif_path" "$python_path" -m torch.distributed.run \
     --standalone --nnodes=1 --nproc_per_node=3 \
-    scripts/train_vrl.py --distributed --task Gd-Vrl-Rbq10-Dreamwaq-v0 \
+    scripts/train_cvtt.py --distributed --task Gd-Vrl-Rbq10-Dreamwaq-v0 \
     --headless --device cuda:0 --total_envs 4096 --seed 42 \
     --max_iterations "$max_iterations" --logger tensorboard \
     --run_name "$run_name" agent.save_interval=100

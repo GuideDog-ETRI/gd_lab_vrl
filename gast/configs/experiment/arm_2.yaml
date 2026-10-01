@@ -1,0 +1,13 @@
+# 100 Hz policy, current robot gains; retain all payload and other events.
+- env.commands.base_velocity.pulse_prob=0.0
+- env.curriculum.pulse_prob_schedule=null
+- env.sim.dt=0.005
+- env.decimation=2
+- env.sim.render_interval=2
+- env.scene.contact_forces.update_period=0.005
+- env.scene.height_scanner.update_period=0.01
+- env.scene.height_scanner_feet_fl.update_period=0.01
+- env.scene.height_scanner_feet_fr.update_period=0.01
+- env.scene.height_scanner_feet_rl.update_period=0.01
+- env.scene.height_scanner_feet_rr.update_period=0.01
+- agent.experiment_name=blind_rbq10_dreamwaq/arm_2

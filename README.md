@@ -3,7 +3,75 @@
 RBQ10 사족보행 로봇 강화학습 프레임워크. IsaacSim 5.1.0 + IsaacLab 2.3.1 위에서
 DreamWaQ 및 카메라 기반 VRL 선생·학생을 학습한다.
 
-## 서버 역할
+## 학습 방법 명칭
+
+아래는 프로젝트 내부 명칭이며 기존 논문의 정식 명칭을 대체하지 않습니다.
+교사 출처(DWB/CVTT/BIVT), 학생 증류(RVLD/GAVD), 잔차 학습(BAVRL)은 서로 다른 분류 축입니다.
+
+| 약칭 | 전체 이름 | 역할 / 소스 |
+| --- | --- | --- |
+| DWB | DreamWaQ Blind Baseline | 블라인드 기준 정책; `src/gd_lab/rl/`의 Actor·CENet 및 기존 blind 태스크 |
+| CVTT | Camera-Visible Terrain Teacher | 가시 지형 교사; `src/gd_lab/teachers/cvtt/` |
+| BIVT | Blind-Initialized Visual Teacher | 블라인드 초기화 교사; `src/gd_lab/teachers/bivt/` |
+| RVLD | Recurrent Visual Latent Distillation | CNN–GRU 학생; `src/gd_lab/students/rvld/` |
+| GAVD | Grid-Attention Visual Distillation | 격자 Attention 학생; `src/gd_lab/students/gavd/` |
+| BAVRL | Blind-Anchored Visual Residual Learning | 고정 DWB-38000 CENet·Actor + 영상 잔차 PPO; [구현·제약](docs/residuals/bavrl.md), 장기 학습/배포 미검증 |
+| GAST | Gap-Aware Spatiotemporal Teacher-Student Learning | 외부 갭 신호 없는 시공간 높이스캔 교사·영상 학생; 독립 복사본 [gast/](gast/README.md) |
+
+### GAST 파이프라인과 구조 변경 브랜치 (2026-10-01)
+
+GAST는 `gast/` 안에 소스·설정·자산을 복사한 독립 실험입니다. 기존 CENet 구조를
+유지하고 교사에는 이동 보정 높이스캔 이력 + CNN·시간 Attention·GRU 및 지형
+Denoising Decoder, 학생에는 영상 공간 Attention·시간 Attention·격자 GRU를 사용합니다.
+외부 갭 신호는 사용하지 않습니다. [설계와 검증 기록](gast/README.md)을 참고하세요.
+로컬 본 학습은 시작하지 않았으며 다른 학습 서버로 이관합니다.
+`python3 gast/scripts/pipeline.py`의 기본 동작은 짧은 검증뿐입니다.
+
+이 구조 변경은 기존 원격 이력을 삭제하거나 force-push하지 않고 별도 브랜치로
+공유합니다. 기존 구조로 실행 중인 학습 서버는 작업 디렉토리를 즉시 전환하지 말고
+별도 worktree/clone에서 새 브랜치의 검증을 수행한 뒤 main 반영 시점을 정합니다.
+체크포인트 경로 이관 기록은 `docs/layout-migration.json`과
+`docs/method-name-migration.json`에 있습니다.
+
+BIVT-Full(2-A), BIVT-Render(2-B), BIVT-Ray(2-R)는 같은 BIVT의 관측 방식입니다.
+Render v1/v2는 시작 checkpoint와 설정이 다른 실험이며 별도 알고리즘 디렉터리를 만들지 않습니다.
+현재 Attention 모델 쌍은 `CVTT-6987 + GAVD`, 신규 잔차 학습 경로는 `DWB-38000 + BAVRL`입니다.
+기존 체크포인트 내부 `cnn_gru` / `grid_attention_v1` 식별자와 Gym task ID는 바꾸지 않습니다.
+실행 예: `scripts/train_cvtt.py`, `scripts/train_bivt.py`,
+`scripts/distill_student.py --student_arch cnn_gru` 또는 `--student_arch grid_attention_v1`.
+단일 GPU GAVD 실행기는 `scripts/train_gavd_5090.sh`입니다.
+
+### 선택한 BIVT-Ray 4500 교사 (2026-10-01)
+
+`origin/main`의 `afc5f4a` 패키지를
+[`checkpoints/teachers/bivt/ray_4500_20261001/`](checkpoints/teachers/bivt/ray_4500_20261001/README.md)로 복사했습니다.
+GAVD 증류용으로 사용자가 선택한 모델은 `teacher/model_4500.pt`입니다.
+이는 **정기 체크포인트**이며 Top-1 또는 최종 20,000회 모델이 아닙니다.
+원격 원본 패키지를 보존했고 모델·설정·출처 문서의 SHA256 검사를 모두 통과했습니다.
+16회/4-env 사전 학습 및 저장 검사를 통과한 뒤, 2026-10-01 13:25 KST에
+GAVD 20,000회/64-env 본 실행을 시작했습니다 (seed 42).
+세션: `bivt-ray4500-gavd-20k`, 실행기: `scripts/train_bivt_ray4500_gavd_5090.sh`.
+로그: `logs/bivt_ray4500_gavd_20000_20261001.console.log`.
+`VrlRayStudent`는 교사의 raycast 가시성·blackout·gated actor를 유지하면서
+학생 입력용 렌더 카메라 스냅샷을 별도로 생성합니다. 렌더 기반 지형 정답으로
+교체하지 않습니다. 교사는 고정하고 GAVD만 학습합니다.
+20,000회는 영상 캡처 시도 횟수이며 PPO 업데이트 수가 아닙니다.
+
+### 수신한 BIVT-Render v1 최종 교사
+
+`origin/main`의 `c61cd08` 패키지를
+[`checkpoints/teachers/bivt/render_v1_final_20260930/`](checkpoints/teachers/bivt/render_v1_final_20260930/README.md)로 배치했습니다.
+최종 모델은 `teacher/model_1299.pt`이며, 설정·소스 상태 기록·학습 로그를 함께 보존합니다.
+새 BIVT 클래스 strict load 및 CPU 추론을 확인했습니다. 학생 학습/배포 모델은 바꾸지 않았습니다.
+
+## 현재 구조 및 서버 역할 (2026-09-30)
+
+교사는 `src/gd_lab/teachers/`, 학생은 `src/gd_lab/students/`로 분리했습니다.
+공통 PPO·CENet은 `rl/`에 유지합니다. [구조 안내](docs/layout.md)를 확인하세요.
+5090 `10.254.90.20`은 **학습·배포 겸용**, 다중 GPU `10.77.32.231`은
+**기존 4카메라 렌더링 기반 비전 교사 학습용**입니다. 명시적 요청 없이 push하지 않습니다.
+
+### 이전 서버 역할 기록 (현재 역할은 위 기준)
 
 - **학습 main 서버:** `10.77.32.231` (`onvlm2`), SSH 포트 `20022`, 사용자 `bsseo`.
   다중 GPU 학습 및 이 저장소(`gd_lab_vrl`)의 학습 코드 작업은 이 서버를 기준으로 한다.
@@ -135,7 +203,7 @@ vrl_run scripts/play_student.py --headless --device cuda:0 --num_envs 20 \
 ```bash
 export_dir="$PWD/exported/arm4_teacher3700"
 vrl_run scripts/export_vrl.py "$teacher_dir/model_3700.pt" --out "$export_dir"
-vrl_run scripts/export_student_vrl.py "$student_pt" --actor-onnx "$export_dir/policy_vrl.onnx"
+vrl_run scripts/export_student.py "$student_pt" --actor-onnx "$export_dir/policy_vrl.onnx"
 sha256sum "$export_dir/policy_vrl.onnx" "$export_dir/policy_vrl_student.onnx" > "$export_dir/SHA256SUMS.txt"
 ```
 
@@ -343,3 +411,9 @@ GD_LAB_ISAAC_TESTS=1 pytest tests/test_smoke_isaac.py   # 학습 머신 (IsaacSi
 CPU 테스트만으로 ObsSpec 계약, mirror 순열(involution), CENet/AdaBoot/PPO 학습 루프,
 저장/재개, export parity(JIT == act_inference)까지 검증된다. 시뮬레이터 스모크
 테스트는 게임패드를 제외한 등록 태스크를 2-env로 생성해 1 iteration 학습을 돌린다.
+# BAVRL 온라인 Top-5 통합 (2026-09-30)
+
+원격 `49c4db5`의 평가 기준을 반영했습니다. 새 구조의 공통 `rl/online_top5.py`와
+`residuals/bavrl/online_quality.py`를 연결해 매 이터 rollout 점수·탈락 사유를 기록하고,
+선정된 체크포인트를 저장합니다. [설정·경로·재개 안내](docs/residuals/bavrl-online-top5.md).
+별도 held-out 평가가 아니며 기준 미충족 시 Top-5는 비어 있을 수 있습니다.

@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="500" height="340" preserveAspectRatio="xMinYMin meet" viewBox="0 0 500 340" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="500" height="340"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-340)" style="clip-path: url(#clip)">
+		<g transform="">
+			<text x="0" y="316" style="font-family: KR; font-size: 10px;fill: rgb(14%,29%,38%); stroke:none;" transform="translate(0,632) scale(1,-1)">Frozen blind branch</text>
+			<rect x="0.0" y="274" width="156.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="50.739999999999995" y="285" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,570) scale(1,-1)">Proprioception</text>
+			<path d="M 158,289 L 169,289 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="169 289, 165 292, 165 286" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="172.0" y="274" width="156.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="209.892" y="285" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,570) scale(1,-1)">Frozen CENet + Actor</text>
+			<path d="M 330,289 L 341,289 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="341 289, 337 292, 337 286" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="344.0" y="274" width="156.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="394.564" y="285" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,570) scale(1,-1)">Blind action a0</text>
+			<text x="0" y="233" style="font-family: KR; font-size: 10px;fill: rgb(14%,29%,38%); stroke:none;" transform="translate(0,466) scale(1,-1)">Trainable visual residual</text>
+			<rect x="0.0" y="191" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="27.088" y="202" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,404) scale(1,-1)">GAVD latent 32</text>
+			<path d="M 115,206 L 126,206 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="126 206, 122 209, 122 203" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="129.0" y="191" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="161.532" y="202" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,404) scale(1,-1)">Features 248</text>
+			<path d="M 244,206 L 255,206 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="255 206, 251 209, 251 203" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="258.0" y="191" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="279.436" y="202" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,404) scale(1,-1)">MLP 128 &gt; 64 &gt; 12</text>
+			<path d="M 373,206 L 384,206 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="384 206, 380 209, 380 203" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="387.0" y="191" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="405.196" y="202" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,404) scale(1,-1)">Bound + slew + gate</text>
+			<text x="0" y="150" style="font-family: KR; font-size: 10px;fill: rgb(14%,29%,38%); stroke:none;" transform="translate(0,300) scale(1,-1)">Output contract</text>
+			<rect x="0.0" y="108" width="156.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="44.272" y="119" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,238) scale(1,-1)">Valid fresh images</text>
+			<path d="M 158,123 L 169,123 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="169 123, 165 126, 165 120" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="172.0" y="108" width="156.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="214.368" y="119" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,238) scale(1,-1)">Action = a0 + delta</text>
+			<path d="M 330,123 L 341,123 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="341 123, 337 126, 337 120" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="344.0" y="108" width="156.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="376.916" y="119" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,238) scale(1,-1)">Missing / stale: delta = 0</text>
+			<text x="0" y="67" style="font-family: KR; font-size: 10px;fill: rgb(14%,29%,38%); stroke:none;" transform="translate(0,134) scale(1,-1)">PPO / training only</text>
+			<rect x="0.0" y="25" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="18.68" y="36" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,72) scale(1,-1)">Environment reward</text>
+			<path d="M 115,40 L 126,40 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="126 40, 122 43, 122 37" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="129.0" y="25" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="147.03199999999998" y="36" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,72) scale(1,-1)">Critic: 298 &gt; MLP &gt; 1</text>
+			<path d="M 244,40 L 255,40 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="255 40, 251 43, 251 37" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="258.0" y="25" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="270.248" y="36" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,72) scale(1,-1)">Update vision + residual</text>
+			<path d="M 373,40 L 384,40 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="384 40, 380 43, 380 37" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="387.0" y="25" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="406.944" y="36" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,72) scale(1,-1)">Anchor stays frozen</text>
+		</g>
+	</g>
+</svg>

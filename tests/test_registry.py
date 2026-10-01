@@ -4,6 +4,7 @@ import gymnasium as gym
 import pytest
 
 import gd_lab  # noqa: F401  (registers the tasks)
+import gd_lab.teachers.bivt  # noqa: F401 (registers optional teacher variants)
 from gd_lab.core import registry
 
 
@@ -16,14 +17,17 @@ def test_registered_blind_and_vision_ids():
         "Gd-Vrl-Rbq10-Dreamwaq-Play-v0",
         "Gd-Vrl-Rbq10-Dreamwaq-Vision-v0",
         "Gd-Vrl-Rbq10-Dreamwaq-VisionPlay-v0",
+        "Gd-VrlBlindStart-Rbq10-Dreamwaq-v0",
+        "Gd-VrlBlindStart-Rbq10-Dreamwaq-Vision-v0",
+        "Gd-VrlBlindStartRaycast-Rbq10-Dreamwaq-v0",
     ]
 
 
 def test_ids_resolve_in_gym_registry():
     for task_id in registry.all_ids():
         spec = gym.spec(task_id)
-        assert spec.kwargs["env_cfg_entry_point"].startswith("gd_lab.tasks.")
-        assert spec.kwargs["rsl_rl_cfg_entry_point"].startswith("gd_lab.agents.")
+        assert spec.kwargs["env_cfg_entry_point"].startswith(("gd_lab.tasks.", "gd_lab.teachers."))
+        assert spec.kwargs["rsl_rl_cfg_entry_point"].startswith(("gd_lab.agents.", "gd_lab.teachers."))
 
 
 def test_duplicate_registration_rejected():

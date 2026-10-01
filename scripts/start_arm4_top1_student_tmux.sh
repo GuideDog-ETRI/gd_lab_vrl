@@ -49,7 +49,7 @@ set +e
 env -u PYTHONPATH CUDA_VISIBLE_DEVICES="$gpu" TRAIN_ARM=4 OMNI_KIT_ACCEPT_EULA=YES PYTHONUNBUFFERED=1 \
     apptainer exec --nv --writable-tmpfs --bind "$usd_tmp:/tmp/IsaacLab" \
     "${GD_LAB_SIF:-/data/users/bsseo/gd_lab_isaaclab.sif}" \
-    "${GD_LAB_PYTHON:-/data/users/bsseo/venv/bin/python}" scripts/train_perception.py \
+    "${GD_LAB_PYTHON:-/data/users/bsseo/venv/bin/python}" scripts/distill_student.py \
     --headless --device cuda:0 --num_envs "$envs" --seed 42 \
     --load_run "$snapshot" --checkpoint model_top1.pt \
     --iterations "$captures" --save_interval 200 --bptt_steps 8 \

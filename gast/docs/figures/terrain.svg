@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg
+  PUBLIC '-//W3C//DTD SVG 1.0//EN'
+  'http://www.w3.org/TR/2001/REC-SVG-20010904/DTD/svg10.dtd'>
+<svg width="500" height="257" preserveAspectRatio="xMinYMin meet" viewBox="0 0 500 257" xmlns="http://www.w3.org/2000/svg" version="1.0" fill-rule="evenodd" xmlns:xlink="http://www.w3.org/1999/xlink">
+	<title>...</title>
+	<desc>...</desc>
+	<clipPath id="clip">
+		<rect x="0" y="0" width="500" height="257"/>
+	</clipPath>
+	<g id="group" transform="scale(1,-1) translate(0,-257)" style="clip-path: url(#clip)">
+		<g transform="">
+			<text x="0" y="233" style="font-family: KR; font-size: 10px;fill: rgb(14%,29%,38%); stroke:none;" transform="translate(0,466) scale(1,-1)">Terrain encoder / PPO</text>
+			<rect x="0.0" y="191" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="20.095999999999997" y="202" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,404) scale(1,-1)">Height + mask: 374</text>
+			<path d="M 115,206 L 126,206 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="126 206, 122 209, 122 203" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="129.0" y="191" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="139.756" y="202" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,404) scale(1,-1)">2 x 11 x 17 / CNN 8 &gt; 16</text>
+			<path d="M 244,206 L 255,206 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="255 206, 251 209, 251 203" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="258.0" y="191" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="278.3" y="202" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,404) scale(1,-1)">Pool 5 x 8 / MLP 64</text>
+			<path d="M 373,206 L 384,206 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="384 206, 380 209, 380 203" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="387.0" y="191" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="412.92" y="202" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,404) scale(1,-1)">Terrain latent 32</text>
+			<text x="0" y="150" style="font-family: KR; font-size: 10px;fill: rgb(14%,29%,38%); stroke:none;" transform="translate(0,300) scale(1,-1)">CVTT and BIVT Actor</text>
+			<rect x="0.0" y="108" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="22.524" y="119" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,238) scale(1,-1)">DWB features 203</text>
+			<path d="M 115,123 L 126,123 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="126 123, 122 126, 122 120" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="129.0" y="108" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="151.56" y="119" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,238) scale(1,-1)">+ terrain 32 = 235</text>
+			<path d="M 244,123 L 255,123 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="255 123, 251 126, 251 120" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="258.0" y="108" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="274.588" y="119" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,238) scale(1,-1)">MLP 512 &gt; 256 &gt; 128</text>
+			<path d="M 373,123 L 384,123 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="384 123, 380 126, 380 120" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="387.0" y="108" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="423.724" y="119" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,238) scale(1,-1)">Actions 12</text>
+			<text x="0" y="67" style="font-family: KR; font-size: 10px;fill: rgb(14%,29%,38%); stroke:none;" transform="translate(0,134) scale(1,-1)">BIVT initialization</text>
+			<rect x="0.0" y="25" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="21.124000000000002" y="36" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,72) scale(1,-1)">Copy blind weights</text>
+			<path d="M 115,40 L 126,40 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="126 40, 122 43, 122 37" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="129.0" y="25" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="147.148" y="36" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,72) scale(1,-1)">New 32 columns = 0</text>
+			<path d="M 244,40 L 255,40 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="255 40, 251 43, 251 37" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="258.0" y="25" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="280.976" y="36" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,72) scale(1,-1)">Full / Render / Ray</text>
+			<path d="M 373,40 L 384,40 Z" style="stroke: rgb(32%,43%,51%); stroke-linecap: butt; stroke-width: 1;"/>
+			<polygon points="384 40, 380 43, 380 37" style="stroke: none; stroke-linecap: butt; stroke-width: 1; fill: rgb(32%,43%,51%); fill-rule: evenodd;"/>
+			<rect x="387.0" y="25" width="113.0" height="30" rx="4" ry="4" style="stroke: rgb(63%,74%,79%); stroke-linecap: butt; stroke-width: 1; fill: rgb(92%,96%,96%); fill-rule: evenodd;"/>
+			<text x="414.024" y="36" style="font-family: KR; font-size: 8px;fill: rgb(8%,20%,29%); stroke:none;" transform="translate(0,72) scale(1,-1)">PPO fine-tuning</text>
+		</g>
+	</g>
+</svg>

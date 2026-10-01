@@ -50,7 +50,7 @@ from gd_lab.core.paths import LOG_ROOT
 from gd_lab.deploy.export_vrl import export_policy_vrl
 from gd_lab.managers.action_history import ensure_prev_prev_action_tracking
 from gd_lab.methods.dreamwaq.spec import DREAMWAQ_SPEC
-from gd_lab.rl.actor_critic_vrl import DreamwaqVrlActorCritic
+from gd_lab.teachers.cvtt.actor_critic import DreamwaqVrlActorCritic
 from gd_lab.tasks.vrl_cameras import configure_vrl_cameras
 
 
