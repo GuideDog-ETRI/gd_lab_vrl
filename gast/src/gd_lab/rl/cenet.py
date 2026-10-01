@@ -152,6 +152,9 @@ class CENet(nn.Module):
             self.inject_gt.fill_(0)
             return
         self.inject_gt.fill_(int((torch.rand(()) >= self.bootstrap_prob).item()))
+        from .distributed import active
+        if active():
+            torch.distributed.broadcast(self.inject_gt, src=0)
 
     # -- decoupled optimizer step ----------------------------------------
     def update(
@@ -206,10 +209,12 @@ class CENet(nn.Module):
         # Clamping bounds the inputs but cannot bound everything: the loss is the
         # one place where every failure path becomes visible. If it is absurd,
         # the batch has nothing to teach -- take no step rather than a wrong one.
-        skipped = not torch.isfinite(loss) or float(loss) > self.loss_skip_threshold
+        from .distributed import any_rank, average_gradients
+        skipped = any_rank(not torch.isfinite(loss) or float(loss) > self.loss_skip_threshold, loss.device)
         self.optimizer.zero_grad(set_to_none=True)
         if not skipped:
             loss.backward()
+            average_gradients(self.parameters())
             self.optimizer.step()
 
         metrics = {

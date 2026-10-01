@@ -13,6 +13,7 @@ from isaaclab.managers import ManagerTermBase
 from gd_lab.core.camera_contract import load_camera_contract
 from gd_lab.core.camera_geometry import mounted_camera_world_poses
 from gd_lab.core.camera_timing import camera_period_steps, camera_refresh_mask
+from gd_lab.core.camera_transport import CameraTransport, CameraTransportConfig, delivery_mask
 
 from .raycast_visibility import contract_intrinsic, raycast_visible_points, warp_mesh_cast
 from .terrain_dropout import SCAN_CELLS, _schedule
@@ -36,11 +37,21 @@ def leg_capsules(robot):
     return pos[:, starts], pos[:, ends], radius
 
 
-def raycast_visible_mask(env, contract, intrinsic, cast) -> torch.Tensor:
+def raycast_visible_mask(env, contract, intrinsic, cast, enhanced=True) -> torch.Tensor:
     """N,187 union over the four mounted cameras of raycast-visible scan cells."""
     robot = env.scene["robot"]
     occluders = leg_capsules(robot)
     trunk = robot.body_names.index("trunk")
+    body_occluders = None
+    if enhanced:
+        # URDF rbq10_simple: trunk visual/collision box .8 x .20 x .12 m;
+        # foot collision spheres .03 m (conservative proxy, not visual mesh).
+        from isaaclab.utils.math import matrix_from_quat
+        foot_ids = [robot.body_names.index(f'{leg}_foot') for leg in LEGS]
+        body_occluders = (robot.data.body_pos_w[:,trunk],
+                          matrix_from_quat(robot.data.body_quat_w[:,trunk]),
+                          robot.data.body_pos_w.new_tensor([.4,.10,.06]),
+                          robot.data.body_pos_w[:,foot_ids], .03)
     positions, rotations = mounted_camera_world_poses(
         robot.data.body_pos_w[:, trunk], robot.data.body_quat_w[:, trunk], contract)
     points = env.scene["height_scanner"].data.ray_hits_w
@@ -48,7 +59,8 @@ def raycast_visible_mask(env, contract, intrinsic, cast) -> torch.Tensor:
     for camera in range(positions.shape[1]):
         visible |= raycast_visible_points(points, positions[:, camera], rotations[:, camera], intrinsic,
                                           (contract.height, contract.width), contract.depth_clip, cast,
-                                          occluders=occluders)
+                                          occluders=occluders, body_occluders=body_occluders,
+                                          conservative=enhanced)
     return visible
 
 
@@ -65,23 +77,37 @@ class RaycastVisibleTerrainDropout(ManagerTermBase):
         self.observation = torch.zeros(env.num_envs, 2 * SCAN_CELLS, device=env.device)
         self.blackout = _schedule(cfg, env)
         self.blackout.reset()
+        self.episodes = torch.zeros(env.num_envs, device=env.device, dtype=torch.long)
+        self.transport = CameraTransport(CameraTransportConfig(), env.step_dt, env.cfg.seed+17)
+        self.timing_manifest = self.transport.config.manifest(env.step_dt)
+        self.next_capture_step = 0
+        self.last_call_step = -1
 
     def reset(self, env_ids=None):
         ids = slice(None) if env_ids is None else env_ids
         self.last_step[ids] = -100
         self.observation[ids] = 0
         self.blackout.reset(env_ids)
+        if hasattr(self, 'episodes'):
+            ids = slice(None) if env_ids is None else env_ids
+            self.episodes[ids] += 1
 
     def __call__(self, env, start_prob=0.0, duration_steps=(50, 300), episode_prob=0.0) -> torch.Tensor:
         step = env.common_step_counter
-        refresh = camera_refresh_mask(self.last_step, step, self.period_steps)
-        if refresh.any():
+        if step != self.last_call_step and step >= self.next_capture_step:
             scan = env.scene["height_scanner"].data
             if scan.ray_hits_w.shape[1] != SCAN_CELLS:
                 raise ValueError("VRL v2 requires the configured 11x17 height scan")
             visible = raycast_visible_mask(env, self.contract, self.intrinsic, self.cast)
             height = (scan.pos_w[:, 2, None] - scan.ray_hits_w[..., 2] - 0.5).clamp(-1, 1) * 5
             height = torch.where(visible & torch.isfinite(height), height, 0)
-            self.observation[refresh] = torch.cat((height, visible.float()), -1)[refresh]
-            self.last_step[refresh] = step
+            captured = torch.cat((height, visible.float()), -1)
+            self.transport.capture(step, (captured, self.episodes.clone()))
+            self.next_capture_step = self.transport.next_capture(step)
+        for packet in self.transport.receive(step):
+            captured, episodes = packet.payload
+            valid = delivery_mask(packet.capture_step, episodes, self.episodes, self.last_step)
+            self.observation[valid] = captured[valid]
+            self.last_step[valid] = packet.capture_step
+        self.last_call_step = step
         return torch.where(self.blackout.mask(step)[:, None], 0.0, self.observation)

@@ -86,10 +86,20 @@ class DreamwaqPPO(PPO):
 
     # -- update ------------------------------------------------------------
     def update(self) -> dict[str, float]:
-        self.policy.cenet.update_bootstrap_from_episode_rewards(self._episode_returns)
+        from .distributed import active
+        import torch.distributed as dist
+        returns = list(self._episode_returns)
+        if active():
+            gathered = [None] * dist.get_world_size()
+            dist.all_gather_object(gathered, returns)
+            returns = [value for batch in gathered for value in batch]
+        self.policy.cenet.update_bootstrap_from_episode_rewards(returns)
         loss_dict = super().update()
         loss_dict.update(self._update_cenet())
         self.policy.notify_iteration_done()
+        if active():
+            for buffer in self.policy.cenet.buffers():
+                dist.broadcast(buffer, src=0)
         return loss_dict
 
     def _update_cenet(self) -> dict[str, float]:

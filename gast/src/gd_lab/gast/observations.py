@@ -70,6 +70,7 @@ class NoisyTerrain(ManagerTermBase):
         self.blackout = BlackoutSchedule(env.num_envs, env.device, .001, (50, 300), .05)
         self.blackout.reset()
         self.bias = torch.zeros(env.num_envs, 1, device=env.device)
+        self.diagnostic_counts = torch.zeros(5, device=env.device, dtype=torch.float64)
         self.last_step = -1
         self.cached = None
         self.history = TerrainHistory(env)
@@ -96,6 +97,9 @@ class NoisyTerrain(ManagerTermBase):
         valid = valid & (torch.rand_like(h) > .03 * strength)
         blackout = self.blackout.mask(step)
         valid = valid & ~blackout[:, None]
+        self.diagnostic_counts += torch.stack((blackout.sum(), blackout.new_tensor(env.num_envs, dtype=torch.long),
+                                              valid.sum(), valid.new_tensor(valid.numel(), dtype=torch.long),
+                                              h.new_tensor(strength * env.num_envs))).double()
         self.cached = torch.cat((torch.where(valid, h.clamp(-1, 1)*5, 0), valid.float()), -1)
         self.last_step = step
         env._gast_history = self.history.update(env, self.cached)

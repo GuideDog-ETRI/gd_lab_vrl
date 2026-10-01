@@ -56,6 +56,40 @@ Isaac(carb)이 PID 이름으로 만드는 `/dev/shm` 파일이 다른 사용자�
 
 ## 테스트
 
+### 2026-10-01: 렌더링 없는 Ray 보완안
+
+Render v1/v2는 장기 PPO의 렌더링 비용 때문에 우선순위를 낮추고,
+소규모 비교 기준으로 유지한다. 성능 열등성이 입증된 것은 아니다.
+v1은 전체 높이맵 사전학습에서 blackout 없이, v2는 blackout을 적용한
+모델에서 출발했으며 Render 단계에서는 둘 다 blackout을 사용한다.
+
+개선 Ray는 기존 지형/다리 가림에 URDF 몸통 박스(.8 x .20 x .12m)와
+발 구(.03m)를 추가한다. 발은 시각 메쉬가 아닌 보수적인 충돌체 근사다.
+몸통 내부 카메라 위치의 오판을 막기 위해 추가 자기 가림은 광학 near clip
+이후 선분에서 검사한다. 네 이웃 픽셀의 깊이 편차가 허용치를 넘는 경계는
+제외한다. 이는 실제 카메라와 완전히 같은 센서 모델이 아니다.
+
+CameraTransportConfig를 학생과 공유한다: 촬영70–100ms, 전달지연0–50ms,
+패킷 손실5%. 카메라 보정은 기존 camera contract를 유지한다.
+표적 높이·마스크는 촬영 당시 계산해 보관하고, 전달 시 새 자세로 재계산하지
+않는다. reset 이전/역순 패킷은 제외한다. 학생이 이 기본값을 별도 override하면
+교사와 학생의 timing manifest를 반드시 다시 맞춰야 한다.
+
+64환경/300제어스텝/2380캡처의 같은 자세 Render 비교 결과:
+precision 57.78%→80.96%, recall 81.02%→58.29%, IoU 50.89%→51.26%,
+false-visible cells 24554→5687. 보수성이 높아져 과잉 가시성은 줄지만
+실제 보이는 지형도 더 많이 버린다. 보행/증류 성능 향상은 아직 미검증이다.
+비교는 전달지연/blackout 전 동일 촬영시점이며, 지연 모델의 성능 검증과는 다르다.
+
+`scripts/compare_visibility.py`는 baseline/enhanced/per-family 결과를 기록한다.
+`scripts/train_bivt.py --resume_checkpoint /absolute/model.pt --target_iterations 20000`
+는 실제 저장 iteration 다음부터 총2만회까지 이어간다.
+`GD_LAB_STOP_FILE` 지정 파일을 만들면 현재 업데이트 완료 후 원자적으로
+체크포인트를 저장하고 종료한다. SIGINT 즉시 저장 기능과 혼동하지 말 것.
+
+교사 CNN은 영상 대신 [높이187, 유효성187]을 입력받는다. 학생만 Depth+IR
+proxy 영상을 직접 인코딩한다. 새 관측조건 전환 전 체크포인트와 코드를 보존한다.
+
 ```bash
 python -m pytest tests/teachers/bivt -q
 (cd blind_start && ruff check .)

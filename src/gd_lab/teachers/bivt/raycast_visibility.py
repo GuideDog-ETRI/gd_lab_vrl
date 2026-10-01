@@ -3,9 +3,9 @@
 Mirrors gd_lab.core.camera_geometry.camera_visible_points (same pinhole model,
 frame bounds, depth clip and four-neighbour depth agreement), but obtains each
 neighbouring pixel's depth by casting a ray through it against the static
-terrain mesh instead of reading a rendered depth image. The only difference to
-the rendered mask by construction: robot legs occlude only as capsules
-(``occluders``), and the trunk/other bodies not at all.
+terrain mesh instead of reading a rendered depth image. Legs use capsule
+proxies; optional enhanced occlusion adds a trunk box and foot spheres, with
+conservative depth-edge rejection. These proxies are not exact rendered meshes.
 """
 
 from __future__ import annotations
@@ -49,8 +49,30 @@ def ray_hits_capsules(starts, directions, lengths, seg_a, seg_b, radius) -> torc
     return (gap.norm(dim=-1) < radius).any(-1)
 
 
+def ray_hits_box(starts, directions, lengths, center, rotation, half_size):
+    """Finite ray vs oriented box; rotation maps local coordinates to world."""
+    origin = ((starts-center)[:, None] @ rotation).squeeze(1)
+    direction = (directions[:, None] @ rotation).squeeze(1)
+    parallel = direction.abs() < 1e-8
+    safe = torch.where(parallel, torch.ones_like(direction), direction)
+    a, b = (-half_size-origin)/safe, (half_size-origin)/safe
+    near = torch.minimum(a,b).masked_fill(parallel, -torch.inf).amax(-1)
+    far = torch.maximum(a,b).masked_fill(parallel, torch.inf).amin(-1)
+    outside = (parallel & (origin.abs() > half_size)).any(-1)
+    return ~outside & (far >= near.clamp_min(0)) & (far > 1e-5) & (near < lengths-1e-4)
+
+
+def ray_hits_spheres(starts, directions, lengths, centers, radius):
+    delta = centers-starts[:,None]
+    along = (delta*directions[:,None]).sum(-1).clamp_min(0)
+    along = torch.minimum(along, lengths[:,None])
+    closest = starts[:,None]+along[...,None]*directions[:,None]
+    return ((closest-centers).square().sum(-1) <= radius**2).any(-1)
+
+
 def raycast_visible_points(points_w, camera_pos, camera_quat_ros, intrinsic, image_hw, depth_clip,
-                           cast: CastFn, occluders=None) -> torch.Tensor:
+                           cast: CastFn, occluders=None, body_occluders=None,
+                           conservative=False) -> torch.Tensor:
     """N,P world points visible in ONE camera: in frame, within depth clip, unoccluded.
 
     ``occluders`` = (seg_a[N,S,3], seg_b[N,S,3], radius[S]) robot capsules, optional.
@@ -75,6 +97,8 @@ def raycast_visible_points(points_w, camera_pos, camera_quat_ros, intrinsic, ima
     k_inv = torch.linalg.inv(k[env_ids])
     world_from_camera = rotation[env_ids]
     agree = torch.ones_like(target_z, dtype=torch.bool)
+    minimum = torch.full_like(target_z, torch.inf)
+    maximum = torch.full_like(target_z, -torch.inf)
     # Emulate the rendered test: the four neighbouring pixels' depth must agree.
     for dx, dy in ((0, 0), (1, 0), (0, 1), (1, 1)):
         pixel = torch.stack(((x0[candidates] + dx).float(), (y0[candidates] + dy).float(),
@@ -84,11 +108,25 @@ def raycast_visible_points(points_w, camera_pos, camera_quat_ros, intrinsic, ima
         direction = (world_from_camera @ (ray_camera / length[:, None])[..., None])[..., 0]
         hit = cast(camera_pos[env_ids].contiguous(), direction.contiguous(), float(hi) * 2.0)
         depth = hit / length  # optical depth: ray_camera has unit z
+        minimum = torch.minimum(minimum, depth)
+        maximum = torch.maximum(maximum, depth)
         agree &= torch.isfinite(depth) & (depth >= lo) & (depth < hi) & ((depth - target_z).abs() <= tolerance)
         if occluders is not None:
             seg_a, seg_b, radius = occluders
             agree &= ~ray_hits_capsules(camera_pos[env_ids], direction, target_z * length,
                                         seg_a[env_ids], seg_b[env_ids], radius)
+        if body_occluders is not None:
+            center, body_rotation, half_size, feet, foot_radius = body_occluders
+            # Match the optical near clip: cameras may lie inside the trunk's
+            # coarse box. Do not spuriously block rays before the near plane.
+            near_length = lo*length
+            starts = camera_pos[env_ids] + direction*near_length[:,None]
+            lengths = (target_z*length-near_length).clamp_min(0)
+            agree &= ~ray_hits_box(starts, direction, lengths, center[env_ids],
+                                  body_rotation[env_ids], half_size)
+            agree &= ~ray_hits_spheres(starts, direction, lengths, feet[env_ids], foot_radius)
+    if conservative:
+        agree &= (maximum-minimum) <= tolerance
     visible[candidates] = agree
     return visible
 
