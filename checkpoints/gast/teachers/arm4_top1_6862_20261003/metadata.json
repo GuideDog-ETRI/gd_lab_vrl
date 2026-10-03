@@ -1,0 +1,44 @@
+{
+  "artifact_kind": "GAST teacher checkpoint",
+  "iteration": 6862,
+  "training_method": "GAST teacher PPO",
+  "student_model_included": false,
+  "deployment_ready": false,
+  "source_run": "/data/users/bsseo/gd_lab_vrl/gast/logs/gast/arm4/2026-10-01_22-47-01_train",
+  "source_launch_snapshot": "/data/users/bsseo/gd_lab_vrl/gast/logs/launches/2026-10-01_22-47-01_train",
+  "launch_base_commit": "036e2846648f5a4cb16bda8a53dbbea91d325815",
+  "selection": {
+    "rank_at_packaging": 1,
+    "online_score": 0.8865376111457486,
+    "score_is_online_proxy": true,
+    "reference_iteration": 6703,
+    "mean_terrain_level": 9.470297029702971,
+    "platform_gap_mean_level": 9.61111111111111,
+    "base_contact_termination_rate": 0.00954861111111111,
+    "platform_gap_termination_rate": 0.0,
+    "stairs_termination_rate": 0.017973856209150325,
+    "diagnostics": {
+      "gast_reconstruction": 0.15762731432914734,
+      "gast_blackout_fraction": 0.19553466796875,
+      "gast_valid_cell_fraction": 0.7803476849724265,
+      "gast_noise_strength": 1.0
+    }
+  },
+  "checkpoint_sha256": "2c85591d7f5966fabf1c888d6eece09c7dbf9a0bdbbfa9f55709f52aff225ff9",
+  "files": {
+    "teacher/6862_top1.pt": "GAST teacher checkpoint",
+    "params/agent.yaml": "run-specific agent configuration",
+    "params/env.yaml": "run-specific environment configuration",
+    "selection/leaderboard.json": "leaderboard snapshot at packaging time",
+    "selection/online_top5.json": "run's captured Top-5 selection criteria",
+    "source/commit.txt": "launch-time base commit",
+    "source/tracked_changes.patch": "launch-time tracked working-tree diff",
+    "source/source.tar.gz": "launch-time src/scripts/configs snapshot",
+    "source/launcher.sh": "teacher launch command"
+  },
+  "notes": [
+    "Top-1 and leaderboard are online selection artifacts, not a held-out evaluation.",
+    "Student distillation and deployment/export validation have not been performed by this package.",
+    "Use the GAST-specific student pipeline rather than the generic BIVT distillation pipeline."
+  ]
+}
