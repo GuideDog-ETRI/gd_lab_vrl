@@ -1,5 +1,6 @@
 import unittest
 import torch
+from gd_lab.gast.targets import gated_teacher_action
 from gd_lab.gast.geometry import warp_memory, targets, reconstruction_loss
 from gd_lab.gast.temporal import TemporalTerrainEncoder
 from gd_lab.gast.student import GastStudent
@@ -111,4 +112,23 @@ class GastTests(unittest.TestCase):
         model.encode(frames, memory, pose)[0].square().mean().backward()
         self.assertIsNotNone(model.cell_gru.weight_hh.grad)
 
-if __name__ == '__main__': unittest.main()
+    def test_gated_action_target_and_hazard_pose_exclusion(self):
+        class Teacher:
+            actor = torch.nn.Linear(5, 2, bias=False)
+
+        teacher = Teacher()
+        base = torch.tensor([[1., 2., 3.]])
+        latent = torch.tensor([[4., 5.]])
+        zero_gate = gated_teacher_action(teacher, base, latent, torch.zeros(1, 1))
+        one_gate = gated_teacher_action(teacher, base, latent, torch.ones(1, 1))
+        torch.testing.assert_close(zero_gate, teacher.actor(torch.cat((base, torch.zeros_like(latent)), -1)))
+        torch.testing.assert_close(one_gate, teacher.actor(torch.cat((base, latent), -1)))
+
+        model = GastStudent()
+        hidden = torch.randn(2, model.gru_hidden_dim)
+        before = model.hazard_head(model.hazard_input(hidden))
+        changed_pose = hidden.clone()
+        changed_pose[:, -4:] += 1000
+        after = model.hazard_head(model.hazard_input(changed_pose))
+        self.assertEqual(model.hazard_head.in_features, model.gru_hidden_dim - 4)
+        torch.testing.assert_close(after, before)

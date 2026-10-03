@@ -22,7 +22,12 @@ class GastStudent(GridAttentionStudent):
         self.head = nn.Sequential(nn.Flatten(), nn.Linear(187*32, 64), nn.ELU(), nn.Linear(64, 32), nn.Tanh())
         self.quality = nn.Linear(32, 1)
         self.age_embed = nn.Linear(1, 32)
-        self.hazard_head = nn.Linear(self.gru_hidden_dim, 1)
+        self.hazard_head = nn.Linear(self.gru_hidden_dim - 4, 1)
+
+    def hazard_input(self, hidden):
+        if hidden.shape[-1] != self.gru_hidden_dim:
+            raise ValueError(f"GAST hidden width must be {self.gru_hidden_dim}, got {hidden.shape[-1]}")
+        return hidden[:, :-4]  # exclude x/y/yaw and validity slots
 
     def init_hidden(self, num_envs, device):
         return torch.zeros(num_envs, self.gru_hidden_dim, device=device)

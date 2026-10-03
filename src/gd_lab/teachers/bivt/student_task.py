@@ -28,6 +28,12 @@ class RayStudentEnvCfg(BlindStartRaycastEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         self.observations.terrain.camera_visible.func = RayTeacherWithCameraSnapshots
+        # Student labels must be captured from the same visible terrain as the
+        # camera frame. Teacher-only blackouts otherwise label intact images
+        # with a zero terrain map and blind action.
+        self.observations.terrain.camera_visible.params = {
+            "start_prob": 0.0, "duration_steps": (50, 300), "episode_prob": 0.0
+        }
 
 
 TASK = registry.register_task(

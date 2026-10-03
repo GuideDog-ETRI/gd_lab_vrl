@@ -14,7 +14,10 @@ parser.add_argument('--teacher-envs', type=int, default=256)
 parser.add_argument('--student-envs', type=int, default=16)
 parser.add_argument('--teacher-iterations', type=int, default=20000)
 parser.add_argument('--student-iterations', type=int, default=20000)
+parser.add_argument('--teacher-only', action='store_true', help='Run only GAST PPO; GAST-teacher distillation is not implemented')
 args = parser.parse_args()
+if not args.teacher_only:
+    parser.error('GAST-teacher -> camera-student distillation is not implemented; pass --teacher-only to run only PPO')
 if not args.train:
     args.teacher_envs, args.student_envs = 32, 4
     args.teacher_iterations, args.student_iterations = 3, 16
@@ -55,15 +58,20 @@ try:
     checkpoint=Path(completed[0]['checkpoint'])
     if not checkpoint.is_file(): raise RuntimeError('Final teacher checkpoint missing')
     state['teacher_result']=completed[0]
-    stage('student', ['./scripts/run.sh','student','--num_envs',str(args.student_envs),
-        '--iterations',str(args.student_iterations),'--teacher_checkpoint',str(checkpoint),
-        '--bptt_steps','64' if args.train else '8','--lr','.0003','--save_interval','200',
-        '--perception_run_name',run+'_student'] +
+    if args.teacher_only:
+        state.update(status='teacher_complete_student_deferred', teacher_checkpoint=str(checkpoint), completed_at=datetime.datetime.now().isoformat())
+        save()
+        raise SystemExit(0)
+    stage('student', ['./scripts/run.sh','student','--task','Gd-BivtGastStudent-Rbq10-Dreamwaq-Vision-v0',
+        '--num_envs',str(args.student_envs), '--iterations',str(args.student_iterations),
+        '--teacher_checkpoint',str(checkpoint), '--bptt_steps','64' if args.train else '8',
+        '--lr','.0003','--save_interval','200','--perception_run_name',run+'_student'] +
         ([] if args.train else ['--student_warmup','0','--student_ramp','1']))
     student=root/'logs/gast/arm4'/(run+'_student')/f'perception_{args.student_iterations}.pt'
     if not student.is_file(): raise RuntimeError('Final student checkpoint missing')
     if not args.train:
-        stage('student_resume', ['./scripts/run.sh','student','--num_envs','4','--iterations','24',
+        stage('student_resume', ['./scripts/run.sh','student','--task','Gd-BivtGastStudent-Rbq10-Dreamwaq-Vision-v0',
+            '--num_envs','4','--iterations','24',
             '--teacher_checkpoint',str(checkpoint),'--student_resume',str(student),'--bptt_steps','8',
             '--lr','.0003','--student_warmup','0','--student_ramp','1',
             '--perception_run_name',run+'_resume'])
@@ -71,7 +79,7 @@ try:
         if not student.is_file(): raise RuntimeError('Resumed student checkpoint missing')
     state.update(status='complete',student_checkpoint=str(student),completed_at=datetime.datetime.now().isoformat())
     save()
-except BaseException as exc:
+except Exception as exc:
     state.update(status='failed',error=str(exc))
     save()
     raise

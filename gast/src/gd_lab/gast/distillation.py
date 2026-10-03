@@ -1,6 +1,7 @@
 import torch
 from torch.nn import functional as F
 from gd_lab.gast.geometry import reconstruction_loss
+from gd_lab.gast.targets import gated_teacher_action
 from gd_lab.gast.observations import pose_xyyaw
 from gd_lab.core.camera_contract import load_camera_contract
 from gd_lab.core.camera_geometry import mounted_camera_world_poses
@@ -113,7 +114,7 @@ class GastDistillation:
         # full teacher latent while the latent loss asked for the gated one, which
         # conflict whenever age > 0 or the frame is degraded. Equals teacher_action
         # when the gate is 1. Missing frames give exactly zero latent (no gradient).
-        expected = self.teacher.actor(torch.cat((base, teacher_latent*self.target_gate), -1))
+        expected = gated_teacher_action(self.teacher, base, teacher_latent, self.target_gate)
         seen = ~missing
         action_loss = (F.mse_loss(actual[seen], expected[seen]) if seen.any()
                        else actual.sum() * 0.0)
