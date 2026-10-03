@@ -13,28 +13,33 @@ def pose_xyyaw(env):
     return torch.cat((data.root_pos_w[:, :2], yaw[:, None]), -1)
 
 class TerrainHistory:
+    # Integer step bookkeeping: float32 seconds made the .1 s cadence alternate
+    # between 10 and 11 policy steps once sim time passed a few seconds.
+    NEVER = -10**9
+
     def __init__(self, env):
         n, device = env.num_envs, env.device
+        self.capture_every = max(1, round(.1 / env.step_dt))
         self.frames = torch.zeros(n, 49, 374, device=device)
         self.poses = torch.zeros(n, 49, 3, device=device)
-        self.times = torch.full((n, 49), -100., device=device)
-        self.last_capture = torch.full((n,), -100., device=device)
+        self.steps = torch.full((n, 49), self.NEVER, dtype=torch.long, device=device)
+        self.last_capture = torch.full((n,), self.NEVER, dtype=torch.long, device=device)
     def reset(self, ids=None):
         ids = slice(None) if ids is None else ids
         self.frames[ids] = 0
-        self.times[ids] = -100
-        self.last_capture[ids] = -100
+        self.steps[ids] = self.NEVER
+        self.last_capture[ids] = self.NEVER
     def update(self, env, terrain):
-        now = env.common_step_counter * env.step_dt
+        step = env.common_step_counter
         pose = pose_xyyaw(env)
-        capture = now-self.last_capture >= .1-1e-6
+        capture = step - self.last_capture >= self.capture_every
         if capture.any():
-            for value in (self.frames, self.poses, self.times):
+            for value in (self.frames, self.poses, self.steps):
                 value[capture, 1:] = value[capture, :-1].clone()
             self.frames[capture, 0] = terrain[capture]
             self.poses[capture, 0] = pose[capture]
-            self.times[capture, 0] = now
-            self.last_capture[capture] = now
+            self.steps[capture, 0] = step
+            self.last_capture[capture] = step
         index = list(HISTORY_OFFSETS)
         grids = self.frames[:, index].reshape(-1, 2, 187).transpose(1, 2)
         warped = warp_memory(grids, self.poses[:, index].reshape(-1, 3),
@@ -42,7 +47,7 @@ class TerrainHistory:
         valid = warped[..., 1] > .999
         packed = torch.cat((torch.where(valid, warped[..., 0], 0), valid.float()), -1).reshape(-1, 8, 374)
         packed[:, -1] = terrain
-        age = (now-self.times[:, index]).clamp(0, 5)
+        age = ((step - self.steps[:, index]).clamp(0, 10**6).float() * env.step_dt).clamp(0, 5)
         age[:, -1] = 0
         return torch.cat((packed, age[..., None]), -1).flatten(1)
 
@@ -72,6 +77,9 @@ class NoisyTerrain(ManagerTermBase):
         self.bias = torch.zeros(env.num_envs, 1, device=env.device)
         self.diagnostic_counts = torch.zeros(5, device=env.device, dtype=torch.float64)
         self.last_step = -1
+        # Control steps completed before this process (set on resume) so the
+        # corruption ramp continues instead of restarting at 10%.
+        self.step_offset = 0
         self.cached = None
         self.history = TerrainHistory(env)
         self.reset()
@@ -92,7 +100,7 @@ class NoisyTerrain(ManagerTermBase):
         clean = clean_terrain(env)
         h, valid = clean[:, :187] / 5, clean[:, 187:374].bool()
         # Ramp observation corruption over the first 200k control steps.
-        strength = min(1., .1 + step / 200000.)
+        strength = min(1., .1 + (step + self.step_offset) / 200000.)
         h = h + strength * (torch.randn_like(h) * .01 + self.bias)
         valid = valid & (torch.rand_like(h) > .03 * strength)
         blackout = self.blackout.mask(step)

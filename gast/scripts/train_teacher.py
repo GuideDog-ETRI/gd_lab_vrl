@@ -155,6 +155,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     if agent_cfg.resume:
         print(f"[INFO] Loading checkpoint: {resume_path}")
         runner.load(resume_path)
+        terrain_term = getattr(env.unwrapped, '_gast_terrain_term', None)
+        if terrain_term is not None:
+            terrain_term.step_offset = runner.current_learning_iteration * agent_cfg.num_steps_per_env
+            print(f'[INFO] GAST noise ramp resumes at step offset {terrain_term.step_offset}')
 
     if not runner.disable_logs:
         dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
