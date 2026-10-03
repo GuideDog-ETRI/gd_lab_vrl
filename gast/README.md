@@ -85,6 +85,17 @@ export/deployment scripts. No robot deployment is performed by this pipeline.
   checks student resume; local optimizer-resume and production BPTT64 simulation
   remain unverified. Smoke checkpoints are intentionally not versioned.
 
+## Student-checkpoint compatibility
+
+The hazard head now receives the recurrent terrain features without the four
+pose/validity slots (input width changed from 64 to 60 for the original
+64-wide hidden state). Existing GAST student checkpoints created with the
+previous 64-input hazard head are therefore **not strict-resume compatible**:
+`hazard_head.weight` has a different shape. Start a new student run or add an
+explicit, validated weight-migration tool; do not silently load or reshape the
+old head. This does not affect GAST teacher checkpoints or BIVT-Ray teacher
+checkpoints.
+
 ## OnVLM2 three-GPU teacher (2026-10-01)
 
 The single-GPU validation above is historical. The OnVLM2 launcher is
