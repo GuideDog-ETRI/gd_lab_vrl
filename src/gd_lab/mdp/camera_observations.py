@@ -92,6 +92,10 @@ class CameraVisibleTerrain(ManagerTermBase):
         height = torch.where(visible & torch.isfinite(height), height, 0)
         self.observation[refresh] = torch.cat((height, visible.float()), -1)[refresh]
         self.last_step[refresh] = step
+        if capture_step is not None and step == capture_step:
+            env._vrl_teacher_terrain_capture_steps = self.last_step.clone()
+            env._vrl_teacher_terrain_snapshot = self.observation.clone()
+            env._vrl_teacher_terrain_contract = self.contract.manifest()
         if self.buffers is None:
             self.buffers = tuple(x.clone() for x in snapshot)
         else:

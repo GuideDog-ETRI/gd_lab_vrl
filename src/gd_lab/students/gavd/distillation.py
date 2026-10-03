@@ -12,27 +12,36 @@ class AttentionDistillation:
         self.warmup, self.ramp = warmup, ramp
         self.latent = torch.zeros(num_envs, 32, device=device)
         self.ready = torch.zeros(num_envs, dtype=torch.bool, device=device)
+        self.stamp = torch.full((num_envs,), -100.0, device=device)
         self.metrics = {}
 
     @torch.no_grad()
-    def capture(self, obs):
+    def capture(self, obs, teacher_action, base_actor=None, teacher_terrain=None):
         packed = self.teacher._actor_input(obs, inference=True)
-        return packed[:, :-32].clone(), self.teacher.actor(packed).clone(), obs["terrain"].clone()
+        base = packed[:, :-32] if base_actor is None else base_actor
+        terrain = obs["terrain"] if teacher_terrain is None else teacher_terrain
+        if terrain.shape[-1] != 374:
+            raise RuntimeError("GAVD requires the synchronized 187-height + 187-visibility teacher map")
+        return base.clone(), teacher_action.clone(), terrain.clone()
 
     @torch.no_grad()
-    def actions(self, obs, iteration):
+    def actions(self, obs, iteration, current_time_seconds):
         teacher_actions = self.teacher.act_inference(obs)
         probability = min(1., max(0., (iteration - self.warmup) / max(1, self.ramp)))
-        student_actions = self.teacher.act_with_terrain_latent(obs, self.latent)
-        use_student = (torch.rand_like(self.ready, dtype=torch.float) < probability) & self.ready
+        age = current_time_seconds - self.stamp
+        fresh = self.ready & (age >= 0) & (age < 0.3)
+        student_actions = self.teacher.act_with_terrain_latent(obs, self.latent * fresh[:, None])
+        use_student = (torch.rand_like(self.ready, dtype=torch.float) < probability) & fresh
         self.metrics["student_rollout_fraction"] = use_student.float().mean().item()
+        self.metrics["stale_fraction"] = (~fresh).float().mean().item()
         return torch.where(use_student[:, None], student_actions, teacher_actions)
 
     def reset(self, done):
         self.ready[done] = False
         self.latent[done] = 0
+        self.stamp[done] = -100.0
 
-    def update(self, frames, hidden, rows, extra, age_seconds):
+    def update(self, frames, hidden, rows, extra, age_seconds, capture_time_seconds=None):
         base, actions, terrain = (x[rows] for x in extra)
         frames = frames.clone()
         dropped = torch.rand(frames.shape[:2], device=frames.device) < .08
@@ -42,9 +51,15 @@ class AttentionDistillation:
         latent, memory, spatial = self.student.encode(frames, timed_hidden)
         predicted_action = self.teacher.actor(torch.cat((base, latent), -1))
         action_loss = F.mse_loss(predicted_action, actions)
-        geometry_loss = spatial_loss(spatial, terrain)
+        geometry_loss, height_loss, visibility_loss, visible_fraction = spatial_loss(
+            spatial, terrain, return_components=True)
         self.latent[rows] = latent.detach()
         self.ready[rows] = True
+        # Production supplies the packet timestamp on the simulation clock.
+        # Keep direct CPU/unit callers compatible with the pre-alignment API.
+        self.stamp[rows] = 0.0 if capture_time_seconds is None else capture_time_seconds
         self.metrics.update(action_mse=action_loss.item(), spatial_loss=geometry_loss.item(),
+                            height_visible_loss=height_loss.item(), visibility_bce=visibility_loss.item(),
+                            teacher_visible_fraction=visible_fraction.item(),
                             age_ms=age_seconds * 1000, view_drop_fraction=dropped.float().mean().item())
         return latent, memory, action_loss + .5 * geometry_loss

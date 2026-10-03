@@ -91,26 +91,38 @@ def test_delay_does_not_relabel_and_resets_and_reordering_are_rejected():
 
 
 def test_capture_function_freezes_frames_and_teacher_labels():
-    # Load the production capture function without booting Isaac's CLI.
+    # Load the production packet builder without booting Isaac. The strict
+    # camera/calibration contract has dedicated CPU tests in test_alignment_unit.py.
     path = Path(__file__).parents[1] / "scripts/distill_student.py"
     tree = ast.parse(path.read_text())
     tree.body = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "capture_teacher_packet"]
     frame = torch.ones(2, 4, 2, 3, 3)
-    terrain = torch.ones(2, 8)
+    terrain = torch.ones(2, 374)
     latent = torch.tensor([[1., 2.], [3., 4.]])
-    env = NS(unwrapped=NS(_vrl_camera_snapshot=(frame,), _vrl_camera_snapshot_steps=torch.tensor([8, 8]),
-                         common_step_counter=8, scene=NS(env_origins=None)))
-    teacher = NS(terrain_latent=lambda obs: latent, _height_scan_slice=slice(0, 4),
-                 terrain_encoder=NS(grid_shape=(2, 2)))
-    ns = dict(torch=torch, terrain_family_gate=lambda *a: torch.zeros(2),
-              augment_student_camera_frames=lambda frames, *a: frames,
+    env = NS(common_step_counter=8, _vrl_camera_snapshot=(frame,),
+             _vrl_camera_snapshot_steps=torch.tensor([8, 8]),
+             scene=NS(env_origins=None))
+    teacher = NS(terrain_latent=lambda obs: latent, _height_scan_slice=slice(0, 187),
+                 _actor_input=lambda obs, inference: torch.ones(2, 5),
+                 act_inference=lambda obs: torch.ones(2, 3),
+                 terrain_encoder=NS(grid_shape=(11, 17)))
+    def validate(e, obs, contract):
+        if not (e._vrl_camera_snapshot_steps == e.common_step_counter).all():
+            raise RuntimeError("camera frame is stale")
+        return obs["terrain"]
+    ns = dict(torch=torch, validate_teacher_camera_capture=validate,
+              terrain_family_gate=lambda *a: torch.zeros(2),
+              augment_student_camera_frames=lambda frames, *a: frames.clone(),
               height_discontinuity_metres=lambda h, *a: h.mean(-1))
     exec(compile(tree, str(path), "exec"), ns)
-    payload = ns["capture_teacher_packet"](env, {"terrain": terrain}, teacher, torch.zeros(2), None, None)
-    frame.zero_()
-    latent.zero_()
-    terrain.zero_()
-    assert payload[0].sum() > 0 and payload[1].sum() == 10 and payload[2].sum() == 2
-    env.unwrapped._vrl_camera_snapshot_steps[0] = 7
-    with pytest.raises(RuntimeError, match="fresh"):
-        ns["capture_teacher_packet"](env, {"terrain": terrain}, teacher, torch.zeros(2), None, None)
+    payload = ns["capture_teacher_packet"](env, {"terrain": terrain}, teacher,
+                                             torch.zeros(2), None, None, object())
+    expected_terrain = terrain.clone()
+    frame.zero_(); latent.zero_(); terrain.zero_()
+    assert payload[0].sum() > 0 and payload[1].sum() == 10
+    assert payload[2].shape == (2, 374) and torch.equal(payload[2], expected_terrain)
+    assert payload[8].shape == (2, 3)
+    env._vrl_camera_snapshot_steps[0] = 7
+    with pytest.raises(RuntimeError, match="stale"):
+        ns["capture_teacher_packet"](env, {"terrain": terrain}, teacher,
+                                      torch.zeros(2), None, None, object())
