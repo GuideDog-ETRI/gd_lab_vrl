@@ -74,6 +74,23 @@ class RaycastVisibleTerrainDropout(ManagerTermBase):
 
     def __call__(self, env, start_prob=0.0, duration_steps=(50, 300), episode_prob=0.0) -> torch.Tensor:
         step = env.common_step_counter
+        # GAST schedules teacher Ray targets at the exact rendered student
+        # capture step. Keep ordinary BIVT-Ray PPO on its normal refresh clock.
+        if getattr(env, "_vrl_camera_capture_step", None) == step:
+            scan = env.scene["height_scanner"].data
+            if scan.ray_hits_w.shape[1] != SCAN_CELLS:
+                raise ValueError("VRL v2 requires the configured 11x17 height scan")
+            visible = raycast_visible_mask(env, self.contract, self.intrinsic, self.cast)
+            height = (scan.pos_w[:, 2, None] - scan.ray_hits_w[..., 2] - 0.5).clamp(-1, 1) * 5
+            height = torch.where(visible & torch.isfinite(height), height, 0)
+            self.observation.copy_(torch.cat((height, visible.float()), -1))
+            self.last_step.fill_(step)
+            output = torch.where(self.blackout.mask(step)[:, None], 0.0, self.observation)
+            env._vrl_teacher_ray_capture_steps = self.last_step.clone()
+            env._vrl_teacher_ray_snapshot = output.clone()
+            env._vrl_teacher_ray_visible = output[:, SCAN_CELLS:].bool().clone()
+            env._vrl_teacher_ray_contract = self.contract.manifest()
+            return output
         refresh = camera_refresh_mask(self.last_step, step, self.period_steps)
         if refresh.any():
             scan = env.scene["height_scanner"].data

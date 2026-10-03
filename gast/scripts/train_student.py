@@ -7,7 +7,9 @@ packet loss. Targets use capture time; only student weights receive gradients.
 import argparse
 import hashlib
 import os
+import re
 import sys
+from pathlib import Path
 
 from isaaclab.app import AppLauncher
 
@@ -148,21 +150,32 @@ def capture_teacher_packet(env, obs, teacher, episode_ids, noise_cfg, gap_ghost)
     """Freeze images AND supervision at capture time, before simulated transit."""
     snapshot = getattr(env.unwrapped, "_vrl_camera_snapshot", None)
     stamps = getattr(env.unwrapped, "_vrl_camera_snapshot_steps", None)
-    if snapshot is None or stamps is None or not (stamps == env.unwrapped.common_step_counter).all():
+    step = env.unwrapped.common_step_counter
+    if snapshot is None or stamps is None or not (stamps == step).all():
         raise RuntimeError("Scheduled camera capture did not produce fresh images for every environment")
+    ray_steps = getattr(env.unwrapped, "_vrl_teacher_ray_capture_steps", None)
+    ray_snapshot = getattr(env.unwrapped, "_vrl_teacher_ray_snapshot", None)
+    if ray_steps is None or not (ray_steps == step).all():
+        raise RuntimeError("Teacher Ray map is not from the current student camera capture step")
     gap_envs = terrain_family_gate(env.unwrapped, ("platform_gap",)) == 0
     frames = augment_student_camera_frames(
         snapshot[0].clone(), snapshot, env.unwrapped.scene.env_origins, gap_envs, noise_cfg, gap_ghost
     )
     latent = teacher.terrain_latent(obs).clone()
     terrain = obs["terrain"]
+    if terrain.shape[-1] != 374:
+        raise RuntimeError(f"BIVT-Ray teacher terrain must be [masked height(187), visibility(187)], got {terrain.shape[-1]}")
+    if ray_snapshot is None or not torch.allclose(terrain, ray_snapshot, atol=0, rtol=0):
+        raise RuntimeError("Teacher behavior/latent input is not the synchronized Ray target")
+    teacher_action = teacher.act_inference(obs).clone()
     cells = teacher._height_scan_slice.stop - teacher._height_scan_slice.start
     visibility = terrain[..., cells:].bool()
     hazard = height_discontinuity_metres(terrain[..., :cells], 5.0, teacher.terrain_encoder.grid_shape, visibility)
     grid = visibility.reshape(-1, *teacher.terrain_encoder.grid_shape)
     supervised = ((grid[:, 1:, :] & grid[:, :-1, :]).flatten(1).any(1)
                   | (grid[:, :, 1:] & grid[:, :, :-1]).flatten(1).any(1))
-    return frames.clone(), latent, hazard, supervised, visibility.float().mean(-1), episode_ids.clone()
+    return (frames.clone(), latent, hazard, supervised, visibility.float().mean(-1),
+            episode_ids.clone(), teacher_action)
 
 
 @hydra_task_config(args_cli.task, args_cli.agent)
@@ -178,6 +191,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     checkpoint_path = (os.path.abspath(args_cli.teacher_checkpoint) if args_cli.teacher_checkpoint else
                        get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint))
     print(f"[INFO] Teacher checkpoint: {checkpoint_path}")
+    teacher_env_yaml = next((parent / "params" / "env.yaml" for parent in Path(checkpoint_path).parents
+                             if (parent / "params" / "env.yaml").is_file()), None)
+    if teacher_env_yaml is None:
+        raise RuntimeError("Teacher package must include params/env.yaml so its camera profile can be verified")
+    teacher_cfg_text = teacher_env_yaml.read_text()
+    teacher_profiles = re.findall(r"(?m)^camera_profile:\s*([A-Za-z0-9_-]+)\s*$", teacher_cfg_text)
+    if len(teacher_profiles) != 1 or teacher_profiles[0] != env_cfg.camera_profile:
+        raise RuntimeError(f"Teacher/student camera profile mismatch or missing metadata: teacher={teacher_profiles}, student={env_cfg.camera_profile}")
+    print(f"[INFO] Verified teacher/student camera profile={teacher_profiles[0]} from {teacher_env_yaml}", flush=True)
     with open(checkpoint_path, "rb") as teacher_file:
         teacher_sha256 = hashlib.sha256(teacher_file.read()).hexdigest()
 
@@ -210,7 +232,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     print(f"[INFO] Camera transport: {transport_config.manifest(dt)}; interval_steps={transport.interval}, delay_steps={transport.delay}")
 
     student = GastStudent(env_cfg.camera_profile).to(device)
-    attention = GastDistillation(teacher, student, env.unwrapped,
+    attention = GastDistillation(teacher, student, env.unwrapped, camera_contract,
                                 args_cli.student_warmup, args_cli.student_ramp)
     optimizer = torch.optim.Adam(student.parameters(), lr=args_cli.lr)
     start_iteration = 0
@@ -218,6 +240,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         saved = torch.load(args_cli.student_resume, map_location=device, weights_only=False)
         if saved['teacher_sha256'] != teacher_sha256 or saved['student_arch'] != args_cli.student_arch:
             raise ValueError('Resume teacher hash or student architecture differs')
+        if saved.get('gast_distillation_contract') != 2:
+            raise ValueError('Student checkpoint uses a different GAST supervision contract; do not silently mix objectives')
+        if saved.get('camera_contract') != camera_contract.manifest():
+            raise ValueError('Resume camera calibration/timing contract differs from this run')
         student.load_state_dict(saved['model'], strict=True)
         optimizer.load_state_dict(saved['optimizer'])
         start_iteration = int(saved['iteration'])
@@ -258,7 +284,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             "distillation_args": vars(args_cli), "camera_contract": camera_contract.manifest(),
             "camera_noise_enabled": camera_noise_cfg is not None,
             "teacher_checkpoint": checkpoint_path, "teacher_sha256": teacher_sha256,
-            "camera_transport": transport_config.manifest(dt), "camera_transport_seed": agent_cfg.seed}
+            "camera_transport": transport_config.manifest(dt), "camera_transport_seed": agent_cfg.seed,
+            "gast_distillation_contract": 2,
+            "student_geometry_supervision": "teacher_ray_visible_valid_cells_only",
+            "student_visibility_supervision": "teacher_ray_mask_all_cells",
+            "teacher_behavior_target": "same_capture_step_teacher_action"}
         if top5_selection is not None: payload["student_top5_selection"] = top5_selection
         return payload
 
@@ -301,19 +331,18 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                 if step == capture_step:
                     payload = capture_teacher_packet(env, obs, teacher, episode_ids, camera_noise_cfg, gap_ghost)
                     if attention:
-                        payload = (*payload, attention.capture(obs))
+                        payload = (*payload, attention.capture(obs, payload[6]))
                     transport.capture(step, payload)
                 for packet in transport.receive(step):
-                    frames, teacher_latent, hazard_label, hazard_supervised, visible, captured_episodes = packet.payload[:6]
+                    frames, teacher_latent, hazard_label, hazard_supervised, visible, captured_episodes, teacher_action = packet.payload[:7]
                     valid = delivery_mask(packet.capture_step, captured_episodes, episode_ids, last_delivered)
                     if not valid.any():
                         continue
                     rows = valid.nonzero(as_tuple=False).flatten()
                     extra_loss = torch.zeros((), device=device)
                     if attention:
-                        attention.teacher_latent = teacher_latent
                         student_latent, new_hidden, extra_loss = attention.update(
-                            frames[rows], hidden[rows], rows, packet.payload[6], (step-packet.capture_step)*dt)
+                            frames[rows], hidden[rows], rows, packet.payload[7], (step-packet.capture_step)*dt)
                     else:
                         student_latent, new_hidden = student(frames[rows], hidden[rows])
                     hidden = hidden.index_copy(0, rows, new_hidden)

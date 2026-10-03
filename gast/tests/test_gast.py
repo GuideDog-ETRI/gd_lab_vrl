@@ -44,6 +44,60 @@ class GastTests(unittest.TestCase):
         loss = reconstruction_loss(torch.zeros(1,187,6, requires_grad=True), clean)
         self.assertTrue(torch.isfinite(loss))
 
+    def test_student_geometry_uses_only_teacher_visible_heights(self):
+        clean = torch.zeros(1, 748)
+        clean[:, 187:374] = 1  # all underlying scan points are valid
+        clean[:, 561:748] = 1  # semantic labels are known, but mask still applies
+        teacher = torch.zeros(1, 374)
+        visibility = torch.zeros(187, dtype=torch.bool)
+        visibility[[4, 5, 21, 22]] = True
+        teacher[:, 187:] = visibility.float()
+        teacher[:, :187] = torch.arange(187).float()[None] * 0.1
+        labels, mask = targets(clean, teacher)
+        self.assertTrue(torch.equal(mask[0, :, 0], visibility))
+        self.assertTrue(torch.equal(mask[0, :, 1], torch.ones(187, dtype=torch.bool)))
+        self.assertTrue(torch.equal(labels[0, :, 1].bool(), visibility))
+        torch.testing.assert_close(labels[0, visibility, 0], teacher[0, :187][visibility] / 5)
+
+        prediction = torch.zeros(1, 187, 6)
+        loss_a, height_a, vis_a, _ = reconstruction_loss(prediction, clean, teacher, return_components=True)
+        changed_hidden = clean.clone()
+        changed_hidden[:, :187] = torch.randn(1, 187) * 1000
+        changed_teacher = teacher.clone()
+        hidden_heights = torch.randn(int((~visibility).sum())) * 1000
+        changed_teacher[0, :187] = torch.where(
+            visibility, teacher[0, :187], teacher.new_zeros(187).masked_scatter(~visibility, hidden_heights))
+        loss_b, height_b, vis_b, _ = reconstruction_loss(prediction, changed_hidden, changed_teacher, return_components=True)
+        torch.testing.assert_close(height_a, height_b)
+        torch.testing.assert_close(vis_a, vis_b)
+        torch.testing.assert_close(loss_a, loss_b)
+
+    def test_teacher_visibility_target_is_independent_of_height_validity(self):
+        clean = torch.zeros(1, 748)
+        clean[:, 187:374] = 1
+        clean[:, 187 + 5] = 0  # scanner height invalid, but teacher visibility remains known
+        teacher = torch.zeros(1, 374)
+        teacher[0, 5] = 0.25
+        teacher[0, 187 + 5] = 1
+        labels, mask = targets(clean, teacher)
+        self.assertFalse(mask[0, 5, 0])  # no height regression at invalid scanner cell
+        self.assertTrue(mask[0, 5, 1])   # still supervise the teacher visibility prediction
+        self.assertTrue(labels[0, 5, 1])
+
+    def test_all_unobserved_cells_have_no_height_loss_but_train_mask(self):
+        clean = torch.zeros(2, 748)
+        clean[:, 187:374] = 1
+        teacher = torch.zeros(2, 374)
+        pred = torch.randn(2, 187, 6, requires_grad=True)
+        total, height, visibility, fraction = reconstruction_loss(pred, clean, teacher, return_components=True)
+        self.assertTrue(torch.isfinite(total))
+        self.assertEqual(height.item(), 0.)
+        self.assertGreater(visibility.item(), 0.)
+        self.assertEqual(fraction.item(), 0.)
+        total.backward()
+        self.assertEqual(pred.grad[..., 0].abs().sum().item(), 0.)
+        self.assertGreater(pred.grad[..., 1].abs().sum().item(), 0.)
+
     def test_student_missing_and_history(self):
         model = GastStudent()
         frames = torch.rand(2,4,2,45,80)
