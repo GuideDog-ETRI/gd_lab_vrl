@@ -340,13 +340,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                     valid = delivery_mask(packet.capture_step, captured_episodes, episode_ids, last_delivered)
                     # One exploded env must not kill the run: drop its non-finite rows.
                     finite = (torch.isfinite(frames.flatten(1)).all(1) & torch.isfinite(teacher_latent).all(1)
-                              & torch.isfinite(teacher_action).all(1))
+                              & torch.isfinite(teacher_action).all(1) & torch.isfinite(hazard_label.flatten(1)).all(1)
+                              & torch.isfinite(visible.flatten(1)).all(1))
                     if attention:
                         for value in packet.payload[7]:
                             if value.is_floating_point():
                                 finite &= torch.isfinite(value.flatten(1)).all(1)
-                    if not bool(finite.all()):
-                        nonfinite_rows += int((valid & ~finite).sum())
+                    bad_rows = valid & ~finite
+                    if bad_rows.any():
+                        # Same rule as main-tree distill_student.py: a non-finite packet
+                        # means that env's state is unusable; drop its memory now.
+                        nonfinite_rows += int(bad_rows.sum())
+                        hidden = torch.where(bad_rows[:, None], torch.zeros_like(hidden), hidden)
+                        if attention:
+                            attention.reset(bad_rows)
                         print(f"[GAST_STUDENT_NONFINITE] capture_step={packet.capture_step} "
                               f"envs={(~finite).nonzero().flatten()[:16].tolist()}", flush=True)
                     valid &= finite
