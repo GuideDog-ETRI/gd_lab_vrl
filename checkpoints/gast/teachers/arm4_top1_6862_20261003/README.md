@@ -26,7 +26,7 @@ These are online selection-window statistics. The score is explicitly marked `sc
 Use the GAST-specific student pipeline and this checkpoint as the frozen teacher, e.g. from the repository's `gast/` working directory:
 
 ```bash
-./scripts/train_student_3gpu.sh --teacher_checkpoint /path/to/6862_top1.pt
+./scripts/run.sh student --teacher_checkpoint /path/to/6862_top1.pt
 ```
 
 Check the current `gast/scripts/train_student.py` CLI and the GAST student README before launching: environment count, iteration target, sensor/rendering requirements, GPU allocation, and output path should be set for the destination machine. Do **not** substitute the generic BIVT distillation script: this checkpoint belongs to the GAST teacher/student path. Student training uses rendered camera observations, so it still incurs simulator camera-rendering cost. Student training and deployment/export validation are not included in this package.
