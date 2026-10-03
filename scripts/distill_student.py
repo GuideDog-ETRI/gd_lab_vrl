@@ -16,6 +16,7 @@ from isaaclab.app import AppLauncher
 import cli_args  # isort: skip
 from gd_lab.core.camera_transport import CameraTransport, CameraTransportConfig, delivery_mask
 from gd_lab.core.experiments import training_arm_overrides
+from gd_lab.students.package import find_teacher_env_yaml
 from vrl_runtime import prepare_vrl_runtime, verify_vrl_runtime
 
 parser = argparse.ArgumentParser(description="Distill the vision-RL terrain-encoder teacher into a camera student.")
@@ -171,8 +172,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     checkpoint_path = (os.path.abspath(args_cli.teacher_checkpoint) if args_cli.teacher_checkpoint else
                        get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint))
     print(f"[INFO] Teacher checkpoint: {checkpoint_path}")
-    teacher_env_yaml = next((parent / "params" / "env.yaml" for parent in Path(checkpoint_path).parents
-                             if (parent / "params" / "env.yaml").is_file()), None)
+    teacher_env_yaml = find_teacher_env_yaml(checkpoint_path)
     if teacher_env_yaml is None:
         raise RuntimeError("Teacher package must include params/env.yaml to verify its camera profile")
     teacher_profiles = re.findall(r"(?m)^camera_profile:\s*([A-Za-z0-9_-]+)\s*$", teacher_env_yaml.read_text())
@@ -266,6 +266,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     learning_started = time.perf_counter()
 
     it = start_iteration
+    consecutive_skips = skipped_windows = nonfinite_rows = 0
     while it < args_cli.iterations:
         window_len = min(args_cli.bptt_steps, args_cli.iterations - it)
         optimizer.zero_grad()
@@ -301,7 +302,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                 if dones.any():
                     done_rows = dones.reshape(-1).bool()
                     keep = (~done_rows).unsqueeze(-1).to(hidden.dtype)
-                    hidden = hidden * keep  # stays in-graph on purpose; see module docstring
+                    hidden = torch.where(keep > 0, hidden, torch.zeros_like(hidden))  # NaN*0 is NaN
                     episode_ids += done_rows.long()
                     gap_ghost.reset(done_rows.nonzero(as_tuple=False).flatten())
                     if attention:
@@ -322,6 +323,24 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                     (frames, teacher_latent, teacher_terrain, hazard_label, hazard_supervised,
                      visible, captured_episodes, base_actor, teacher_action) = packet.payload[:9]
                     valid = delivery_mask(packet.capture_step, captured_episodes, episode_ids, last_delivered)
+                    finite = torch.isfinite(frames.flatten(1)).all(1)
+                    for value in (teacher_latent, teacher_terrain, hazard_label, visible, base_actor, teacher_action):
+                        if value.is_floating_point():
+                            finite &= torch.isfinite(value.flatten(1)).all(1)
+                    if attention:
+                        for value in packet.payload[9]:
+                            if value.is_floating_point():
+                                finite &= torch.isfinite(value.flatten(1)).all(1)
+                    bad_rows = valid & ~finite
+                    if bad_rows.any():
+                        nonfinite_rows += int(bad_rows.sum().item())
+                        hidden = torch.where(bad_rows[:, None], torch.zeros_like(hidden), hidden)
+                        if attention:
+                            attention.reset(bad_rows)
+                        else:
+                            rvld_latent[bad_rows] = 0
+                            rvld_ready[bad_rows] = False
+                            rvld_stamp[bad_rows] = -100.0
                     if not valid.any():
                         continue
                     rows = valid.nonzero(as_tuple=False).flatten()
@@ -370,8 +389,19 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             it += 1
         if window_updates:
             (window_loss / window_updates).backward()
-            torch.nn.utils.clip_grad_norm_(trainable, 1.0, error_if_nonfinite=True)
-            optimizer.step()
+            norm = torch.nn.utils.clip_grad_norm_(trainable, 1.0)
+            if torch.isfinite(norm) and torch.isfinite(window_loss):
+                optimizer.step()
+                consecutive_skips = 0
+            else:
+                optimizer.zero_grad(set_to_none=True)
+                consecutive_skips += 1
+                skipped_windows += 1
+                bad_hidden = ~torch.isfinite(hidden).all(-1)
+                hidden = torch.where(bad_hidden[:, None], torch.zeros_like(hidden), hidden)
+                print(f"[STUDENT_NONFINITE] gradient window skipped at iteration {it}; consecutive={consecutive_skips}", flush=True)
+                if consecutive_skips > 5:
+                    raise RuntimeError("Student gradients non-finite for 6 consecutive windows")
         hidden = hidden.detach()  # stop gradients at the BPTT window boundary
         count = max(window_updates, 1)
         if attention:
@@ -398,6 +428,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         writer.add_scalar("transport/updates", window_updates, it)
         writer.add_scalar("transport/delay_ms", window_delay_sum / count, it)
         writer.add_scalar("transport/dropped", transport.dropped, it)
+        writer.add_scalar("distillation/skipped_windows", skipped_windows, it)
+        writer.add_scalar("distillation/nonfinite_rows", nonfinite_rows, it)
         if (it // window_len) % 10 == 0 or it >= args_cli.iterations:
             print(f"[INFO] iter {it}/{args_cli.iterations} mse={mse_val:.5f} hazard_mse={hazard_val:.5f} "
                   f"action_mse={action_val:.5f} spatial={geometry_val:.5f} "

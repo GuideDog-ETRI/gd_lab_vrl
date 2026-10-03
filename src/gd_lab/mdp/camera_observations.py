@@ -18,12 +18,14 @@ def canonical_camera_snapshot(scene, contract):
         robot.data.body_pos_w[:, trunk], robot.data.body_quat_w[:, trunk], contract
     )
     for camera_index, name in enumerate(CAMERA_NAMES):
-        data = scene[name].data
+        sensor = scene[name]
+        data = sensor.data
         target_k = data.intrinsic_matrices.clone()
         target_k[:, 0, 0], target_k[:, 1, 1] = contract.fx, contract.fy
         target_k[:, 0, 2], target_k[:, 1, 2] = contract.width / 2, contract.height / 2
         shape = (contract.height, contract.width)
         # Keep invalid depth as invalid for visibility; map it only in student input.
+        _validate_sensor_config(sensor, name, camera_index, contract)
         raw = data.output["distance_to_image_plane"]
         # grid_sample on inf can produce NaN even at valid neighbors. A far
         # sentinel is conservative: it can never validate an in-range point.
@@ -37,6 +39,35 @@ def canonical_camera_snapshot(scene, contract):
         rotations.append(camera_quat[:, camera_index])
         intrinsics.append(target_k)
     return tuple(torch.stack(items, 1) for items in (frames, depths, positions, rotations, intrinsics))
+
+def _validate_sensor_config(sensor, name, camera_index, contract):
+    """Check actual TiledCameraCfg mount and optics against the teacher contract."""
+    cfg = getattr(sensor, "cfg", None)
+    offset, spawn = getattr(cfg, "offset", None), getattr(cfg, "spawn", None)
+    if offset is None or spawn is None:
+        raise RuntimeError(f"{name} has no inspectable camera mount/optics config")
+    if getattr(offset, "convention", None) != "opengl":
+        raise RuntimeError(f"{name} mount quaternion convention is not OpenGL")
+    expected_pos = torch.as_tensor(contract.positions[camera_index], dtype=torch.float64)
+    expected_quat = torch.as_tensor(contract.quaternions_opengl[camera_index], dtype=torch.float64)
+    actual_pos = torch.as_tensor(offset.pos, dtype=torch.float64)
+    actual_quat = torch.as_tensor(offset.rot, dtype=torch.float64)
+    actual_quat = actual_quat / actual_quat.norm().clamp_min(1e-12)
+    expected_quat = expected_quat / expected_quat.norm().clamp_min(1e-12)
+    if actual_pos.shape != expected_pos.shape or not torch.allclose(actual_pos, expected_pos, atol=1e-6, rtol=0):
+        raise RuntimeError(f"{name} configured mount position differs from camera contract")
+    if torch.abs(torch.dot(actual_quat, expected_quat)) < 1 - 1e-6:
+        raise RuntimeError(f"{name} configured mount rotation differs from camera contract")
+    if tuple(spawn.clipping_range) != tuple(contract.depth_clip) or (int(cfg.width), int(cfg.height)) != (contract.width, contract.render_height):
+        raise RuntimeError(f"{name} configured clipping or resolution differs from camera contract")
+    raw_k = sensor.data.intrinsic_matrices
+    render_height, render_width = sensor.data.output["distance_to_image_plane"].shape[-3:-1]
+    focal_px = contract.focal_m * render_width / contract.sensor_size_m[0]
+    expected_k = raw_k.new_tensor([[focal_px, 0, render_width/2], [0, focal_px, render_height/2], [0, 0, 1]])
+    if not torch.allclose(raw_k, expected_k.expand_as(raw_k), atol=1e-3, rtol=1e-4):
+        raise RuntimeError(f"{name} renderer intrinsics disagree with configured camera optics")
+    if abs(float(spawn.focal_length)/1000-contract.focal_m) > 1e-7 or abs(float(spawn.horizontal_aperture)/1000-contract.sensor_size_m[0]) > 1e-7:
+        raise RuntimeError(f"{name} configured optical calibration differs from camera contract")
 
 
 class CameraVisibleTerrain(ManagerTermBase):

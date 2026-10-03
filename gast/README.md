@@ -32,11 +32,13 @@ CVTT/BIVT/RVLD/GAVD code outside gast is unchanged. No Git push is performed.
 From this directory, `scripts/run.sh teacher --num_envs 256 --max_iterations 20000`
 trains a new teacher. For the student, use `scripts/run.sh student --num_envs 16
 --iterations 20000 --bptt_steps 64 --lr .0003 --teacher_checkpoint /absolute/model.pt`.
-`python3 scripts/pipeline.py` defaults to SMOKE ONLY: teacher3 -> student16 ->
-student resume24. `python3 scripts/pipeline.py --train` explicitly selects the
-20,000 + 20,000 sequence. It never retries a failed stage. State:
-logs/current_gast_run.json; logs and models remain under gast/logs. No production
-training has been started on this machine; user moved training to another server.
+`python3 scripts/pipeline.py` refuses to launch unless `--teacher-only` is given.
+The default teacher-only smoke uses 32 envs and 3 PPO updates; `--train --teacher-only`
+selects the requested full GAST teacher run. It does not start a student stage:
+GAST-teacher -> camera-student distillation is deferred and its adapter is not
+implemented. The current GAST student path requires a BIVT-Ray teacher and its
+same-capture Ray targets. State: logs/current_gast_run.json; outputs remain under
+gast/logs. It never retries a failed stage.
 
 On the training server set GAST_IMAGE and GAST_CONTAINER_PYTHON for Apptainer,
 or GAST_PYTHON to a working native IsaacLab Python executable. GAST_GPU selects

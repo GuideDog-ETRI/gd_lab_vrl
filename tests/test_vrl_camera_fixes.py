@@ -122,19 +122,26 @@ def test_canonical_snapshot_does_not_read_stale_usd_pose():
     body_pos = torch.tensor([[[0., 0., 0.], [8., -56., 1.3]]])
     body_quat = torch.tensor([[[1., 0., 0., 0.], [1., 0., 0., 0.]]])
     scene = {"robot": NS(body_names=["other", "trunk"], data=NS(body_pos_w=body_pos, body_quat_w=body_quat))}
-    k = torch.tensor([[[contract.fx, 0., 40.], [0., contract.fx, 24.], [0., 0., 1.]]])
-    for name in CAMERA_NAMES:
+    focal_px = contract.focal_m * 80 / contract.sensor_size_m[0]
+    k = torch.tensor([[[focal_px, 0., 40.], [0., focal_px, 24.], [0., 0., 1.]]])
+    for camera_index, name in enumerate(CAMERA_NAMES):
         # No pose fields: canonical projection must use live articulation data.
         data = NS(intrinsic_matrices=k, output={
             "distance_to_image_plane": torch.ones(1, 48, 80, 1),
             "rgb": torch.full((1, 48, 80, 3), 128, dtype=torch.uint8),
         })
-        scene[name] = NS(data=data)
+        cfg = NS(offset=NS(pos=contract.positions[camera_index], rot=contract.quaternions_opengl[camera_index], convention="opengl"),
+                 spawn=NS(focal_length=contract.focal_m*1000, horizontal_aperture=contract.sensor_size_m[0]*1000,
+                          clipping_range=contract.depth_clip), width=contract.width, height=contract.render_height)
+        scene[name] = NS(data=data, cfg=cfg)
     snapshot = ns["canonical_camera_snapshot"](scene, contract)
     expected_pos, expected_quat = mounted_camera_world_poses(body_pos[:, 1], body_quat[:, 1], contract)
     assert snapshot[0].shape == (1, 4, 2, 45, 80)
     assert torch.allclose(snapshot[2], expected_pos) and torch.allclose(snapshot[3], expected_quat)
     assert torch.isfinite(snapshot[0]).all()
+    scene[CAMERA_NAMES[0]].cfg.offset.pos = (0.01, 0.0, 0.0)
+    with pytest.raises(RuntimeError, match="mount position"):
+        ns["canonical_camera_snapshot"](scene, contract)
 
 
 @pytest.mark.parametrize("reset_step", [1, 2, 3])
@@ -180,7 +187,7 @@ def test_actual_observation_adapter_keeps_images_and_targets_on_same_clock(sched
     ns = dict(torch=torch, ManagerTermBase=type("Base", (), {"__init__": lambda self, cfg, env: None}),
               camera_period_steps=camera_period_steps, camera_refresh_mask=camera_refresh_mask,
               canonical_camera_snapshot=capture,
-              load_camera_contract=lambda profile: NS(period_steps=4, policy_dt=0.02, depth_clip=(0.15, 5.0)),
+              load_camera_contract=lambda profile: NS(period_steps=4, policy_dt=0.02, depth_clip=(0.15, 5.0), manifest=lambda: {}),
               camera_visible_points=lambda points, *args: torch.ones(points.shape[:2], dtype=torch.bool))
     exec(compile(tree, str(path), "exec"), ns)
     term = ns["CameraVisibleTerrain"](None, env)

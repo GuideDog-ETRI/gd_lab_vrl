@@ -16,12 +16,13 @@ from isaaclab.app import AppLauncher
 import cli_args  # isort: skip
 from gd_lab.core.camera_transport import CameraTransport, CameraTransportConfig, delivery_mask
 from gd_lab.core.experiments import training_arm_overrides
+from gd_lab.students.package import find_teacher_env_yaml
 from gd_lab.gast.student_top5 import StudentTop5
 from vrl_runtime import prepare_vrl_runtime, verify_vrl_runtime
 
 parser = argparse.ArgumentParser(description="Distill the vision-RL terrain-encoder teacher into a camera student.")
 parser.add_argument(
-    "--task", type=str, default="Gd-Gast-Rbq10-Dreamwaq-Vision-v0", help="GAST camera student task"
+    "--task", type=str, default="Gd-BivtGastStudent-Rbq10-Dreamwaq-Vision-v0", help="GAST student task; current supervision requires a BIVT-Ray teacher"
 )
 parser.add_argument("--agent", type=str, default="rsl_rl_cfg_entry_point", help="Agent config entry-point name.")
 parser.add_argument("--seed", type=int, default=None, help="Environment seed.")
@@ -191,8 +192,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     checkpoint_path = (os.path.abspath(args_cli.teacher_checkpoint) if args_cli.teacher_checkpoint else
                        get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint))
     print(f"[INFO] Teacher checkpoint: {checkpoint_path}")
-    teacher_env_yaml = next((parent / "params" / "env.yaml" for parent in Path(checkpoint_path).parents
-                             if (parent / "params" / "env.yaml").is_file()), None)
+    teacher_env_yaml = find_teacher_env_yaml(checkpoint_path)
     if teacher_env_yaml is None:
         raise RuntimeError("Teacher package must include params/env.yaml so its camera profile can be verified")
     teacher_cfg_text = teacher_env_yaml.read_text()
@@ -368,7 +368,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                         student_latent, new_hidden = student(frames[rows], hidden[rows])
                     hidden = hidden.index_copy(0, rows, new_hidden)
                     last_delivered[rows] = packet.capture_step
-                    hazard_pred = student.hazard_head(new_hidden).squeeze(-1)
+                    hazard_pred = student.hazard_head(student.hazard_input(new_hidden)).squeeze(-1)
                     supervised = hazard_supervised[rows]
                     latent_loss = F.mse_loss(student_latent, teacher_latent[rows]*attention.target_gate)
                     hazard_loss = (F.mse_loss(hazard_pred[supervised], hazard_label[rows][supervised])
