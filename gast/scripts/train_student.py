@@ -14,6 +14,7 @@ from isaaclab.app import AppLauncher
 import cli_args  # isort: skip
 from gd_lab.core.camera_transport import CameraTransport, CameraTransportConfig, delivery_mask
 from gd_lab.core.experiments import training_arm_overrides
+from gd_lab.gast.student_top5 import StudentTop5
 from vrl_runtime import prepare_vrl_runtime, verify_vrl_runtime
 
 parser = argparse.ArgumentParser(description="Distill the vision-RL terrain-encoder teacher into a camera student.")
@@ -52,6 +53,11 @@ parser.add_argument("--perception_run_name", type=str, default=None, help="Perce
 parser.add_argument("--student_arch", choices=("gast_spatiotemporal_v1",), default="gast_spatiotemporal_v1")
 parser.add_argument("--teacher_checkpoint", help="Explicit frozen checkpoint; overrides run lookup.")
 parser.add_argument("--student_resume", help="Restore student and optimizer; iterations is total target. Environment/history reset.")
+parser.add_argument("--top5_start_iteration", type=int, default=5000)
+parser.add_argument("--top5_keep", type=int, default=5)
+parser.add_argument("--top5_smoothing_windows", type=int, default=8)
+parser.add_argument("--top5_min_visible_fraction", type=float, default=0.95)
+parser.add_argument("--top5_min_hazard_supervised_fraction", type=float, default=0.95)
 parser.add_argument("--student_warmup", type=int, default=1000)
 parser.add_argument("--student_ramp", type=int, default=4000)
 parser.add_argument("--camera_interval_ms", type=float, nargs=2, default=(70.0, 100.0), metavar=("MIN", "MAX"))
@@ -70,6 +76,10 @@ AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
 if min(args_cli.iterations, args_cli.bptt_steps, args_cli.save_interval, args_cli.num_envs) <= 0:
     parser.error("iterations, bptt_steps, save_interval and num_envs must be positive")
+if (args_cli.top5_start_iteration < 0 or args_cli.top5_keep < 1 or args_cli.top5_smoothing_windows < 1
+        or not 0.0 <= args_cli.top5_min_visible_fraction <= 1.0
+        or not 0.0 <= args_cli.top5_min_hazard_supervised_fraction <= 1.0):
+    parser.error("invalid Top-5 checkpoint criteria")
 if args_cli.lr <= 0 or args_cli.hazard_loss_coef < 0:
     parser.error("lr must be positive and hazard_loss_coef nonnegative")
 if args_cli.student_warmup < 0 or args_cli.student_ramp < 1:
@@ -223,6 +233,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     run_name = args_cli.perception_run_name or time.strftime("%Y-%m-%d_%H-%M-%S") + "_perception"
     log_dir = os.path.join(log_root_path, run_name)
     os.makedirs(log_dir, exist_ok=True)
+    top5_manager = StudentTop5(os.path.join(log_dir, "top5"),
+        start_iteration=args_cli.top5_start_iteration, keep=args_cli.top5_keep,
+        smoothing_windows=args_cli.top5_smoothing_windows,
+        min_visible_fraction=args_cli.top5_min_visible_fraction,
+        min_hazard_supervised_fraction=args_cli.top5_min_hazard_supervised_fraction)
     writer = SummaryWriter(log_dir=log_dir)
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
@@ -234,12 +249,31 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     last_delivered = torch.full_like(episode_ids, -1)
     learning_started = time.perf_counter()
 
+    def make_student_checkpoint(iteration, top5_selection=None):
+        payload = {"model": student.state_dict(), "iteration": iteration,
+            "student_arch": args_cli.student_arch, "optimizer": optimizer.state_dict(),
+            "student_config": {"camera_profile": env_cfg.camera_profile} if attention else {},
+            "age_input": {"explicit_seconds": True, "stale_seconds": .3},
+            "gast_contract": {"external_gap_signal": False, "pose": "xy_yaw_wxyz", "hidden_dim": student.gru_hidden_dim},
+            "distillation_args": vars(args_cli), "camera_contract": camera_contract.manifest(),
+            "camera_noise_enabled": camera_noise_cfg is not None,
+            "teacher_checkpoint": checkpoint_path, "teacher_sha256": teacher_sha256,
+            "camera_transport": transport_config.manifest(dt), "camera_transport_seed": agent_cfg.seed}
+        if top5_selection is not None: payload["student_top5_selection"] = top5_selection
+        return payload
+
+    def write_student_checkpoint(path, iteration, top5_selection=None):
+        temporary_path = path + ".tmp"
+        torch.save(make_student_checkpoint(iteration, top5_selection), temporary_path)
+        os.replace(temporary_path, path)
+
     it = start_iteration
     while it < args_cli.iterations:
         window_len = min(args_cli.bptt_steps, args_cli.iterations - it)
         optimizer.zero_grad()
         window_loss = torch.zeros((), device=device)
         window_mse_sum, window_hazard_sum = 0.0, 0.0
+        window_extra_sum, window_total_loss_sum = 0.0, 0.0
         window_visible_sum, window_supervised_sum = 0.0, 0.0
         window_updates = 0
         window_delay_sum = 0.0
@@ -290,8 +324,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                     hazard_loss = (F.mse_loss(hazard_pred[supervised], hazard_label[rows][supervised])
                                    if supervised.any() else hazard_pred.sum() * 0.0)
                     window_loss = window_loss + latent_loss + args_cli.hazard_loss_coef * hazard_loss + extra_loss
-                    window_mse_sum += latent_loss.item()
-                    window_hazard_sum += hazard_loss.item()
+                    latent_value, hazard_value, extra_value = latent_loss.item(), hazard_loss.item(), extra_loss.item()
+                    window_mse_sum += latent_value
+                    window_hazard_sum += hazard_value
+                    window_extra_sum += extra_value
+                    window_total_loss_sum += latent_value + args_cli.hazard_loss_coef * hazard_value + extra_value
                     window_visible_sum += visible[rows].mean().item()
                     window_supervised_sum += supervised.float().mean().item()
                     window_delay_sum += (step - packet.capture_step) * dt * 1000
@@ -309,39 +346,41 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                 writer.add_scalar(f"attention/{key}", value, it)
         mse_val = window_mse_sum / count
         hazard_val = window_hazard_sum / count
+        extra_val = window_extra_sum / count
+        total_loss_val = window_total_loss_sum / count
+        visible_val = window_visible_sum / count
+        supervised_val = window_supervised_sum / count
+        top5_result = None
+        if window_updates:
+            top5_result = top5_manager.consider(it, total_loss_val,
+                {"latent_mse": mse_val, "hazard_mse": hazard_val, "extra_loss": extra_val,
+                 "visible_fraction": visible_val, "hazard_supervised_fraction": supervised_val,
+                 "updates": window_updates},
+                save_fn=lambda path, record: write_student_checkpoint(str(path), it, record))
         if window_updates:
             writer.add_scalar("perception/mse", mse_val, it)
             writer.add_scalar("perception/hazard_mse", hazard_val, it)
-            writer.add_scalar("perception/visible_fraction", window_visible_sum / count, it)
-            writer.add_scalar("perception/hazard_supervised_fraction", window_supervised_sum / count, it)
+            writer.add_scalar("perception/extra_loss", extra_val, it)
+            writer.add_scalar("perception/total_loss", total_loss_val, it)
+            writer.add_scalar("perception/visible_fraction", visible_val, it)
+            writer.add_scalar("perception/hazard_supervised_fraction", supervised_val, it)
         writer.add_scalar("transport/updates", window_updates, it)
         writer.add_scalar("transport/delay_ms", window_delay_sum / count, it)
         writer.add_scalar("transport/dropped", transport.dropped, it)
         if (it // window_len) % 2 == 0 or it >= args_cli.iterations:
             print(f"[INFO] iter {it}/{args_cli.iterations} mse={mse_val:.5f} hazard_mse={hazard_val:.5f} "
-                  f"updates={window_updates} delay_ms={window_delay_sum / count:.1f} dropped={transport.dropped} "
-                  f"visible={window_visible_sum / count:.4f} "
-                  f"hazard_supervised={window_supervised_sum / count:.4f} "
+                  f"total_loss={total_loss_val:.5f} updates={window_updates} "
+                  f"delay_ms={window_delay_sum / count:.1f} dropped={transport.dropped} "
+                  f"visible={visible_val:.4f} hazard_supervised={supervised_val:.4f} "
                   f"learning_wall_seconds={time.perf_counter()-learning_started:.2f}")
+        if top5_result and top5_result.get("evaluated"):
+            print(f"[TOP5] iter={it} score={top5_result.get('score', float('nan')):.6f} "
+                  f"windows={top5_result.get('windows', 0)} rank={top5_result.get('rank', '-')} "
+                  f"saved={top5_result.get('saved', False)} reason={top5_result.get('reason', '-')}")
 
         if it % args_cli.save_interval < window_len or it >= args_cli.iterations:
             ckpt_path = os.path.join(log_dir, f"perception_{it}.pt")
-            torch.save({
-                "model": student.state_dict(), "iteration": it,
-                "student_arch": args_cli.student_arch,
-                "optimizer": optimizer.state_dict(),
-                "student_config": {"camera_profile": env_cfg.camera_profile} if attention else {},
-                "age_input": {"explicit_seconds": True, "stale_seconds": .3},
-                "gast_contract": {"external_gap_signal": False, "pose": "xy_yaw_wxyz", "hidden_dim": student.gru_hidden_dim},
-                "distillation_args": vars(args_cli),
-                "camera_contract": camera_contract.manifest(),
-                "camera_noise_enabled": camera_noise_cfg is not None,
-                "teacher_checkpoint": checkpoint_path,
-                "teacher_sha256": teacher_sha256,
-                "camera_transport": transport_config.manifest(dt),
-                "camera_transport_seed": agent_cfg.seed,
-            }, ckpt_path + ".tmp")
-            os.replace(ckpt_path + ".tmp", ckpt_path)
+            write_student_checkpoint(ckpt_path, it)
             print(f"[INFO] Saved {ckpt_path}")
 
     print(f"[INFO] Distillation complete: captures={transport.captured} dropped={transport.dropped} "
