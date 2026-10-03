@@ -36,7 +36,8 @@ def average_gradients(parameters):
 @torch.no_grad()
 def update_normalizer(normalizer, values):
     if not active():
-        normalizer.update(values)
+        if values.shape[0]:
+            normalizer.update(values)
         return
     if not normalizer.training or (normalizer.until is not None and normalizer.count >= normalizer.until):
         return
@@ -45,6 +46,8 @@ def update_normalizer(normalizer, values):
     dist.all_reduce(moments)
     width = x.shape[-1]
     n = moments[-1]
+    if n == 0:  # every rank filtered all rows out; same decision on every rank
+        return
     mean = (moments[:width]/n).reshape_as(normalizer._mean)
     var = (moments[width:2*width]/n-mean.flatten().square()).clamp_min(0).reshape_as(normalizer._var)
     old_mean = normalizer._mean.double()

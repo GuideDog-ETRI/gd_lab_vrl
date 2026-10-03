@@ -1,4 +1,5 @@
-from isaaclab.managers import ObservationTermCfg, ObservationGroupCfg
+import torch
+from isaaclab.managers import ObservationTermCfg, ObservationGroupCfg, TerminationTermCfg
 from isaaclab.utils import configclass
 from gd_lab.core import registry
 from gd_lab.tasks.blind_rough import BlindRoughSceneCfg
@@ -20,6 +21,17 @@ class HistoryObservations(CleanTargets):
     target = ObservationTermCfg(func=history_observation)
 
 
+def nonfinite_state(env):
+    """Reset envs whose physics went NaN/inf before their observations are computed.
+
+    Without it a single exploded env stays NaN until time-out, and its observations
+    poison the shared normalizers (arm4 crashes at iter 8727 and 10342).
+    """
+    data = env.scene['robot'].data
+    return ~(torch.isfinite(data.root_state_w).all(-1) & torch.isfinite(data.joint_pos).all(-1)
+             & torch.isfinite(data.joint_vel).all(-1))
+
+
 @configclass
 class GastTeacherCfg(VrlTeacherEnvCfg):
     scene: BlindRoughSceneCfg = BlindRoughSceneCfg(num_envs=256, env_spacing=2.5)
@@ -30,6 +42,7 @@ class GastTeacherCfg(VrlTeacherEnvCfg):
         self.observations.terrain.camera_visible = ObservationTermCfg(func=NoisyTerrain)
         self.observations.gast_clean = CleanTargets()
         self.observations.gast_history = HistoryObservations()
+        self.terminations.nonfinite_state = TerminationTermCfg(func=nonfinite_state)
 
 
 @configclass
