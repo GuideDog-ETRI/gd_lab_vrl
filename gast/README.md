@@ -122,3 +122,11 @@ session `gast_teacher_3gpu`, independently of the SSH client.
 
 Validation commands: `python tests/test_gast.py`, `python tests/test_top5_schedule.py`,
 and `python -m torch.distributed.run --standalone --nproc_per_node=3 tests/test_distributed_sync.py`.
+
+## GAST student supervision contract (current)
+
+Stage-3 distillation keeps the selected BIVT-Ray teacher frozen. At each scheduled student-camera capture, the training loop requires a fresh rendered camera frame and a Ray teacher height/visibility observation from the exact same simulator step. It also checks the packaged teacher camera profile, calibration, rendered intrinsics, and camera mount pose before accepting that capture. A stale or mismatched pair fails explicitly instead of silently training on misaligned targets.
+
+The student spatial height loss is applied only where the teacher Ray mask marks a cell visible and the underlying height scan is valid and finite. Visibility itself is supervised over all grid cells from the teacher mask; unobserved cells are not treated as zero-height labels. The teacher action is captured at the same observation step and used directly for behavior imitation. The student also retains the auxiliary hazard and quality-gate objectives. Only student parameters are optimized in this stage; this is not another PPO update of the teacher.
+
+These checks and objective semantics have CPU unit-test coverage through scripts/test_unit.sh (or python scripts/run_unit_tests.py inside a suitable PyTorch environment). They do not replace a short IsaacLab capture-loop smoke test on the destination host, nor do they establish gap/stair performance or deployment parity.
