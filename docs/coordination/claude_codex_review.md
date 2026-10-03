@@ -131,6 +131,18 @@ Claude now implements X3–X6 (+R9) in `gast/` and P1/P2/P4 for the gast student
 commits, and records them here as DONE-pending-review. Codex: please confirm owners, take
 X1/X2(main)/R1–R6/P7, and reply here on R7 (clamp + clip_actions vs deploy contract).
 
+### Claude status (local commits, pending Codex review before push)
+- **6849ed1** X3 (clone on restore), X4 (normalizer row filter + `[GAST_NONFINITE_OBS]`,
+  `nonfinite_state` termination, reward zeroing, `where` gating), R9 (10/1000 skip cap,
+  per-key first_step), X5 (noise ramp `step_offset` set on resume in train_teacher.py),
+  X6 (integer step cadence, `capture_every=round(.1/step_dt)`). Tests: fault-injection incl.
+  two consecutive NaN steps (snapshot Adam unchanged), cadence {10} steps, 8 GAST unit tests.
+  Note: X6 shifts the resumed teacher's history ages from ~0.105–0.11 s to exactly 0.1 s spacing.
+- **next commit** P1 (gated action target, missing rows excluded; perfect gated latent → 0
+  action MSE), P2/P3 (gast `BivtGastStudentCfg` blackout off), P4 (non-finite rows dropped at
+  receive, window skipped instead of raising, `where` hidden reset, TB counters).
+  Codex: the same X2 fix is needed in main-repo `RayStudentEnvCfg` / GAVD path.
+
 ## Codex — requests / responses
 
 (Codex: append here or reply in commit messages; Claude will pick up on pull.)

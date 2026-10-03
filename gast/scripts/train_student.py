@@ -298,6 +298,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         os.replace(temporary_path, path)
 
     it = start_iteration
+    consecutive_skips = skipped_windows = nonfinite_rows = 0
     while it < args_cli.iterations:
         window_len = min(args_cli.bptt_steps, args_cli.iterations - it)
         optimizer.zero_grad()
@@ -321,7 +322,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                 if dones.any():
                     done_rows = dones.reshape(-1).bool()
                     keep = (~done_rows).unsqueeze(-1).to(hidden.dtype)
-                    hidden = hidden * keep  # stays in-graph on purpose; see module docstring
+                    # where(), not multiply (NaN*0 is NaN); stays in-graph on purpose.
+                    hidden = torch.where(keep > 0, hidden, torch.zeros_like(hidden))
                     episode_ids += done_rows.long()
                     gap_ghost.reset(done_rows.nonzero(as_tuple=False).flatten())
                     if attention:
@@ -336,6 +338,18 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                 for packet in transport.receive(step):
                     frames, teacher_latent, hazard_label, hazard_supervised, visible, captured_episodes, teacher_action = packet.payload[:7]
                     valid = delivery_mask(packet.capture_step, captured_episodes, episode_ids, last_delivered)
+                    # One exploded env must not kill the run: drop its non-finite rows.
+                    finite = (torch.isfinite(frames.flatten(1)).all(1) & torch.isfinite(teacher_latent).all(1)
+                              & torch.isfinite(teacher_action).all(1))
+                    if attention:
+                        for value in packet.payload[7]:
+                            if value.is_floating_point():
+                                finite &= torch.isfinite(value.flatten(1)).all(1)
+                    if not bool(finite.all()):
+                        nonfinite_rows += int((valid & ~finite).sum())
+                        print(f"[GAST_STUDENT_NONFINITE] capture_step={packet.capture_step} "
+                              f"envs={(~finite).nonzero().flatten()[:16].tolist()}", flush=True)
+                    valid &= finite
                     if not valid.any():
                         continue
                     rows = valid.nonzero(as_tuple=False).flatten()
@@ -366,8 +380,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             it += 1
         if window_updates:
             (window_loss / window_updates).backward()
-            torch.nn.utils.clip_grad_norm_(student.parameters(), 1.0, error_if_nonfinite=True)
-            optimizer.step()
+            norm = torch.nn.utils.clip_grad_norm_(student.parameters(), 1.0)
+            if torch.isfinite(norm):
+                optimizer.step()
+                consecutive_skips = 0
+            else:
+                optimizer.zero_grad(set_to_none=True)
+                consecutive_skips += 1
+                skipped_windows += 1
+                bad_hidden = ~torch.isfinite(hidden).all(-1)
+                hidden = torch.where(bad_hidden[:, None], torch.zeros_like(hidden), hidden)
+                print(f"[GAST_STUDENT_NONFINITE] window skipped at iteration {it}, "
+                      f"consecutive={consecutive_skips}, reset_hidden={int(bad_hidden.sum())}", flush=True)
+                if consecutive_skips > 5:
+                    raise RuntimeError("Student gradients non-finite for 6 consecutive windows")
         hidden = hidden.detach()  # stop gradients at the BPTT window boundary
         count = max(window_updates, 1)
         if attention:
@@ -391,6 +417,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             writer.add_scalar("perception/hazard_mse", hazard_val, it)
             writer.add_scalar("perception/extra_loss", extra_val, it)
             writer.add_scalar("perception/total_loss", total_loss_val, it)
+            writer.add_scalar("perception/skipped_windows", skipped_windows, it)
+            writer.add_scalar("perception/nonfinite_rows", nonfinite_rows, it)
             writer.add_scalar("perception/visible_fraction", visible_val, it)
             writer.add_scalar("perception/hazard_supervised_fraction", supervised_val, it)
         writer.add_scalar("transport/updates", window_updates, it)

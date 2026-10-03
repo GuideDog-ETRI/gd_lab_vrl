@@ -72,7 +72,7 @@ class GastDistillation:
         pose = torch.cat((pose_xyyaw(self.env), self.env.scene['robot'].data.root_quat_w), -1)
         stamp = torch.full_like(self.stamp, step * self.env.step_dt)
         return (packed[:, :-32].clone(), obs['gast_clean'].clone(), obs['terrain'].clone(),
-                pose.clone(), stamp, teacher_action.clone())
+                pose.clone(), stamp, teacher_action.clone(), packed[:, -32:].clone())
 
     @torch.no_grad()
     def actions(self, obs, iteration):
@@ -92,7 +92,7 @@ class GastDistillation:
         self.stamp[done] = -100
 
     def update(self, frames, hidden, rows, extra, age_seconds):
-        base, clean, teacher_terrain, pose, stamp, teacher_action = (x[rows] for x in extra)
+        base, clean, teacher_terrain, pose, stamp, teacher_action, teacher_latent = (x[rows] for x in extra)
         frames = frames.clone()
         n = len(rows)
         missing = torch.rand(n, device=frames.device) < .1
@@ -109,7 +109,14 @@ class GastDistillation:
         # Bad-input supervision asks for the learned zero-terrain behavior.
         self.target_gate = (quality_target[:,None] * max(0., 1-age_seconds/.3)).detach()
         actual = self.teacher.actor(torch.cat((base, latent), -1))
-        action_loss = F.mse_loss(actual, teacher_action)
+        # Same gate as the latent target. The ungated teacher action asked for the
+        # full teacher latent while the latent loss asked for the gated one, which
+        # conflict whenever age > 0 or the frame is degraded. Equals teacher_action
+        # when the gate is 1. Missing frames give exactly zero latent (no gradient).
+        expected = self.teacher.actor(torch.cat((base, teacher_latent*self.target_gate), -1))
+        seen = ~missing
+        action_loss = (F.mse_loss(actual[seen], expected[seen]) if seen.any()
+                       else actual.sum() * 0.0)
         geometry_loss, height_loss, visibility_loss, visible_fraction = reconstruction_loss(
             spatial, clean, teacher_terrain, return_components=True)
         quality_loss = F.binary_cross_entropy_with_logits(logits[:,0], quality_target)
