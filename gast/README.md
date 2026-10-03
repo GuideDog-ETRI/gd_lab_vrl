@@ -130,3 +130,20 @@ Stage-3 distillation keeps the selected BIVT-Ray teacher frozen. At each schedul
 The student spatial height loss is applied only where the teacher Ray mask marks a cell visible and the underlying height scan is valid and finite. Visibility itself is supervised over all grid cells from the teacher mask; unobserved cells are not treated as zero-height labels. The teacher action is captured at the same observation step and used directly for behavior imitation. The student also retains the auxiliary hazard and quality-gate objectives. Only student parameters are optimized in this stage; this is not another PPO update of the teacher.
 
 These checks and objective semantics have CPU unit-test coverage through scripts/test_unit.sh (or python scripts/run_unit_tests.py inside a suitable PyTorch environment). They do not replace a short IsaacLab capture-loop smoke test on the destination host, nor do they establish gap/stair performance or deployment parity.
+
+
+## GAST-teacher → GAST-student distillation (deferred; not implemented)
+
+This is a separate future path from the current BIVT-Ray-teacher → GAST-student supervision contract above. The existing GAST distillation loop expects same-capture BIVT-Ray snapshots (teacher height targets, visibility mask, camera contract, and teacher action); a GAST teacher does not produce that Ray snapshot contract. Do not treat the existing loop, its BIVT-Ray smoke test, or a successful checkpoint load as proof that GAST-to-GAST distillation is ready.
+
+The GAST teacher uses its own terrain-history observation path (including temporally ordered terrain samples) and a GAST-specific actor/terrain encoder. A dedicated adapter and capture contract are required before distillation: load the exact GAST teacher architecture/configuration and checkpoint; reconstruct the teacher's temporal-history inputs with the same ordering, timing, reset behavior, noise, and validity semantics; and record camera frames plus teacher targets from the same simulator capture time. Preserve timestamps/poses so delayed or dropped camera frames are not paired with a teacher target from a different time. Keep the teacher frozen and optimize only the student.
+
+For spatial supervision, compute height error only on cells that are both valid in the teacher target and visible to the student camera at that capture. Never label unseen cells as zero height. A visibility objective may supervise the observed/unobserved mask; if a trustworthy same-time visibility target cannot be generated, omit the spatial height loss rather than substituting a BIVT-Ray snapshot or fabricated labels. Before distillation, verify the camera intrinsics, mount pose, coordinate frame, capture-time alignment, and teacher/student observation shapes.
+
+Recommended validation sequence:
+1. Strictly load the intended GAST checkpoint/config and verify teacher parameters remain frozen.
+2. Unit-test temporal history ordering, timestamps, resets, frame drops/staleness, coordinate alignment, visible-only masking, and finite losses.
+3. Run a short one-environment IsaacLab capture/update smoke test; verify student gradients and a saved checkpoint, without changing or restarting teacher PPO training.
+4. Only after those checks pass, decide whether to launch a longer student-distillation run.
+
+A previous one-environment smoke test exercised a BIVT-Ray teacher, not a GAST teacher. It validates neither the GAST-teacher adapter nor GAST-to-GAST distillation. No GAST-teacher student run or GAST-specific smoke test is claimed by this note. The adapter, alignment contract, tests, and smoke test remain future work; this documentation entry does not modify training code or any running process.
