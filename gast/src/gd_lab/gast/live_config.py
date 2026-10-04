@@ -26,7 +26,8 @@ IMMUTABLE_SETTINGS = (
     "hazard_loss_coef",
     "camera_profile", "camera_interval_ms", "camera_delay_ms", "camera_drop_prob",
     "top5_start_iteration", "top5_keep", "top5_smoothing_windows",
-    "top5_min_visible_fraction", "top5_min_hazard_supervised_fraction",
+    "top5_min_visible_fraction", "top5_min_visible_sample_fraction",
+    "top5_min_hazard_supervised_fraction",
 )
 
 

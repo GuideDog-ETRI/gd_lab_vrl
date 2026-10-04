@@ -71,7 +71,8 @@ parser.add_argument("--live_config", default=None,
                     help="JSON settings file polled during distillation (default: <run_dir>/student_live.json).")
 parser.add_argument("--top5_keep", type=int, default=5)
 parser.add_argument("--top5_smoothing_windows", type=int, default=8)
-parser.add_argument("--top5_min_visible_fraction", type=float, default=0.95)
+parser.add_argument("--top5_min_visible_sample_fraction", "--top5_min_visible_fraction",
+                    dest="top5_min_visible_sample_fraction", type=float, default=0.95)
 parser.add_argument("--top5_min_hazard_supervised_fraction", type=float, default=0.95)
 parser.add_argument("--student_warmup", type=int, default=1000)
 parser.add_argument("--student_ramp", type=int, default=4000)
@@ -92,7 +93,7 @@ args_cli, hydra_args = parser.parse_known_args()
 if min(args_cli.iterations, args_cli.bptt_steps, args_cli.save_interval, args_cli.num_envs) <= 0:
     parser.error("iterations, bptt_steps, save_interval and num_envs must be positive")
 if (args_cli.top5_start_iteration < 0 or args_cli.top5_keep < 1 or args_cli.top5_smoothing_windows < 1
-        or not 0.0 <= args_cli.top5_min_visible_fraction <= 1.0
+        or not 0.0 <= args_cli.top5_min_visible_sample_fraction <= 1.0
         or not 0.0 <= args_cli.top5_min_hazard_supervised_fraction <= 1.0):
     parser.error("invalid Top-5 checkpoint criteria")
 if args_cli.lr <= 0 or args_cli.hazard_loss_coef < 0:
@@ -274,7 +275,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     top5_manager = StudentTop5(os.path.join(log_dir, "top5"),
         start_iteration=args_cli.top5_start_iteration, keep=args_cli.top5_keep,
         smoothing_windows=args_cli.top5_smoothing_windows,
-        min_visible_fraction=args_cli.top5_min_visible_fraction,
+        min_visible_fraction=None, min_visible_sample_fraction=args_cli.top5_min_visible_sample_fraction,
         min_hazard_supervised_fraction=args_cli.top5_min_hazard_supervised_fraction)
     writer = SummaryWriter(log_dir=log_dir)
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
@@ -353,6 +354,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         window_mse_sum, window_hazard_sum = 0.0, 0.0
         window_extra_sum, window_total_loss_sum = 0.0, 0.0
         window_visible_sum, window_supervised_sum = 0.0, 0.0
+        window_visible_sample_sum = window_visible_sample_count = 0
         window_updates = 0
         window_delay_sum = 0.0
 
@@ -428,6 +430,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                     window_extra_sum += extra_value
                     window_total_loss_sum += latent_value + args_cli.hazard_loss_coef * hazard_value + extra_value
                     window_visible_sum += visible[rows].mean().item()
+                    window_visible_sample_sum += int((visible[rows] > 0).sum())
+                    window_visible_sample_count += rows.numel()
                     window_supervised_sum += supervised.float().mean().item()
                     window_delay_sum += (step - packet.capture_step) * dt * 1000
                     window_updates += 1
@@ -459,12 +463,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         extra_val = window_extra_sum / count
         total_loss_val = window_total_loss_sum / count
         visible_val = window_visible_sum / count
+        visible_sample_val = window_visible_sample_sum / max(window_visible_sample_count, 1)
         supervised_val = window_supervised_sum / count
         top5_result = None
         if window_updates:
             top5_result = top5_manager.consider(it, total_loss_val,
                 {"latent_mse": mse_val, "hazard_mse": hazard_val, "extra_loss": extra_val,
-                 "visible_fraction": visible_val, "hazard_supervised_fraction": supervised_val,
+                 "visible_fraction": visible_val, "visible_sample_fraction": visible_sample_val,
+                 "hazard_supervised_fraction": supervised_val,
                  "updates": window_updates},
                 save_fn=lambda path, record: write_student_checkpoint(str(path), it, record))
         if window_updates:
@@ -475,6 +481,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             writer.add_scalar("perception/skipped_windows", skipped_windows, it)
             writer.add_scalar("perception/nonfinite_rows", nonfinite_rows, it)
             writer.add_scalar("perception/visible_fraction", visible_val, it)
+            writer.add_scalar("perception/visible_sample_fraction", visible_sample_val, it)
             writer.add_scalar("perception/hazard_supervised_fraction", supervised_val, it)
         writer.add_scalar("transport/updates", window_updates, it)
         writer.add_scalar("transport/delay_ms", window_delay_sum / count, it)

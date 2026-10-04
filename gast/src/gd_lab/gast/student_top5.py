@@ -5,21 +5,30 @@ from pathlib import Path
 
 class StudentTop5:
     def __init__(self, directory, *, start_iteration=5000, keep=5, smoothing_windows=8,
-                 min_visible_fraction=.95, min_hazard_supervised_fraction=.95):
+                 min_visible_fraction=.95, min_visible_sample_fraction=None,
+                 min_hazard_supervised_fraction=.95):
         if start_iteration < 0 or keep < 1 or smoothing_windows < 1:
             raise ValueError("invalid Top-5 settings")
-        if not 0 <= min_visible_fraction <= 1 or not 0 <= min_hazard_supervised_fraction <= 1:
+        if ((min_visible_fraction is not None and not 0 <= min_visible_fraction <= 1)
+                or (min_visible_sample_fraction is not None and not 0 <= min_visible_sample_fraction <= 1)
+                or not 0 <= min_hazard_supervised_fraction <= 1):
             raise ValueError("quality thresholds must be in [0, 1]")
         self.directory=Path(directory); self.directory.mkdir(parents=True,exist_ok=True)
         self.start_iteration=start_iteration; self.keep=keep
         self.history=deque(maxlen=smoothing_windows)
         self.min_visible_fraction=min_visible_fraction
+        self.min_visible_sample_fraction=min_visible_sample_fraction
         self.min_hazard_supervised_fraction=min_hazard_supervised_fraction
-        self.criteria={"version":1,"start_iteration":start_iteration,"keep":keep,
+        self.criteria={"version":2,"start_iteration":start_iteration,"keep":keep,
             "rolling_optimizer_windows":smoothing_windows,
             "score":"latent_mse + hazard_loss_coef * hazard_mse + extra_loss",
             "order":"ascending (lower is better)",
             "min_visible_fraction":min_visible_fraction,
+            "min_visible_sample_fraction":min_visible_sample_fraction,
+            "visibility_gate_semantics":(
+                "fraction of student rows with at least one teacher-visible height cell"
+                if min_visible_sample_fraction is not None
+                else "mean fraction of map cells marked visible (legacy gate)"),
             "min_hazard_supervised_fraction":min_hazard_supervised_fraction,
             "score_scope":"training windows, not held-out validation"}
         self._write(self.directory/"criteria.json",self.criteria)
@@ -57,18 +66,24 @@ class StudentTop5:
             score=float(score); updates=int(metrics["updates"])
             vals={k:float(metrics[k]) for k in ("latent_mse","hazard_mse","extra_loss",
                 "visible_fraction","hazard_supervised_fraction")}
+            if "visible_sample_fraction" in metrics:
+                vals["visible_sample_fraction"] = float(metrics["visible_sample_fraction"])
         except (KeyError,TypeError,ValueError):
             return {"evaluated":True,"saved":False,"reason":"invalid_metrics"}
         if updates<=0 or not all(math.isfinite(v) for v in [score,*vals.values()]):
             return {"evaluated":True,"saved":False,"reason":"invalid_metrics"}
-        if vals["visible_fraction"]<self.min_visible_fraction:
+        if self.min_visible_sample_fraction is not None:
+            if "visible_sample_fraction" not in vals:
+                return {"evaluated":True,"saved":False,"reason":"missing_visibility_sample_coverage"}
+            if vals["visible_sample_fraction"] < self.min_visible_sample_fraction:
+                return {"evaluated":True,"saved":False,"reason":"low_visibility_sample_coverage"}
+        elif self.min_visible_fraction is not None and vals["visible_fraction"] < self.min_visible_fraction:
             return {"evaluated":True,"saved":False,"reason":"low_visibility"}
         if vals["hazard_supervised_fraction"]<self.min_hazard_supervised_fraction:
             return {"evaluated":True,"saved":False,"reason":"low_hazard_supervision"}
         self.history.append({"score":score,**vals})
         avg={k:sum(row[k] for row in self.history)/len(self.history)
-             for k in ("score","latent_mse","hazard_mse","extra_loss",
-                       "visible_fraction","hazard_supervised_fraction")}
+             for k in self.history[0]}
         avg["windows"]=len(self.history)
         if len(self.history)<self.history.maxlen:
             return {"evaluated":True,"saved":False,"reason":"smoothing_warmup",**avg}
