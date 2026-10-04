@@ -5,10 +5,24 @@ import unittest
 spec=importlib.util.spec_from_file_location("student_top5",Path(__file__).parents[1]/"src/gd_lab/gast/student_top5.py")
 module=importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
 StudentTop5=module.StudentTop5
-def metrics(v,visible=1.,supervised=1.):
-    return {"latent_mse":v,"hazard_mse":0.,"extra_loss":0.,"visible_fraction":visible,
+def metrics(v,visible=1.,supervised=1.,sample_visible=None):
+    result={"latent_mse":v,"hazard_mse":0.,"extra_loss":0.,"visible_fraction":visible,
             "hazard_supervised_fraction":supervised,"updates":1}
+    if sample_visible is not None:
+        result["visible_sample_fraction"]=sample_visible
+    return result
 class StudentTop5Tests(unittest.TestCase):
+    def test_sample_gate_uses_coverage_not_visible_cell_density(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            board=StudentTop5(tmp, min_visible_fraction=None,
+                min_visible_sample_fraction=.95, smoothing_windows=1)
+            save=lambda path,record: path.write_bytes(b"ckpt")
+            rejected=board.consider(5000,1,metrics(1,.12,sample_visible=.94),save)
+            accepted=board.consider(5064,1,metrics(1,.12,sample_visible=.99),save)
+            self.assertEqual(rejected["reason"],"low_visibility_sample_coverage")
+            self.assertTrue(accepted["saved"])
+            self.assertEqual(accepted["visible_fraction"],.12)
+            self.assertEqual(accepted["visible_sample_fraction"],.99)
     def test_start_quality_and_finite_gates(self):
         with tempfile.TemporaryDirectory() as tmp:
             board=StudentTop5(tmp); saved=[]
