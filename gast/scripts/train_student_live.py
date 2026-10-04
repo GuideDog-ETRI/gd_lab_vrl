@@ -18,6 +18,7 @@ from gd_lab.core.camera_transport import CameraTransport, CameraTransportConfig,
 from gd_lab.core.experiments import training_arm_overrides
 from gd_lab.gast.student_top5 import StudentTop5
 from gd_lab.gast.live_config import StudentLiveConfig
+from gd_lab.gast.student_utils import finite_batch_rows
 from vrl_runtime import prepare_vrl_runtime, verify_vrl_runtime
 
 def find_teacher_env_yaml(checkpoint_path):
@@ -386,13 +387,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                     frames, teacher_latent, hazard_label, hazard_supervised, visible, captured_episodes, teacher_action = packet.payload[:7]
                     valid = delivery_mask(packet.capture_step, captured_episodes, episode_ids, last_delivered)
                     # One exploded env must not kill the run: drop its non-finite rows.
-                    finite = (torch.isfinite(frames.flatten(1)).all(1) & torch.isfinite(teacher_latent).all(1)
-                              & torch.isfinite(teacher_action).all(1) & torch.isfinite(hazard_label.flatten(1)).all(1)
-                              & torch.isfinite(visible.flatten(1)).all(1))
+                    finite = (finite_batch_rows(frames) & finite_batch_rows(teacher_latent)
+                              & finite_batch_rows(teacher_action) & finite_batch_rows(hazard_label)
+                              & finite_batch_rows(visible))
                     if attention:
                         for value in packet.payload[7]:
                             if value.is_floating_point():
-                                finite &= torch.isfinite(value.flatten(1)).all(1)
+                                finite &= finite_batch_rows(value)
                     bad_rows = valid & ~finite
                     if bad_rows.any():
                         # Same rule as main-tree distill_student.py: a non-finite packet
