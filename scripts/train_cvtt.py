@@ -83,6 +83,9 @@ def _resolve(path: str) -> type[OnPolicyRunner]:
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
+    if getattr(env_cfg, "camera_profile", None) is not None:
+        from gd_lab.core.camera_contract import require_training_camera_profile
+        require_training_camera_profile(env_cfg.camera_profile)  # legacy calibration only with explicit opt-in
     if args_cli.num_envs is not None:
         env_cfg.scene.num_envs = args_cli.num_envs
     if args_cli.total_envs is not None:

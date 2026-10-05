@@ -57,6 +57,13 @@ parser.add_argument("--teacher_checkpoint", help="Explicit frozen checkpoint; ov
 parser.add_argument("--student_resume", help="Restore student and optimizer; iterations is total target. Environment/history reset.")
 parser.add_argument("--student_warmup", type=int, default=1000)
 parser.add_argument("--student_ramp", type=int, default=4000)
+parser.add_argument(
+    "--stale_student_rollout",
+    action="store_true",
+    default=False,
+    help="Opt-in: a student-driven env whose latent is stale/missing keeps the student policy with a zero "
+    "latent (the deployed blind route) instead of falling back to the privileged teacher. Off = legacy.",
+)
 parser.add_argument("--camera_interval_ms", type=float, nargs=2, default=(70.0, 100.0), metavar=("MIN", "MAX"))
 parser.add_argument("--camera_delay_ms", type=float, nargs=2, default=(0.0, 50.0), metavar=("MIN", "MAX"))
 parser.add_argument("--camera_drop_prob", type=float, default=0.05, help="Probability of dropping a complete four-camera set.")
@@ -119,6 +126,7 @@ from gd_lab.mdp.camera_noise import augment_student_camera_frames
 from gd_lab.mdp.platform_gap_noise import PlatformGapDepthGhost, PlatformGapDepthGhostCfg
 from gd_lab.mdp.terrain_families import terrain_family_gate
 from gd_lab.teachers.cvtt.actor_critic import DreamwaqVrlActorCritic
+from gd_lab.core.camera_contract import check_checkpoint_camera_contract
 from gd_lab.students.alignment import validate_teacher_camera_capture
 from gd_lab.students.gavd.distillation import AttentionDistillation
 from gd_lab.students.rvld.model import CameraPerceptionEncoder, height_discontinuity_metres
@@ -162,6 +170,8 @@ def capture_teacher_packet(env, obs, teacher, episode_ids, noise_cfg, gap_ghost,
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
+    from gd_lab.core.camera_contract import require_training_camera_profile
+    require_training_camera_profile(env_cfg.camera_profile)  # legacy calibration only with explicit opt-in
     env_cfg.seed = agent_cfg.seed
     env_cfg.scene.num_envs = args_cli.num_envs
     if args_cli.device is not None:
@@ -219,7 +229,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     if args_cli.student_arch == "grid_attention_v1":
         student = GridAttentionStudent(env_cfg.camera_profile).to(device)
         attention = AttentionDistillation(teacher, student, env.unwrapped.num_envs, device,
-                                          args_cli.student_warmup, args_cli.student_ramp)
+                                          args_cli.student_warmup, args_cli.student_ramp,
+                                          stale_student_rollout=args_cli.stale_student_rollout)
     else:
         # RVLD keeps its deployable CNN-GRU graph; this map decoder is auxiliary-only.
         alignment_head = TerrainAlignmentHead(args_cli.gru_hidden_dim).to(device)
@@ -232,6 +243,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             raise ValueError('Resume teacher hash or student architecture differs')
         if saved.get('student_alignment_contract') != 2:
             raise ValueError('Resume checkpoint lacks the strict capture-alignment supervision contract; start a new aligned run')
+        # Missing contract = refused (explicit GD_LAB_ALLOW_MISSING_CAMERA_CONTRACT=1 only); any calibration/timing change = refused.
+        check_checkpoint_camera_contract(saved.get('camera_contract'), camera_contract, purpose="resume")
         student.load_state_dict(saved['model'], strict=True)
         if alignment_head is not None:
             if 'alignment_head' not in saved:
@@ -294,9 +307,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                         fresh = rvld_ready & (age >= 0) & (age < 0.3)
                         student_actions = teacher.act_with_terrain_latent(obs, rvld_latent * fresh[:, None])
                         probability = min(1.0, max(0.0, (it - args_cli.student_warmup) / max(1, args_cli.student_ramp)))
-                        use_student = (torch.rand_like(rvld_ready, dtype=torch.float) < probability) & fresh
+                        use_student = torch.rand_like(rvld_ready, dtype=torch.float) < probability
+                        if not args_cli.stale_student_rollout:
+                            use_student &= fresh
                         writer.add_scalar("distillation/student_rollout_fraction", use_student.float().mean().item(),
                                           env.unwrapped.common_step_counter)
+                        writer.add_scalar("distillation/stale_student_rollout_fraction",
+                                          (use_student & ~fresh).float().mean().item(), env.unwrapped.common_step_counter)
                         actions = torch.where(use_student[:, None], student_actions, teacher_actions)
                 obs, _, dones, _ = env.step(actions)
                 if dones.any():
@@ -341,6 +358,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                             rvld_latent[bad_rows] = 0
                             rvld_ready[bad_rows] = False
                             rvld_stamp[bad_rows] = -100.0
+                    # A non-finite packet must not reach the loss: before this line it was reset above but
+                    # still updated, so one NaN row voided the whole BPTT window (the GAST loops already do this).
+                    valid &= finite
                     if not valid.any():
                         continue
                     rows = valid.nonzero(as_tuple=False).flatten()

@@ -145,6 +145,7 @@ def _finalize_gap_run(env, runner, agent_cfg, env_cfg, checkpoint) -> dict:
     manager = env.unwrapped.reward_manager
     manifest = {
         "task": args_cli.task, "arm": arm_of(args_cli.task), "checkpoint": checkpoint,
+        "camera_profile": env_cfg.camera_profile,
         "resumed_iteration": int(runner.current_learning_iteration), "ppo_lr": ppo_lr, "cenet_lr": cenet,
         "baseline_gate": gate,
         "reward_weights": {name: float(manager.get_term_cfg(name).weight) for name in terms},
@@ -183,6 +184,9 @@ def _run_rollout_only(env, runner, steps: int) -> None:
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
+    if (args_cli.enable_cameras or args_cli.task in RAYCAST_TASK_IDS) and not args_cli.rollout_only_steps:
+        from gd_lab.core.camera_contract import require_training_camera_profile
+        require_training_camera_profile(env_cfg.camera_profile)  # legacy calibration only with explicit opt-in
     if args_cli.num_envs is not None:
         env_cfg.scene.num_envs = args_cli.num_envs
     if args_cli.total_envs is not None:

@@ -71,6 +71,8 @@ def check_contract(saved, current):
 
 @hydra_task_config(args.task, "rsl_rl_cfg_entry_point")
 def main(env_cfg, agent_cfg):
+    from gd_lab.core.camera_contract import require_training_camera_profile
+    require_training_camera_profile(env_cfg.camera_profile)  # legacy calibration only with explicit opt-in
     torch.manual_seed(args.seed)
     rng = random.Random(args.seed)
     output = Path(args.output).resolve()

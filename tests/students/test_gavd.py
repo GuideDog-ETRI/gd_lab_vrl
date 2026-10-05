@@ -93,7 +93,7 @@ def test_onnx_export(tmp_path):
     from gd_lab.deploy.export_student_vrl import export_student_vrl
 
     m = GridAttentionStudent().eval()
-    _, path = export_student_vrl(m, str(tmp_path / "policy.onnx"))
+    _, path = export_student_vrl(m, str(tmp_path / "policy.onnx"), camera_profile=m.camera_profile)
     x = torch.rand(1, 4, 2, 45, 80)
     h = torch.rand(1, 64)
     expected = m(x, h)
@@ -101,6 +101,7 @@ def test_onnx_export(tmp_path):
     assert session.get_modelmeta().custom_metadata_map == {
         "camel.student_arch": "grid_attention_v1",
         "camel.student_age": "hidden63_seconds_clipped_0_1",
+        "camel.camera_profile": "vendor_new",
     }
     actual = session.run(None, {"frames": x.numpy(), "hidden_in": h.numpy()})
     for a, e in zip(actual, expected, strict=True):

@@ -3,6 +3,7 @@ import math
 import torch
 from torch import nn
 from torch.nn import functional as F
+from gd_lab.core.camera_contract import DEFAULT_CAMERA_PROFILE
 from gd_lab.students.gavd.model import GridAttentionStudent
 from gd_lab.core.camera_geometry import camera_rotation_matrix
 from gd_lab.gast.geometry import warp_memory
@@ -12,7 +13,7 @@ class GastStudent(GridAttentionStudent):
     gru_hidden_dim = 187*32 + 4*32 + 4
     age_slot = None
 
-    def __init__(self, camera_profile='vendor_legacy'):
+    def __init__(self, camera_profile=DEFAULT_CAMERA_PROFILE):
         super().__init__(camera_profile, dim=32)
         # Replace legacy pooled memory; each terrain cell retains its own memory.
         del self.fuse, self.gru, self.head, self.spatial_head
