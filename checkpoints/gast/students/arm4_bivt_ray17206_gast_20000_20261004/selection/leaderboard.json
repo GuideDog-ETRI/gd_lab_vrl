@@ -1,0 +1,92 @@
+{
+  "criteria": {
+    "keep": 5,
+    "min_hazard_supervised_fraction": 0.95,
+    "min_visible_fraction": null,
+    "min_visible_sample_fraction": 0.85,
+    "order": "ascending (lower is better)",
+    "rolling_optimizer_windows": 8,
+    "score": "latent_mse + hazard_loss_coef * hazard_mse + extra_loss",
+    "score_scope": "training windows, not held-out validation",
+    "start_iteration": 5000,
+    "version": 2,
+    "visibility_gate_semantics": "fraction of student rows with at least one teacher-visible height cell"
+  },
+  "entries": [
+    {
+      "file": "student_top5_iter_16720.pt",
+      "iteration": 16720,
+      "metrics": {
+        "extra_loss": 0.0789742966996158,
+        "hazard_mse": 0.004036407668820255,
+        "hazard_supervised_fraction": 0.9857554242983734,
+        "latent_mse": 0.008400069182395812,
+        "score": 0.08939256971642172,
+        "visible_fraction": 0.11187277567920859,
+        "visible_sample_fraction": 0.9949509292449583,
+        "windows": 8
+      },
+      "score": 0.08939256971642172
+    },
+    {
+      "file": "student_top5_iter_16704.pt",
+      "iteration": 16704,
+      "metrics": {
+        "extra_loss": 0.07924593243144125,
+        "hazard_mse": 0.004271458284304675,
+        "hazard_supervised_fraction": 0.9856592656150733,
+        "latent_mse": 0.008405083019265925,
+        "score": 0.08978674459285953,
+        "visible_fraction": 0.11189009022673818,
+        "visible_sample_fraction": 0.9948508698015582,
+        "windows": 8
+      },
+      "score": 0.08978674459285953
+    },
+    {
+      "file": "student_top5_iter_16736.pt",
+      "iteration": 16736,
+      "metrics": {
+        "extra_loss": 0.07888167038058433,
+        "hazard_mse": 0.004602964239317801,
+        "hazard_supervised_fraction": 0.9854185118275139,
+        "latent_mse": 0.008649022348997806,
+        "score": 0.08983217484924104,
+        "visible_fraction": 0.11155330754028489,
+        "visible_sample_fraction": 0.9946944062590133,
+        "windows": 8
+      },
+      "score": 0.08983217484924104
+    },
+    {
+      "file": "student_top5_iter_16752.pt",
+      "iteration": 16752,
+      "metrics": {
+        "extra_loss": 0.07901822651306598,
+        "hazard_mse": 0.004504123453269184,
+        "hazard_supervised_fraction": 0.9854902736037533,
+        "latent_mse": 0.008768797207166586,
+        "score": 0.09003908544686716,
+        "visible_fraction": 0.11148516119648823,
+        "visible_sample_fraction": 0.9946392220655519,
+        "windows": 8
+      },
+      "score": 0.09003908544686716
+    },
+    {
+      "file": "student_top5_iter_16688.pt",
+      "iteration": 16688,
+      "metrics": {
+        "extra_loss": 0.07956660093224502,
+        "hazard_mse": 0.004282349198210163,
+        "hazard_supervised_fraction": 0.9861150159271972,
+        "latent_mse": 0.008527136406918387,
+        "score": 0.09023491193826848,
+        "visible_fraction": 0.11170708821905646,
+        "visible_sample_fraction": 0.9950480657511898,
+        "windows": 8
+      },
+      "score": 0.09023491193826848
+    }
+  ]
+}

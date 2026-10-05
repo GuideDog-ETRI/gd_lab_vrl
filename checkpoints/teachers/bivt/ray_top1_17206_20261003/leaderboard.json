@@ -1,0 +1,461 @@
+{
+  "entries": [
+    {
+      "score": 0.8936756365139066,
+      "components": {
+        "G": 1.0,
+        "B": 1.0,
+        "P": 0.596499838394863,
+        "T": 0.8853669861952463,
+        "E": 0.7173773372910711,
+        "Q": 0.5959019054119779
+      },
+      "criteria_metrics": {
+        "mean_terrain_level": 9.805555555555555,
+        "base_contact_rate": 0.0,
+        "platform_gap_termination_rate": 0.0,
+        "stairs_termination_rate": 0.0
+      },
+      "sample_counts": {
+        "hf_pyramid_slope:13": 2,
+        "hf_pyramid_slope:14": 1,
+        "hf_pyramid_slope_inv:5": 1,
+        "hf_pyramid_slope_inv:11": 1,
+        "hf_pyramid_slope_inv:12": 1,
+        "platform_gap:4": 1,
+        "platform_gap:6": 1,
+        "platform_gap:10": 1,
+        "platform_gap:11": 2,
+        "platform_gap:12": 1,
+        "platform_gap:13": 2,
+        "platform_gap:14": 1,
+        "pyramid_stairs:5": 1,
+        "pyramid_stairs:10": 1,
+        "pyramid_stairs:11": 1,
+        "pyramid_stairs:13": 1,
+        "pyramid_stairs_inv:11": 1,
+        "pyramid_stairs_inv:13": 1,
+        "pyramid_stairs_inv_nose:12": 1,
+        "pyramid_stairs_inv_wide:5": 1,
+        "pyramid_stairs_inv_wide:6": 1,
+        "pyramid_stairs_nose:14": 1,
+        "pyramid_stairs_wide:6": 1,
+        "pyramid_stairs_wide:9": 1,
+        "random_rough:4": 2,
+        "random_rough:8": 1,
+        "random_rough:10": 1,
+        "ring_fence:5": 1,
+        "ring_fence:9": 1,
+        "ring_fence:10": 1,
+        "ring_fence:12": 1,
+        "ring_fence:14": 1
+      },
+      "curriculum_snapshot": {
+        "mean_level_by_family": {
+          "hf_pyramid_slope": 13.333333333333334,
+          "hf_pyramid_slope_inv": 9.333333333333334,
+          "platform_gap": 10.444444444444445,
+          "pyramid_stairs": 9.75,
+          "pyramid_stairs_inv": 12.0,
+          "pyramid_stairs_inv_nose": 12.0,
+          "pyramid_stairs_inv_wide": 5.5,
+          "pyramid_stairs_nose": 14.0,
+          "pyramid_stairs_wide": 7.5,
+          "random_rough": 6.5,
+          "ring_fence": 10.0
+        }
+      },
+      "score_is_online_proxy": true,
+      "iteration": 17206,
+      "eligibility": {
+        "minimum_platform_gap_mean_level": 8.0,
+        "platform_gap_mean_level_pass": true
+      },
+      "criteria": {
+        "top5_min_spacing": 100,
+        "min_platform_gap_mean_level": 8.0,
+        "min_terrain_mean_level": 9.0,
+        "max_base_contact_rate": 0.09,
+        "max_platform_gap_termination_rate": 0.09,
+        "max_stairs_termination_rate": 0.09,
+        "max_gap_success_regression": 0.02,
+        "max_base_contact_regression": 0.01
+      },
+      "gate_results": {
+        "gap_success_pass": true,
+        "base_contact_pass": true,
+        "terrain_mean_level_pass": true,
+        "base_contact_rate_pass": true,
+        "platform_gap_termination_pass": true,
+        "stairs_termination_pass": true,
+        "reference_iteration": 14385
+      }
+    },
+    {
+      "score": 0.8907299464879017,
+      "components": {
+        "G": 1.0,
+        "B": 1.0,
+        "P": 0.573247744757316,
+        "T": 0.882170996180287,
+        "E": 0.7280090351419085,
+        "Q": 0.6025046679836028
+      },
+      "criteria_metrics": {
+        "mean_terrain_level": 9.945454545454545,
+        "base_contact_rate": 0.0,
+        "platform_gap_termination_rate": 0.0,
+        "stairs_termination_rate": 0.0
+      },
+      "sample_counts": {
+        "hf_pyramid_slope:7": 1,
+        "hf_pyramid_slope:8": 1,
+        "hf_pyramid_slope:10": 2,
+        "hf_pyramid_slope:12": 1,
+        "hf_pyramid_slope:13": 1,
+        "hf_pyramid_slope_inv:6": 1,
+        "hf_pyramid_slope_inv:9": 3,
+        "hf_pyramid_slope_inv:12": 3,
+        "platform_gap:9": 1,
+        "platform_gap:10": 2,
+        "platform_gap:11": 1,
+        "platform_gap:12": 4,
+        "platform_gap:13": 2,
+        "platform_gap:14": 3,
+        "pyramid_stairs:6": 1,
+        "pyramid_stairs:9": 1,
+        "pyramid_stairs:11": 1,
+        "pyramid_stairs:13": 1,
+        "pyramid_stairs_inv:4": 1,
+        "pyramid_stairs_inv:10": 1,
+        "pyramid_stairs_inv_nose:6": 1,
+        "pyramid_stairs_inv_nose:12": 1,
+        "pyramid_stairs_inv_nose:14": 1,
+        "pyramid_stairs_inv_wide:8": 1,
+        "pyramid_stairs_inv_wide:10": 1,
+        "pyramid_stairs_inv_wide:11": 1,
+        "pyramid_stairs_inv_wide:13": 1,
+        "pyramid_stairs_wide:4": 1,
+        "pyramid_stairs_wide:8": 2,
+        "pyramid_stairs_wide:10": 1,
+        "random_rough:4": 1,
+        "random_rough:5": 1,
+        "random_rough:9": 1,
+        "random_rough:13": 2,
+        "random_rough:14": 1,
+        "ring_fence:2": 1,
+        "ring_fence:4": 1,
+        "ring_fence:9": 1,
+        "ring_fence:10": 2,
+        "ring_fence:12": 1
+      },
+      "curriculum_snapshot": {
+        "mean_level_by_family": {
+          "hf_pyramid_slope": 10.0,
+          "hf_pyramid_slope_inv": 9.857142857142858,
+          "platform_gap": 12.0,
+          "pyramid_stairs": 9.75,
+          "pyramid_stairs_inv": 7.0,
+          "pyramid_stairs_inv_nose": 10.666666666666666,
+          "pyramid_stairs_inv_wide": 10.5,
+          "pyramid_stairs_wide": 7.5,
+          "random_rough": 9.666666666666666,
+          "ring_fence": 7.833333333333333
+        }
+      },
+      "score_is_online_proxy": true,
+      "iteration": 14385,
+      "eligibility": {
+        "minimum_platform_gap_mean_level": 8.0,
+        "platform_gap_mean_level_pass": true
+      },
+      "criteria": {
+        "top5_min_spacing": 100,
+        "min_platform_gap_mean_level": 8.0,
+        "min_terrain_mean_level": 9.0,
+        "max_base_contact_rate": 0.09,
+        "max_platform_gap_termination_rate": 0.09,
+        "max_stairs_termination_rate": 0.09,
+        "max_gap_success_regression": 0.02,
+        "max_base_contact_regression": 0.01
+      },
+      "gate_results": {
+        "gap_success_pass": true,
+        "base_contact_pass": true,
+        "terrain_mean_level_pass": true,
+        "base_contact_rate_pass": true,
+        "platform_gap_termination_pass": true,
+        "stairs_termination_pass": true,
+        "reference_iteration": 13112
+      }
+    },
+    {
+      "score": 0.8630027231097819,
+      "components": {
+        "G": 0.95,
+        "B": 0.9883720930232558,
+        "P": 0.5469010904684787,
+        "T": 0.8750162636582636,
+        "E": 0.7244082150400554,
+        "Q": 0.6030499833173403
+      },
+      "criteria_metrics": {
+        "mean_terrain_level": 9.416666666666666,
+        "base_contact_rate": 0.011627906976744186,
+        "platform_gap_termination_rate": 0.05,
+        "stairs_termination_rate": 0.0
+      },
+      "sample_counts": {
+        "hf_pyramid_slope:2": 1,
+        "hf_pyramid_slope:5": 1,
+        "hf_pyramid_slope:7": 3,
+        "hf_pyramid_slope:9": 2,
+        "hf_pyramid_slope:10": 1,
+        "hf_pyramid_slope:13": 1,
+        "hf_pyramid_slope_inv:5": 1,
+        "hf_pyramid_slope_inv:6": 3,
+        "hf_pyramid_slope_inv:13": 1,
+        "platform_gap:5": 2,
+        "platform_gap:6": 1,
+        "platform_gap:7": 2,
+        "platform_gap:8": 1,
+        "platform_gap:9": 1,
+        "platform_gap:10": 1,
+        "platform_gap:11": 4,
+        "platform_gap:12": 1,
+        "platform_gap:13": 2,
+        "platform_gap:14": 2,
+        "pyramid_stairs:3": 1,
+        "pyramid_stairs:5": 1,
+        "pyramid_stairs:14": 1,
+        "pyramid_stairs_inv:10": 2,
+        "pyramid_stairs_inv:12": 2,
+        "pyramid_stairs_inv:13": 1,
+        "pyramid_stairs_inv_nose:10": 1,
+        "pyramid_stairs_inv_nose:11": 1,
+        "pyramid_stairs_inv_wide:10": 1,
+        "pyramid_stairs_inv_wide:12": 1,
+        "pyramid_stairs_inv_wide:13": 1,
+        "pyramid_stairs_inv_wide:14": 1,
+        "pyramid_stairs_nose:4": 1,
+        "pyramid_stairs_nose:5": 1,
+        "pyramid_stairs_wide:3": 1,
+        "pyramid_stairs_wide:9": 1,
+        "pyramid_stairs_wide:11": 1,
+        "pyramid_stairs_wide:13": 2,
+        "random_rough:8": 1,
+        "random_rough:12": 2,
+        "random_rough:14": 2,
+        "ring_fence:3": 1,
+        "ring_fence:11": 1,
+        "ring_fence:12": 1
+      },
+      "curriculum_snapshot": {
+        "mean_level_by_family": {
+          "hf_pyramid_slope": 7.666666666666667,
+          "hf_pyramid_slope_inv": 7.2,
+          "platform_gap": 9.823529411764707,
+          "pyramid_stairs": 7.333333333333333,
+          "pyramid_stairs_inv": 11.4,
+          "pyramid_stairs_inv_nose": 10.5,
+          "pyramid_stairs_inv_wide": 12.25,
+          "pyramid_stairs_nose": 4.5,
+          "pyramid_stairs_wide": 9.8,
+          "random_rough": 12.0,
+          "ring_fence": 8.666666666666666
+        }
+      },
+      "score_is_online_proxy": true,
+      "iteration": 13112,
+      "eligibility": {
+        "minimum_platform_gap_mean_level": 8.0,
+        "platform_gap_mean_level_pass": true
+      },
+      "criteria": {
+        "top5_min_spacing": 100,
+        "min_platform_gap_mean_level": 8.0,
+        "min_terrain_mean_level": 9.0,
+        "max_base_contact_rate": 0.09,
+        "max_platform_gap_termination_rate": 0.09,
+        "max_stairs_termination_rate": 0.09,
+        "max_gap_success_regression": 0.02,
+        "max_base_contact_regression": 0.01
+      },
+      "gate_results": {
+        "gap_success_pass": true,
+        "base_contact_pass": true,
+        "terrain_mean_level_pass": true,
+        "base_contact_rate_pass": true,
+        "platform_gap_termination_pass": true,
+        "stairs_termination_pass": true,
+        "reference_iteration": 12937
+      }
+    },
+    {
+      "score": 0.8244084969164049,
+      "components": {
+        "G": 0.85,
+        "B": 0.9945945945945946,
+        "P": 0.5477081141555286,
+        "T": 0.8751970750552879,
+        "E": 0.7174472706853307,
+        "Q": 0.6042312020926343
+      },
+      "criteria_metrics": {
+        "mean_terrain_level": 9.454545454545455,
+        "base_contact_rate": 0.005405405405405406,
+        "platform_gap_termination_rate": 0.025,
+        "stairs_termination_rate": 0.0
+      },
+      "sample_counts": {
+        "hf_pyramid_slope:11": 1,
+        "hf_pyramid_slope:14": 1,
+        "hf_pyramid_slope_inv:1": 1,
+        "hf_pyramid_slope_inv:6": 1,
+        "hf_pyramid_slope_inv:11": 1,
+        "hf_pyramid_slope_inv:13": 1,
+        "platform_gap:4": 1,
+        "platform_gap:6": 1,
+        "platform_gap:7": 1,
+        "platform_gap:9": 1,
+        "platform_gap:10": 1,
+        "platform_gap:11": 1,
+        "platform_gap:12": 1,
+        "platform_gap:14": 5,
+        "pyramid_stairs:6": 1,
+        "pyramid_stairs:11": 1,
+        "pyramid_stairs:13": 1,
+        "pyramid_stairs_inv:5": 1,
+        "pyramid_stairs_inv:7": 1,
+        "pyramid_stairs_inv:10": 2,
+        "pyramid_stairs_inv:13": 1,
+        "pyramid_stairs_inv:14": 1,
+        "pyramid_stairs_inv_nose:3": 2,
+        "pyramid_stairs_inv_nose:7": 1,
+        "pyramid_stairs_inv_nose:12": 1,
+        "pyramid_stairs_inv_wide:3": 1,
+        "pyramid_stairs_inv_wide:7": 1,
+        "pyramid_stairs_inv_wide:10": 1,
+        "pyramid_stairs_inv_wide:11": 1,
+        "pyramid_stairs_nose:7": 1,
+        "pyramid_stairs_wide:0": 1,
+        "pyramid_stairs_wide:5": 1,
+        "pyramid_stairs_wide:10": 1,
+        "pyramid_stairs_wide:14": 1,
+        "random_rough:11": 1,
+        "ring_fence:11": 1,
+        "ring_fence:14": 2
+      },
+      "curriculum_snapshot": {
+        "mean_level_by_family": {
+          "hf_pyramid_slope": 12.5,
+          "hf_pyramid_slope_inv": 7.75,
+          "platform_gap": 10.75,
+          "pyramid_stairs": 10.0,
+          "pyramid_stairs_inv": 9.833333333333334,
+          "pyramid_stairs_inv_nose": 6.25,
+          "pyramid_stairs_inv_wide": 7.75,
+          "pyramid_stairs_nose": 7.0,
+          "pyramid_stairs_wide": 7.25,
+          "random_rough": 11.0,
+          "ring_fence": 13.0
+        }
+      },
+      "score_is_online_proxy": true,
+      "iteration": 12937,
+      "eligibility": {
+        "minimum_platform_gap_mean_level": 8.0,
+        "platform_gap_mean_level_pass": true
+      },
+      "criteria": {
+        "top5_min_spacing": 100,
+        "min_platform_gap_mean_level": 8.0,
+        "min_terrain_mean_level": 9.0,
+        "max_base_contact_rate": 0.09,
+        "max_platform_gap_termination_rate": 0.09,
+        "max_stairs_termination_rate": 0.09,
+        "max_gap_success_regression": 0.02,
+        "max_base_contact_regression": 0.01
+      },
+      "gate_results": {
+        "gap_success_pass": true,
+        "base_contact_pass": true,
+        "terrain_mean_level_pass": true,
+        "base_contact_rate_pass": true,
+        "platform_gap_termination_pass": true,
+        "stairs_termination_pass": true,
+        "reference_iteration": 2003
+      }
+    },
+    {
+      "score": 0.4818394880576981,
+      "components": {
+        "G": 0.0,
+        "B": 1.0,
+        "P": 0.9833409562451018,
+        "T": 0.11080265715724594,
+        "E": 0.9541616719292836,
+        "Q": 0.5109999061748826
+      },
+      "criteria_metrics": {
+        "mean_terrain_level": 9.10909090909091,
+        "base_contact_rate": 0.0,
+        "platform_gap_termination_rate": 0.0,
+        "stairs_termination_rate": 0.0
+      },
+      "sample_counts": {
+        "hf_pyramid_slope:9": 3,
+        "hf_pyramid_slope_inv:9": 7,
+        "platform_gap:10": 17,
+        "pyramid_stairs:8": 2,
+        "pyramid_stairs_inv:10": 3,
+        "pyramid_stairs_inv_nose:10": 3,
+        "pyramid_stairs_inv_wide:9": 1,
+        "pyramid_stairs_nose:8": 6,
+        "pyramid_stairs_wide:8": 3,
+        "random_rough:9": 4,
+        "ring_fence:8": 6
+      },
+      "curriculum_snapshot": {
+        "mean_level_by_family": {
+          "hf_pyramid_slope": 9.0,
+          "hf_pyramid_slope_inv": 9.0,
+          "platform_gap": 10.0,
+          "pyramid_stairs": 8.0,
+          "pyramid_stairs_inv": 10.0,
+          "pyramid_stairs_inv_nose": 10.0,
+          "pyramid_stairs_inv_wide": 9.0,
+          "pyramid_stairs_nose": 8.0,
+          "pyramid_stairs_wide": 8.0,
+          "random_rough": 9.0,
+          "ring_fence": 8.0
+        }
+      },
+      "score_is_online_proxy": true,
+      "iteration": 2003,
+      "eligibility": {
+        "minimum_platform_gap_mean_level": 8.0,
+        "platform_gap_mean_level_pass": true
+      },
+      "criteria": {
+        "top5_min_spacing": 100,
+        "min_platform_gap_mean_level": 8.0,
+        "min_terrain_mean_level": 9.0,
+        "max_base_contact_rate": 0.09,
+        "max_platform_gap_termination_rate": 0.09,
+        "max_stairs_termination_rate": 0.09,
+        "max_gap_success_regression": 0.02,
+        "max_base_contact_regression": 0.01
+      },
+      "gate_results": {
+        "gap_success_pass": true,
+        "base_contact_pass": true,
+        "terrain_mean_level_pass": true,
+        "base_contact_rate_pass": true,
+        "platform_gap_termination_pass": true,
+        "stairs_termination_pass": true,
+        "reference_iteration": 2002
+      }
+    }
+  ]
+}
