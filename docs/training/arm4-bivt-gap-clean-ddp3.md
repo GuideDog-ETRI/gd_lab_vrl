@@ -107,4 +107,10 @@ tmux new-session -d -s bivt_gap_clean_ddp3 \
 
 ## 실행 기록
 
-(시작 후 run id, 시작 시각, 정지 파일 경로를 여기에 덧붙인다.)
+- 시작: 2026-10-05 22:54 KST, tmux `bivt_gap_clean_ddp3`, 코드 `60455f8`
+- run id: `2026-10-05_22-54-39_gap_clean_ddp3_s42_train`
+- run 폴더: `logs/vision_rbq10_dreamwaq/arm_4/2026-10-05_22-54-55_2026-10-05_22-54-39_gap_clean_ddp3_s42_train/`
+- 콘솔 로그: `logs/bivt_gap_clean_ddp3_train_console_20261005_225439.log`
+- 정지 파일: `logs/2026-10-05_22-54-39_gap_clean_ddp3_s42_train.stop` (작업 폴더 기준)
+- 초기 속도: 약 5.45 s/iter(17233 시점) → 예상 종료 2026-10-07 20시 무렵(약 45시간)
+- GPU 메모리: GPU 0·1·2 각 약 16 GB, GPU 3 VLLM 90,800 MiB 불변
