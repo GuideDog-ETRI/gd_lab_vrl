@@ -14,6 +14,7 @@ from rsl_rl.runners import OnPolicyRunner
 from tensordict import TensorDict
 
 from .actor_critic import DreamwaqActorCritic
+from .distributed_sync import assert_synchronized_state, raise_if_any
 from .online_rollout import install_episode_collector
 from .online_top5 import DEFAULT_TOP5_CRITERIA, Top5CriteriaReloader, rank_and_save_top5
 from .terrain_resume import (
@@ -166,6 +167,21 @@ class DreamwaqRunner(OnPolicyRunner):
         os.replace(temporary, path)
 
     def load(self, path: str, load_optimizer: bool = True, map_location: str | None = None) -> dict:
+        infos = None
+        error = None
+        try:
+            infos = self._load_local(path, load_optimizer=load_optimizer, map_location=map_location)
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+        raise_if_any(error, device=self.device, context=f"checkpoint resume {path}")
+        policy = self.alg.policy
+        optimizers = [("ppo", self.alg.optimizer)]
+        if hasattr(policy, "cenet") and hasattr(policy.cenet, "optimizer"):
+            optimizers.append(("cenet", policy.cenet.optimizer))
+        assert_synchronized_state(policy, optimizers, context=f"checkpoint resume {path}")
+        return infos
+
+    def _load_local(self, path: str, load_optimizer: bool = True, map_location: str | None = None) -> dict:
         infos = super().load(path, load_optimizer=load_optimizer, map_location=map_location)
         extra = (infos or {}).get("gd_lab", {})
         if "learning_rate" in extra:

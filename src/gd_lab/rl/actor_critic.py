@@ -10,6 +10,7 @@ from rsl_rl.networks import MLP
 from tensordict import TensorDict
 
 from .cenet import CENet
+from .distributed_sync import synchronize_empirical_normalizer
 
 
 class DreamwaqActorCritic(ActorCritic):
@@ -114,6 +115,13 @@ class DreamwaqActorCritic(ActorCritic):
         self._adaboot_pending_resample = False
 
     # -- actor input -------------------------------------------------------
+    def update_normalization(self, obs: TensorDict) -> None:
+        """Keep empirical moments equal by updating them from global rank batches."""
+        if self.actor_obs_normalization:
+            synchronize_empirical_normalizer(self.actor_obs_normalizer, self.get_actor_obs(obs))
+        if self.critic_obs_normalization:
+            synchronize_empirical_normalizer(self.critic_obs_normalizer, self.get_critic_obs(obs))
+
     def _normalized_history(self, obs: TensorDict) -> torch.Tensor:
         return self.actor_obs_normalizer(obs[self.obs_groups["policy"][0]])
 

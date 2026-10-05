@@ -365,7 +365,7 @@ def test_cli_accepts_the_safe_configuration(tmp_path):
 
 @pytest.mark.parametrize("override", [
     dict(force_ppo_lr=None), dict(force_ppo_lr=0.0), dict(force_ppo_lr=float("inf")), dict(resume_checkpoint=None),
-    dict(distributed=True), dict(blind_init="blind.pt"), dict(target_iterations=None),
+    dict(blind_init="blind.pt"), dict(target_iterations=None),
     dict(hash_fn=lambda path: "0" * 64), dict(rollout_only_steps=0, target_iterations=None),
     dict(target_iterations=17207), dict(target_iterations=100),  # resumes at 17207: nothing left to train
     dict(baseline_gate=None), dict(baseline_gate="/nonexistent/gate.json"),
@@ -762,3 +762,23 @@ def test_foot_order_check_says_so_when_it_cannot_run(capsys):
     env, _, holder = _wrapper_env()  # stub robot/sensor without body_names
     _call(_monitor(env, holder, module), env)
     assert "foot-order check skipped" in capsys.readouterr().out
+
+
+def test_gap_training_accepts_distributed_and_an_explicit_waiver(tmp_path):
+    task = gap_guard.GAP_TASK_IDS[2]
+    gap_guard.validate_cli(task, **_cli(tmp_path, distributed=True))
+    waiver = "user waived gate C on 2026-10-05 for the multi-GPU run"
+    gap_guard.validate_cli(task, **_cli(tmp_path, baseline_gate=None, baseline_gate_waiver=waiver))
+    for bad in (dict(baseline_gate=None, baseline_gate_waiver="too short"),
+                dict(baseline_gate_waiver=waiver),  # together with a gate record: ambiguous
+                dict(baseline_gate=None, baseline_gate_waiver=None)):
+        with pytest.raises(ValueError):
+            gap_guard.validate_cli(task, **_cli(tmp_path, **bad))
+
+
+def test_ddp_launcher_pins_arm4_new_cameras_and_spares_gpu3():
+    text = (Path(__file__).parents[1] / "scripts/run_bivt_gap_finetune_ddp.sh").read_text()
+    for needle in ("TRAIN_ARM=4", "--distributed", "--total_envs", "torch.distributed.run", "GPU 3 belongs to VLLM",
+                   "GAP_TOTAL_ENVS:-4096", "GAP_TARGET_ITERATIONS:-30000", "--force_ppo_lr 1e-4"):
+        assert needle in text
+    assert "vendor_legacy" not in text and "GD_LAB_ALLOW_LEGACY_CAMERA" not in text

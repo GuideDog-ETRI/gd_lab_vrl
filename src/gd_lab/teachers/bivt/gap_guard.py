@@ -33,6 +33,8 @@ EXPECTED_CENET_LR = 1.0e-3
 # unexecuted teacher-only draft and must never create or satisfy it.
 GATE_SCHEMA = "gap_baseline_gate_v1"
 GATE_UNLOCKING_VERDICT = "teacher_problem_reproduced"
+# Instead of a gate record, the user may waive gate C for a run; the reason is recorded in the manifest.
+MIN_WAIVER_REASON = 20
 
 
 def arm_of(task: str) -> str | None:
@@ -80,7 +82,7 @@ def validate_gate_record(path) -> dict:
 
 def validate_cli(
     task, *, resume_checkpoint, force_ppo_lr, blind_init, distributed, rollout_only_steps, target_iterations=None,
-    baseline_gate=None, hash_fn=sha256_file,
+    baseline_gate=None, baseline_gate_waiver=None, hash_fn=sha256_file,
 ):
     """Raise ValueError for any unsafe combination. Cheap: no torch, no simulator."""
     if task not in GAP_TASK_IDS:
@@ -88,7 +90,9 @@ def validate_cli(
             raise ValueError("--force_ppo_lr/--rollout_only_steps are only valid for the gap fine-tuning tasks")
         return
     if distributed:
-        raise ValueError("gap fine-tuning forbids --distributed (CENet is not synchronized across ranks)")
+        # PPO/CENet gradients, optimizer steps, normalizers and the AdaBoot draw are rank-synchronized by
+        # gd_lab.rl.distributed_sync (tests/test_rl_distributed_sync.py); refuse if that layer is absent.
+        from gd_lab.rl import distributed_sync  # noqa: F401
     if blind_init is not None:
         raise ValueError("gap fine-tuning must resume the 17206 teacher, not --blind_init")
     if force_ppo_lr is None or not math.isfinite(force_ppo_lr) or force_ppo_lr <= 0:
@@ -101,10 +105,17 @@ def validate_cli(
         raise ValueError(
             f"--target_iterations {target_iterations} leaves no update after resuming at {PINNED_CHECKPOINT_ITER + 1}"
         )
-    if rollout_only_steps is None:  # training: the gate is mandatory; the rollout-only smoke may run before it
-        if not baseline_gate:
-            raise ValueError("gap fine-tuning requires --baseline_gate <passed gate-C record>")
-        validate_gate_record(baseline_gate)
+    if rollout_only_steps is None:  # training: a gate record or an explicit waiver; the smoke may run before it
+        if baseline_gate and baseline_gate_waiver:
+            raise ValueError("give either --baseline_gate or --baseline_gate_waiver, not both")
+        if baseline_gate_waiver is not None:
+            if len(str(baseline_gate_waiver).strip()) < MIN_WAIVER_REASON:
+                raise ValueError(f"--baseline_gate_waiver needs a reason of at least {MIN_WAIVER_REASON} characters")
+        elif not baseline_gate:
+            raise ValueError("gap fine-tuning requires --baseline_gate <passed gate-C record> "
+                             "or --baseline_gate_waiver '<who decided and why>'")
+        else:
+            validate_gate_record(baseline_gate)
     if not resume_checkpoint:
         raise ValueError(f"gap fine-tuning requires --resume_checkpoint .../{PINNED_CHECKPOINT_NAME}")
     path = Path(resume_checkpoint)
