@@ -1,0 +1,35 @@
+{
+  "artifact_type": "bivt_ray_teacher",
+  "robot": "RBQ10",
+  "method": "DreamWaQ",
+  "training_variant": "clean_gap_finetune_vendor_new",
+  "checkpoint_iteration": 21068,
+  "checkpoint_file": "teacher/21068_top1.pt",
+  "checkpoint_sha256": "fa397d22a949e24f74312b5270b5954a4ddb15c7451ea85ba8f64dbeeb7c9501",
+  "source_run": "logs/vision_rbq10_dreamwaq/arm_4/2026-10-05_22-54-55_2026-10-05_22-54-39_gap_clean_ddp3_s42_train",
+  "source_task": "Gd-VrlGapFinetuneCleanRaycast-Rbq10-Dreamwaq-v0",
+  "source_branch": "codex/bivt-ray-ddp-newcam-17206",
+  "source_repository_revision_at_packaging": "af9754faa98dc2cbed52bfb5a98288c4a44a1f0a",
+  "camera_profile": "vendor_new",
+  "base_checkpoint_iteration": 17206,
+  "base_checkpoint_sha256": "a70adbda5b73925f5936eaef27ee3b33686d9f7489486afdda9bf40ddb0c326d",
+  "base_camera_profile": "vendor_legacy",
+  "seed": {"launch": 42, "run_manifest": 44},
+  "distributed": {"world_size": 3, "total_envs": 4096},
+  "leaderboard_snapshot": {
+    "file": "leaderboard.json",
+    "captured_during_packaging": true,
+    "selected_iteration": 21068,
+    "score": 0.8652681642427711,
+    "gap_clean_crossing_rate": 0.9562962962962962,
+    "base_contact_rate": 0.03339371980676328,
+    "gap_success_definition": "clean_crossing",
+    "score_is_online_proxy": true
+  },
+  "source_files": {
+    "environment": "params/env.yaml",
+    "agent": "params/agent.yaml",
+    "gap_finetune_manifest": "params/gap_finetune_manifest.yaml",
+    "leaderboard": "leaderboard.json"
+  }
+}
