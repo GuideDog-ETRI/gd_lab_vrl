@@ -6,10 +6,19 @@ from __future__ import annotations
 from typing import NamedTuple
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
 from rsl_rl.networks import MLP
 from torch import optim
+
+from .distributed_sync import (
+    any_rank,
+    average_gradients,
+    distributed_active,
+    install_collective_optimizer_step,
+    raise_if_any,
+)
 
 
 class CENetOut(NamedTuple):
@@ -151,7 +160,12 @@ class CENet(nn.Module):
         if not self.adaboot_enabled or int(self.adaboot_update_count.item()) < self.adaboot_min_updates:
             self.inject_gt.fill_(0)
             return
-        self.inject_gt.fill_(int((torch.rand(()) >= self.bootstrap_prob).item()))
+        if not distributed_active() or dist.get_rank() == 0:
+            self.inject_gt.fill_(
+                int((torch.rand((), device=self.bootstrap_prob.device) >= self.bootstrap_prob).item())
+            )
+        if distributed_active():
+            dist.broadcast(self.inject_gt, src=0)
 
     # -- decoupled optimizer step ----------------------------------------
     def update(
@@ -186,30 +200,42 @@ class CENet(nn.Module):
         # An extreme history drives the forward pass, not the targets.
         obs_history = obs_history.clamp(-hlim, hlim)
 
-        out = self.forward(obs_history, deterministic=False)
-        velocity_loss = F.mse_loss(out.velocity, velocity_target.detach())
-        target = next_obs_target.detach()
-        if valid_mask is not None:
-            valid_mask = valid_mask.reshape(-1).bool()
-            if valid_mask.any():
-                recon_loss = F.mse_loss(out.decode[valid_mask], target[valid_mask])
+        error = None
+        try:
+            out = self.forward(obs_history, deterministic=False)
+            velocity_loss = F.mse_loss(out.velocity, velocity_target.detach())
+            target = next_obs_target.detach()
+            if valid_mask is not None:
+                valid_mask = valid_mask.reshape(-1).bool()
+                if valid_mask.any():
+                    recon_loss = F.mse_loss(out.decode[valid_mask], target[valid_mask])
+                else:
+                    recon_loss = out.decode.new_tensor(0.0)
             else:
-                recon_loss = out.decode.new_tensor(0.0)
-        else:
-            recon_loss = F.mse_loss(out.decode, target)
-        kl_loss = self.kl_divergence(out.mean_latent, out.logvar_latent)
-        loss = (
-            self.velocity_loss_coef * velocity_loss
-            + self.reconstruction_loss_coef * recon_loss
-            + self.beta * kl_loss
-        )
-        # Clamping bounds the inputs but cannot bound everything: the loss is the
-        # one place where every failure path becomes visible. If it is absurd,
-        # the batch has nothing to teach -- take no step rather than a wrong one.
-        skipped = not torch.isfinite(loss) or float(loss) > self.loss_skip_threshold
+                recon_loss = F.mse_loss(out.decode, target)
+            kl_loss = self.kl_divergence(out.mean_latent, out.logvar_latent)
+            loss = (
+                self.velocity_loss_coef * velocity_loss
+                + self.reconstruction_loss_coef * recon_loss
+                + self.beta * kl_loss
+            )
+        except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"
+        raise_if_any(error, device=obs_history.device, context="CENet forward")
+        local_skip = (not bool(torch.isfinite(loss).all())) or float(loss) > self.loss_skip_threshold
+        skipped = any_rank(local_skip, loss.device)
         self.optimizer.zero_grad(set_to_none=True)
         if not skipped:
-            loss.backward()
+            error = None
+            try:
+                loss.backward()
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {exc}"
+            raise_if_any(error, device=loss.device, context="CENet backward")
+            nonfinite = any(parameter.grad is not None and not bool(torch.isfinite(parameter.grad).all()) for parameter in self.parameters())
+            raise_if_any("non-finite CENet gradient" if nonfinite else None, device=loss.device, context="CENet gradients")
+            average_gradients(self.parameters())
+            install_collective_optimizer_step(self.optimizer, device=loss.device, context="CENet optimizer")
             self.optimizer.step()
 
         metrics = {

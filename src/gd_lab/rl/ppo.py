@@ -6,10 +6,18 @@ from collections import deque
 from typing import Any
 
 import torch
+import torch.distributed as dist
 from rsl_rl.algorithms import PPO
 from tensordict import TensorDict
 
 from .actor_critic import DreamwaqActorCritic
+from .distributed_sync import (
+    assert_synchronized_state,
+    average_gradients,
+    distributed_active,
+    install_collective_optimizer_step,
+    raise_if_any,
+)
 
 
 class DreamwaqPPO(PPO):
@@ -25,6 +33,7 @@ class DreamwaqPPO(PPO):
     def __init__(
         self,
         *args: Any,
+        distributed_check_interval: int = 100,
         episode_reward_window: int = 100,
         min_learning_rate: float = 1.0e-5,
         **kwargs: Any,
@@ -36,6 +45,10 @@ class DreamwaqPPO(PPO):
         # Adam was built from the raw argument, before the floor applied.
         for group in self.optimizer.param_groups:
             group["lr"] = self.learning_rate
+        install_collective_optimizer_step(self.optimizer, device=self.device, context="PPO optimizer")
+        install_collective_optimizer_step(self.policy.cenet.optimizer, device=self.device, context="CENet optimizer")
+        self.distributed_check_interval = max(1, int(distributed_check_interval))
+        self._distributed_update_count = 0
         self._episode_returns: deque[float] = deque(maxlen=episode_reward_window)
         self._cur_return: torch.Tensor | None = None
         self._next_latest: torch.Tensor | None = None
@@ -85,11 +98,42 @@ class DreamwaqPPO(PPO):
         super().process_env_step(obs, rewards, dones, extras)
 
     # -- update ------------------------------------------------------------
+    def reduce_parameters(self) -> None:
+        """Average PPO actor/critic/terrain gradients after rank-wide finite checks."""
+        parameters = list(self.policy.parameters())
+        if self.rnd is not None:
+            parameters.extend(self.rnd.parameters())
+        nonfinite = any(
+            parameter.grad is not None and not bool(torch.isfinite(parameter.grad).all())
+            for parameter in parameters
+        )
+        raise_if_any(
+            "non-finite PPO gradient" if nonfinite else None,
+            device=self.device,
+            context="PPO gradients",
+        )
+        average_gradients(parameters)
+
+    def _global_episode_returns(self) -> list[float]:
+        local = list(self._episode_returns)
+        if not distributed_active():
+            return local
+        gathered: list[list[float] | None] = [None] * dist.get_world_size()
+        dist.all_gather_object(gathered, local)
+        return [reward for rank_rewards in gathered for reward in (rank_rewards or [])]
+
     def update(self) -> dict[str, float]:
-        self.policy.cenet.update_bootstrap_from_episode_rewards(self._episode_returns)
+        self.policy.cenet.update_bootstrap_from_episode_rewards(self._global_episode_returns())
         loss_dict = super().update()
         loss_dict.update(self._update_cenet())
         self.policy.notify_iteration_done()
+        self._distributed_update_count += 1
+        if self._distributed_update_count % self.distributed_check_interval == 0:
+            assert_synchronized_state(
+                self.policy,
+                [("ppo", self.optimizer), ("cenet", self.policy.cenet.optimizer)],
+                context=f"PPO/CENet update {self._distributed_update_count}",
+            )
         return loss_dict
 
     def _update_cenet(self) -> dict[str, float]:

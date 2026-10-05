@@ -55,6 +55,8 @@ parser.add_argument('--force_ppo_lr', type=float, default=None,
                     help='Gap fine-tuning only: fixed PPO LR applied after the checkpoint is loaded (required there).')
 parser.add_argument('--baseline_gate', type=str, default=None,
                     help='Gap fine-tuning training only: structured gate-C record (see gd_lab.teachers.bivt.gap_guard).')
+parser.add_argument('--baseline_gate_waiver', type=str, default=None,
+                    help='Gap fine-tuning training only: explicit gate-C waiver; the reason is recorded in the manifest.')
 parser.add_argument('--rollout_only_steps', type=int, default=None,
                     help='Gap fine-tuning smoke: run the loaded policy for N env steps and exit; no PPO update.')
 cli_args.add_rsl_rl_args(parser)
@@ -74,7 +76,7 @@ try:  # fail closed before the simulator starts
         args_cli.task, resume_checkpoint=args_cli.resume_checkpoint, force_ppo_lr=args_cli.force_ppo_lr,
         blind_init=args_cli.blind_init, distributed=args_cli.distributed,
         rollout_only_steps=args_cli.rollout_only_steps, target_iterations=args_cli.target_iterations,
-        baseline_gate=args_cli.baseline_gate,
+        baseline_gate=args_cli.baseline_gate, baseline_gate_waiver=args_cli.baseline_gate_waiver,
     )
 except ValueError as exc:
     parser.error(str(exc))
@@ -139,8 +141,12 @@ def _finalize_gap_run(env, runner, agent_cfg, env_cfg, checkpoint) -> dict:
         raise RuntimeError(f"observation contract {context.get('version')!r} != {OBSERVATION_VERSION!r}")
     gate = None
     if not args_cli.rollout_only_steps:  # defense in depth: training never starts without a validated gate record
-        validate_gate_record(args_cli.baseline_gate)
-        gate = {"path": str(args_cli.baseline_gate), "sha256": sha256_file(args_cli.baseline_gate)}
+        if args_cli.baseline_gate_waiver is not None:
+            gate = {"waived": True, "reason": args_cli.baseline_gate_waiver.strip()}
+            print(f"[WARN] Gate C waived for this run: {gate['reason']}", flush=True)
+        else:
+            validate_gate_record(args_cli.baseline_gate)
+            gate = {"path": str(args_cli.baseline_gate), "sha256": sha256_file(args_cli.baseline_gate)}
     terms = ("platform_gap_monitor", "platform_gap_intrusion", "platform_gap_clean")
     manager = env.unwrapped.reward_manager
     manifest = {
@@ -151,6 +157,8 @@ def _finalize_gap_run(env, runner, agent_cfg, env_cfg, checkpoint) -> dict:
         "reward_weights": {name: float(manager.get_term_cfg(name).weight) for name in terms},
         "train_arm_env": os.environ.get("TRAIN_ARM"), "hydra_overrides": list(hydra_args),
         "seed": int(agent_cfg.seed), "num_envs": int(env_cfg.scene.num_envs),
+        "distributed": bool(args_cli.distributed), "world_size": int(os.environ.get("WORLD_SIZE", "1")),
+        "total_envs": args_cli.total_envs,
         "source_commit": os.environ.get("GD_LAB_SOURCE_COMMIT"), "patch_sha256": os.environ.get("GD_LAB_PATCH_SHA256"),
     }
     print(f"[INFO] Gap fine-tuning manifest: {manifest}", flush=True)
