@@ -147,6 +147,8 @@ class DreamwaqRunner(OnPolicyRunner):
         extra["learning_rate"] = self.alg.learning_rate
         if hasattr(self, 'observation_context'):
             extra['observation_context'] = self.observation_context
+        if hasattr(self, 'gap_finetune_manifest'):
+            extra['gap_finetune'] = self.gap_finetune_manifest
         policy = self.alg.policy
         if isinstance(policy, DreamwaqActorCritic):
             extra["cenet_optimizer_state_dict"] = policy.cenet.optimizer.state_dict()

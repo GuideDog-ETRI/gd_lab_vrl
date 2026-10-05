@@ -20,6 +20,20 @@ from isaaclab.app import AppLauncher
 
 import cli_args  # isort: skip
 from gd_lab.core.experiments import training_arm_overrides
+from gd_lab.teachers.bivt.gap_guard import (
+    CAMERA_FREE_TASK_IDS,
+    GAP_TASK_IDS,
+    OBSERVATION_VERSION,
+    RAYCAST_TASK_IDS,
+    apply_force_ppo_lr,
+    arm_of,
+    cenet_lr_report,
+    inspect_checkpoint,
+    sha256_file,
+    validate_cli,
+    validate_gate_record,
+    verify_restored_iteration,
+)
 from vrl_runtime import prepare_vrl_runtime, verify_vrl_runtime
 
 parser = argparse.ArgumentParser(description="Train an RSL-RL agent on a gd_lab task.")
@@ -37,6 +51,12 @@ parser.add_argument("--video_interval", type=int, default=2000, help="Interval b
 parser.add_argument("--blind_init", type=str, default=None, help="Blind DreamWaQ model_*.pt to warm-start the policy from.")
 parser.add_argument('--resume_checkpoint', type=str, help='Absolute checkpoint path, including Top5 checkpoints.')
 parser.add_argument('--target_iterations', type=int, help='Total completed PPO updates, not additional updates.')
+parser.add_argument('--force_ppo_lr', type=float, default=None,
+                    help='Gap fine-tuning only: fixed PPO LR applied after the checkpoint is loaded (required there).')
+parser.add_argument('--baseline_gate', type=str, default=None,
+                    help='Gap fine-tuning training only: structured gate-C record (see gd_lab.teachers.bivt.gap_guard).')
+parser.add_argument('--rollout_only_steps', type=int, default=None,
+                    help='Gap fine-tuning smoke: run the loaded policy for N env steps and exit; no PPO update.')
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
@@ -47,9 +67,17 @@ if args_cli.resume_checkpoint:
 if args_cli.total_envs is not None and (not args_cli.distributed or args_cli.total_envs < int(os.environ.get("WORLD_SIZE", "1"))):
     parser.error("--total_envs requires --distributed and at least one environment per process")
 
-# Only the camera-free tasks (2-A, 2-R) run without rendered cameras.
-CAMERA_FREE_TASKS = ("Gd-VrlBlindStart-Rbq10-Dreamwaq-v0", "Gd-VrlBlindStartRaycast-Rbq10-Dreamwaq-v0")
-args_cli.enable_cameras = args_cli.task not in CAMERA_FREE_TASKS
+# Only the camera-free tasks (2-A, 2-R, gap fine-tuning arms) run without rendered cameras.
+args_cli.enable_cameras = args_cli.task not in CAMERA_FREE_TASK_IDS
+try:  # fail closed before the simulator starts
+    validate_cli(
+        args_cli.task, resume_checkpoint=args_cli.resume_checkpoint, force_ppo_lr=args_cli.force_ppo_lr,
+        blind_init=args_cli.blind_init, distributed=args_cli.distributed,
+        rollout_only_steps=args_cli.rollout_only_steps, target_iterations=args_cli.target_iterations,
+        baseline_gate=args_cli.baseline_gate,
+    )
+except ValueError as exc:
+    parser.error(str(exc))
 if args_cli.blind_init is not None and args_cli.resume:
     parser.error("--blind_init starts a new run; it cannot be combined with --resume")
 
@@ -79,6 +107,7 @@ import torch
 from gd_lab.core.paths import LOG_ROOT
 from gd_lab.deploy.metadata import capture_context
 from gd_lab.managers.action_history import ensure_prev_prev_action_tracking
+from gd_lab.mdp.platform_gap_attempts import EpisodeArchive
 from gd_lab.mdp.terrain_families import family_column_masks
 from gd_lab.tasks.vrl_cameras import configure_vrl_cameras
 from gd_lab.teachers.bivt.blind_init import load_blind_checkpoint
@@ -96,6 +125,59 @@ torch.backends.cudnn.allow_tf32 = True
 def _resolve(path: str) -> type[OnPolicyRunner]:
     module_name, attr = path.split(":")
     return getattr(importlib.import_module(module_name), attr)
+
+
+def _finalize_gap_run(env, runner, agent_cfg, env_cfg, checkpoint) -> dict:
+    """Gap arms only: prove the 17206 state was restored, pin the PPO LR, record the effective setup."""
+    verify_restored_iteration(runner.current_learning_iteration, checkpoint)  # load() resumes at iter + 1
+    ppo_lr = apply_force_ppo_lr(runner.alg, args_cli.force_ppo_lr)  # after load: load restores the saved LR
+    cenet = cenet_lr_report(runner.alg.policy)
+    if not cenet["as_expected"]:
+        print(f"[WARN] CENet LR differs from the expected value: {cenet}", flush=True)
+    context = getattr(runner, "observation_context", None) or {}
+    if context.get("version") != OBSERVATION_VERSION:
+        raise RuntimeError(f"observation contract {context.get('version')!r} != {OBSERVATION_VERSION!r}")
+    gate = None
+    if not args_cli.rollout_only_steps:  # defense in depth: training never starts without a validated gate record
+        validate_gate_record(args_cli.baseline_gate)
+        gate = {"path": str(args_cli.baseline_gate), "sha256": sha256_file(args_cli.baseline_gate)}
+    terms = ("platform_gap_monitor", "platform_gap_intrusion", "platform_gap_clean")
+    manager = env.unwrapped.reward_manager
+    manifest = {
+        "task": args_cli.task, "arm": arm_of(args_cli.task), "checkpoint": checkpoint,
+        "resumed_iteration": int(runner.current_learning_iteration), "ppo_lr": ppo_lr, "cenet_lr": cenet,
+        "baseline_gate": gate,
+        "reward_weights": {name: float(manager.get_term_cfg(name).weight) for name in terms},
+        "train_arm_env": os.environ.get("TRAIN_ARM"), "hydra_overrides": list(hydra_args),
+        "seed": int(agent_cfg.seed), "num_envs": int(env_cfg.scene.num_envs),
+        "source_commit": os.environ.get("GD_LAB_SOURCE_COMMIT"), "patch_sha256": os.environ.get("GD_LAB_PATCH_SHA256"),
+    }
+    print(f"[INFO] Gap fine-tuning manifest: {manifest}", flush=True)
+    return manifest
+
+
+def _run_rollout_only(env, runner, steps: int) -> None:
+    """Server smoke (UNVERIFIED on this PC): exercise the manager graph; no PPO update, no optimizer step.
+
+    The tracker is wiped on every env reset, so the totals come from an EpisodeArchive that snapshots
+    each env's first episode right before its reset.
+    """
+    unwrapped = env.unwrapped
+    monitor = unwrapped.reward_manager.get_term_cfg("platform_gap_monitor").func
+    archive = EpisodeArchive(monitor.tracker)
+    archive.install(monitor)
+    policy = runner.get_inference_policy(device=unwrapped.device)
+    obs = env.get_observations()
+    obs = obs[0] if isinstance(obs, tuple) else obs
+    log_keys, resets = set(), 0
+    with torch.inference_mode():
+        for _ in range(steps):
+            obs, _, dones, extras = env.step(policy(obs))
+            resets += int(dones.sum())
+            log_keys.update(k for k in extras.get("log", {}) if "platform_gap_diagnostics" in k)
+    stats, records = archive.finish()
+    print(f"[SMOKE] steps={steps} total_resets={resets} truncated_envs={archive.truncated} "
+          f"diag_keys={sorted(log_keys)} records={len(records)} stats={stats}", flush=True)
 
 
 @hydra_task_config(args_cli.task, args_cli.agent)
@@ -160,7 +242,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         columns, spacing=agent_cfg.top5_min_spacing,
         min_platform_gap_mean_level=agent_cfg.top5_min_platform_gap_mean_level,
     )
-    if args_cli.task == 'Gd-VrlBlindStartRaycast-Rbq10-Dreamwaq-v0':
+    if args_cli.task in RAYCAST_TASK_IDS:
         from gd_lab.core.camera_transport import CameraTransportConfig
         runner.observation_context = dict(version='bivt_ray_occlusion_v2',
             occlusion='terrain + leg capsules + trunk OBB + foot spheres',
@@ -174,8 +256,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     except (ValueError, AttributeError, KeyError, TypeError) as exc:
         print(f"[WARN] Deployment metadata unavailable; checkpoints will not carry it: {exc}")
     runner.add_git_repo_to_log(__file__)
+    gap_checkpoint = None
     if agent_cfg.resume:
         print(f"[INFO] Loading checkpoint: {resume_path}")
+        if args_cli.task in GAP_TASK_IDS:
+            gap_checkpoint = inspect_checkpoint(resume_path)  # raises if any required state is missing
         runner.load(resume_path)
     if args_cli.blind_init is not None:
         blind_infos = load_blind_checkpoint(runner.alg.policy, args_cli.blind_init)
@@ -185,12 +270,23 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                 group["lr"] = runner.alg.learning_rate
         print(f"[INFO] Warm-started from blind checkpoint: {args_cli.blind_init}", flush=True)
 
+    gap_manifest = None
+    if args_cli.task in GAP_TASK_IDS:
+        gap_manifest = _finalize_gap_run(env, runner, agent_cfg, env_cfg, gap_checkpoint)
+        runner.gap_finetune_manifest = gap_manifest
+
     if args_cli.target_iterations is not None:
         agent_cfg.max_iterations = args_cli.target_iterations - runner.current_learning_iteration
         if agent_cfg.max_iterations <= 0:
             raise ValueError('Checkpoint has already reached the requested target')
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
+    if gap_manifest is not None:
+        dump_yaml(os.path.join(log_dir, "params", "gap_finetune_manifest.yaml"), gap_manifest)
+    if args_cli.rollout_only_steps:
+        _run_rollout_only(env, runner, args_cli.rollout_only_steps)
+        env.close()
+        return
 
     runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
     env.close()

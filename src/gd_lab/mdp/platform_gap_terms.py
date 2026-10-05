@@ -47,6 +47,7 @@ class PlatformGapCrossing(ManagerTermBase):
         self.paid = torch.zeros(env.num_envs, 2, dtype=torch.bool, device=env.device)
         self.stable_steps = torch.zeros(env.num_envs, 2, dtype=torch.long, device=env.device)
         self.achieved = torch.zeros_like(self.paid)
+        self.last_event = torch.zeros_like(self.paid)
         self.bypassed = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
 
     def reset(self, env_ids=None):
@@ -54,6 +55,7 @@ class PlatformGapCrossing(ManagerTermBase):
         self.paid[ids] = False
         self.stable_steps[ids] = 0
         self.achieved[ids] = False
+        self.last_event[ids] = False
         self.bypassed[ids] = False
 
     def __call__(self, env, asset_cfg: SceneEntityCfg, sensor_cfg: SceneEntityCfg, hold_time: float = 0.1):
@@ -76,6 +78,7 @@ class PlatformGapCrossing(ManagerTermBase):
         self.stable_steps = torch.where(candidate, self.stable_steps + 1, 0)
         completed = self.stable_steps * env.step_dt >= hold_time
         event = completed & ~self.paid
+        self.last_event = event
         self.paid |= event
         self.achieved |= event
         # RewardManager multiplies all terms by dt: compensate for this discrete event.
