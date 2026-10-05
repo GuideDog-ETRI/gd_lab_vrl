@@ -12,6 +12,7 @@ from torch.distributions import Normal
 
 from gd_lab.rl.actor_critic import DreamwaqActorCritic
 from gd_lab.students.gavd.model import GridAttentionStudent
+from gd_lab.core.camera_contract import DEFAULT_CAMERA_PROFILE
 
 
 @dataclass(frozen=True)
@@ -21,7 +22,7 @@ class ResidualConfig:
     slew: float = .02
     stale_seconds: float = .25
     initial_std: float = .1
-    camera_profile: str = "vendor_legacy"
+    camera_profile: str = DEFAULT_CAMERA_PROFILE
 
     def __post_init__(self):
         if not all(torch.isfinite(torch.tensor(x)) and x > 0 for x in

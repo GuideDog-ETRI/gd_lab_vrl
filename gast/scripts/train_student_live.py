@@ -137,6 +137,7 @@ import gd_lab.gast.tasks
 import gd_lab.gast.cvtt_student_task
 import gd_lab.gast.bivt_student_task
 from gd_lab.gast.student import GastStudent
+from gd_lab.core.camera_contract import check_checkpoint_camera_contract
 from gd_lab.gast.distillation import GastDistillation
 if args_cli.task == 'Gd-VrlRayStudent-Rbq10-Dreamwaq-Vision-v0':
     import gd_lab.teachers.bivt.student_task  # noqa: F401
@@ -195,6 +196,8 @@ def capture_teacher_packet(env, obs, teacher, episode_ids, noise_cfg, gap_ghost)
 @hydra_task_config(args_cli.task, args_cli.agent)
 def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     agent_cfg = cli_args.update_rsl_rl_cfg(agent_cfg, args_cli)
+    from gd_lab.core.camera_contract import require_training_camera_profile
+    require_training_camera_profile(env_cfg.camera_profile)  # legacy calibration only with explicit opt-in
     env_cfg.seed = agent_cfg.seed
     env_cfg.scene.num_envs = args_cli.num_envs
     if args_cli.device is not None:
@@ -255,8 +258,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             raise ValueError('Resume teacher hash or student architecture differs')
         if saved.get('gast_distillation_contract') != 2:
             raise ValueError('Student checkpoint uses a different GAST supervision contract; do not silently mix objectives')
-        if saved.get('camera_contract') != camera_contract.manifest():
-            raise ValueError('Resume camera calibration/timing contract differs from this run')
+        try:
+            check_checkpoint_camera_contract(saved.get('camera_contract'), camera_contract, purpose='resume')
+        except ValueError as exc:
+            raise ValueError('Resume camera calibration/timing contract differs from this run') from exc
         student.load_state_dict(saved['model'], strict=True)
         optimizer.load_state_dict(saved['optimizer'])
         start_iteration = int(saved['iteration'])

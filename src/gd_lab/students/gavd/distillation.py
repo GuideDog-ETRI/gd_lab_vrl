@@ -7,9 +7,13 @@ from gd_lab.students.gavd.model import spatial_loss
 
 
 class AttentionDistillation:
-    def __init__(self, teacher, student, num_envs, device, warmup=1000, ramp=4000):
+    def __init__(self, teacher, student, num_envs, device, warmup=1000, ramp=4000, stale_student_rollout=False):
         self.teacher, self.student = teacher, student
         self.warmup, self.ramp = warmup, ramp
+        # False (legacy): a stale/missing student latent hands the env back to the privileged teacher.
+        # True: the selected env keeps the student policy and walks the blind (zero-latent) route,
+        # as deployment does when the camera stream stalls (and as the GAST loop already does).
+        self.stale_student_rollout = bool(stale_student_rollout)
         self.latent = torch.zeros(num_envs, 32, device=device)
         self.ready = torch.zeros(num_envs, dtype=torch.bool, device=device)
         self.stamp = torch.full((num_envs,), -100.0, device=device)
@@ -31,8 +35,11 @@ class AttentionDistillation:
         age = current_time_seconds - self.stamp
         fresh = self.ready & (age >= 0) & (age < 0.3)
         student_actions = self.teacher.act_with_terrain_latent(obs, self.latent * fresh[:, None])
-        use_student = (torch.rand_like(self.ready, dtype=torch.float) < probability) & fresh
+        use_student = torch.rand_like(self.ready, dtype=torch.float) < probability
+        if not self.stale_student_rollout:
+            use_student &= fresh
         self.metrics["student_rollout_fraction"] = use_student.float().mean().item()
+        self.metrics["stale_student_rollout_fraction"] = (use_student & ~fresh).float().mean().item()
         self.metrics["stale_fraction"] = (~fresh).float().mean().item()
         return torch.where(use_student[:, None], student_actions, teacher_actions)
 

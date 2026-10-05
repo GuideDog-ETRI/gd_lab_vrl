@@ -10,6 +10,7 @@ import onnxruntime as ort
 import torch
 from tensordict import TensorDict
 
+from gd_lab.core.camera_contract import camera_contract_for_policy
 from gd_lab.deploy.export_student_vrl import export_student_vrl
 from gd_lab.residuals.bavrl import BAVRL, ResidualConfig, load_blind_teacher
 from gd_lab.residuals.bavrl.export import BAVRLActorExport, BAVRLVisionExport
@@ -48,11 +49,14 @@ def main():
     graph = onnx.load(str(path))
     onnx.helper.set_model_props(graph, {"camel.bavrl": "v1_sim_only", "teacher_sha256": digest})
     onnx.save(graph, str(path))
-    export_student_vrl(BAVRLVisionExport(model), str(path))
+    camera_profile = model.config.camera_profile
+    model.vision.verify_camera_geometry()
+    export_student_vrl(BAVRLVisionExport(model), str(path), camera_profile=camera_profile)
     student_path = output / "policy_bavrl_student.onnx"
     student_graph = onnx.load(str(student_path))
     onnx.helper.set_model_props(student_graph, {"camel.student_arch": "grid_attention_v1",
-        "camel.student_age": "hidden63_seconds_clipped_0_1", "camel.bavrl_vision": "v1"})
+        "camel.student_age": "hidden63_seconds_clipped_0_1", "camel.bavrl_vision": "v1",
+        "camel.camera_profile": camera_profile})
     onnx.save(student_graph, str(student_path))
     session = ort.InferenceSession(str(path), providers=["CPUExecutionProvider"])
     for valid in (0., 1.):
@@ -70,7 +74,8 @@ def main():
                 assert np.count_nonzero(actual[2]) == 0
     (output / "manifest.json").write_text(json.dumps({"schema": "bavrl_v1", "simulation_only": True,
         "checkpoint": str(Path(args.checkpoint).resolve()), "iteration": state["iteration"],
-        "teacher_sha256": digest, "deploy_context": context, "onnx_parity": "passed"}, indent=2))
+        "teacher_sha256": digest, "deploy_context": context, "onnx_parity": "passed",
+        "camera_contract": camera_contract_for_policy(camera_profile, context["policy_dt"]).manifest()}, indent=2))
     print("BAVRL exported, actor ONNX parity and missing/stale residual=0 verified:", output)
 
 

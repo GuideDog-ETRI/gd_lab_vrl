@@ -72,7 +72,9 @@ from isaaclab_tasks.utils import get_checkpoint_path
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
 import gd_lab  # noqa: F401  (registers the tasks)
-from gd_lab.core.camera_contract import camera_contract_for_policy
+if args_cli.task == 'Gd-VrlRayStudent-Rbq10-Dreamwaq-Vision-v0':  # BIVT-Ray teacher + rendered cameras
+    import gd_lab.teachers.bivt.student_task  # noqa: F401  (same registration as distill_student.py)
+from gd_lab.core.camera_contract import camera_contract_for_policy, check_checkpoint_camera_contract
 from gd_lab.core.paths import LOG_ROOT
 from gd_lab.managers.action_history import ensure_prev_prev_action_tracking
 from gd_lab.teachers.cvtt.actor_critic import DreamwaqVrlActorCritic
@@ -120,11 +122,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     ).to(device)
     ckpt = torch.load(args_cli.student_checkpoint, map_location=device)
     camera_contract = camera_contract_for_policy(env_cfg.camera_profile, env.unwrapped.step_dt)
-    recorded = ckpt.get("camera_contract")
-    if recorded is not None and recorded != camera_contract.manifest():
-        raise ValueError("Student camera contract does not match the environment calibration")
-    if recorded is None:
-        print("[WARN] Legacy student checkpoint has no camera calibration metadata.")
+    # Missing contract = refused (explicit GD_LAB_ALLOW_MISSING_CAMERA_CONTRACT=1 only); mismatch = refused.
+    check_checkpoint_camera_contract(ckpt.get("camera_contract"), camera_contract, purpose="evaluation")
     student.load_state_dict(ckpt["model"])
     student.eval()
     print(f"[INFO] Student checkpoint: {args_cli.student_checkpoint} (iteration {ckpt.get('iteration')})")

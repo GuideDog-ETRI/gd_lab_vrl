@@ -33,6 +33,8 @@ def export_student_vrl(
     actor_onnx_path: str,
     camera_width: int = 80,
     camera_height: int = 45,
+    *,
+    camera_profile: str | None,
 ) -> tuple[str, str]:
     """Write ``<actor_stem>_student.pt``/``.onnx`` next to ``actor_onnx_path``.
 
@@ -40,7 +42,21 @@ def export_student_vrl(
     ``width``/``height`` (``tasks/vrl_rough.py``'s ``_belly_camera``) --
     there is no way to detect a mismatch from the student checkpoint alone,
     it would just silently see a resized/garbled image.
+
+    ``camera_profile`` is the calibration the student was trained with (its checkpoint's
+    ``camera_contract.profile``); it is written to the ONNX as ``camel.camera_profile``, which the
+    deploy runtime requires to match the cameras feeding it. ``None`` (an explicitly accepted
+    checkpoint without a contract) writes no key, so the runtime treats the model as legacy.
+    Students with ray geometry buffers (GAVD/GAST) are checked against that profile first.
     """
+    if camera_profile is not None:
+        from gd_lab.core.camera_contract import load_camera_contract
+
+        load_camera_contract(camera_profile)  # unknown profile -> ValueError
+        if hasattr(student, "verify_camera_geometry"):
+            if getattr(student, "camera_profile", camera_profile) != camera_profile:
+                raise ValueError(f"student geometry is {student.camera_profile!r}, not {camera_profile!r}")
+            student.verify_camera_geometry()
     student = copy.deepcopy(student).cpu().eval()
     stem, _ = os.path.splitext(actor_onnx_path)
     jit_path = f"{stem}_student.pt"
@@ -74,6 +90,8 @@ def export_student_vrl(
     metadata = {"camel.student_arch": architecture}
     if architecture == "grid_attention_v1":
         metadata["camel.student_age"] = "hidden63_seconds_clipped_0_1"
+    if camera_profile is not None:
+        metadata["camel.camera_profile"] = camera_profile
     onnx.helper.set_model_props(graph, metadata)
     onnx.save(graph, onnx_path)
     return jit_path, onnx_path

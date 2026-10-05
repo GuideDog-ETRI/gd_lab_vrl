@@ -105,7 +105,7 @@ def test_camera_student_bptt_and_export(tmp_path):
     assert student.gru.weight_hh.grad is not None and torch.isfinite(student.gru.weight_hh.grad).all()
 
     actor_path = tmp_path / "policy_vrl.onnx"
-    _, onnx_path = export_student_vrl(student, str(actor_path))
+    _, onnx_path = export_student_vrl(student, str(actor_path), camera_profile="vendor_new")
     if importlib.util.find_spec("onnxruntime") is None:
         pytest.skip("onnxruntime not installed")
     import onnxruntime as ort

@@ -12,7 +12,26 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from gd_lab.core.camera_contract import load_camera_contract
+from gd_lab.core.camera_contract import DEFAULT_CAMERA_PROFILE, load_camera_contract
+
+
+def camera_ray_buffers(contract):
+    """(rays[1,4,144,3], mounts[1,4,1,3]) of the 9x16 token grid, in the trunk frame, from a camera contract."""
+    py, px = torch.meshgrid((torch.arange(9) + .5) * 45 / 9,
+                            (torch.arange(16) + .5) * 80 / 16, indexing="ij")
+    # Optical depth is z, not radial range. Convert OpenGL rays to trunk.
+    ray = torch.stack(((px - 40) / contract.fx, -(py - 22.5) / contract.fy, -torch.ones_like(px)), -1)
+    rays = []
+    for quat in contract.quaternions_opengl:
+        q = F.normalize(torch.tensor(quat, dtype=torch.float32), dim=0)  # profiles may list ints
+        v = q[1:].expand_as(ray)
+        rays.append(ray + 2 * (q[0] * torch.cross(v, ray, dim=-1)
+                               + torch.cross(v, torch.cross(v, ray, dim=-1), dim=-1)))
+    return torch.stack(rays).reshape(1, 4, 144, 3), torch.tensor(contract.positions, dtype=torch.float32).reshape(1, 4, 1, 3)
+
+
+def _verify_after_load(module, incompatible_keys):
+    module.verify_camera_geometry()
 
 
 class GridAttentionStudent(nn.Module):
@@ -22,7 +41,7 @@ class GridAttentionStudent(nn.Module):
     latent_dim = 32
     age_slot = 63
 
-    def __init__(self, camera_profile="vendor_legacy", dim=32):
+    def __init__(self, camera_profile=DEFAULT_CAMERA_PROFILE, dim=32):
         super().__init__()
         self.camera_profile = camera_profile
         self.dim = dim
@@ -46,18 +65,30 @@ class GridAttentionStudent(nn.Module):
         self.gru = nn.GRUCell(64, 63)
         self.head = nn.Sequential(nn.Linear(63, 32), nn.Tanh())
         self.hazard_head = nn.Sequential(nn.Linear(64, 16), nn.ELU(), nn.Linear(16, 1))
-        py, px = torch.meshgrid((torch.arange(9) + .5) * 45 / 9,
-                                (torch.arange(16) + .5) * 80 / 16, indexing="ij")
-        # Optical depth is z, not radial range. Convert OpenGL rays to trunk.
-        ray = torch.stack(((px - 40) / c.fx, -(py - 22.5) / c.fy, -torch.ones_like(px)), -1)
-        rays = []
-        for quat in c.quaternions_opengl:
-            q = F.normalize(torch.tensor(quat), dim=0)
-            v = q[1:].expand_as(ray)
-            rays.append(ray + 2 * (q[0] * torch.cross(v, ray, dim=-1)
-                                   + torch.cross(v, torch.cross(v, ray, dim=-1), dim=-1)))
-        self.register_buffer("rays", torch.stack(rays).reshape(1, 4, 144, 3))
-        self.register_buffer("mounts", torch.tensor(c.positions).reshape(1, 4, 1, 3))
+        rays, mounts = camera_ray_buffers(c)
+        # Persistent buffers: a checkpoint carries its camera geometry, so every load is verified. A post-load
+        # hook (not a load_state_dict override) also fires when a parent module (e.g. BAVRL) is loaded.
+        self.register_buffer("rays", rays)
+        self.register_buffer("mounts", mounts)
+        self.register_load_state_dict_post_hook(_verify_after_load)
+
+    def verify_camera_geometry(self, atol=1e-5):
+        """Fail if the loaded ray/mount buffers are not those of ``self.camera_profile``.
+
+        A legacy checkpoint loaded into a model built for another profile would otherwise silently
+        restore the old camera geometry (and bake it into an ONNX export).
+        """
+        rays, mounts = camera_ray_buffers(load_camera_contract(self.camera_profile))
+        for name, expected in (("rays", rays), ("mounts", mounts)):
+            actual = getattr(self, name)
+            if actual.shape != expected.shape or not torch.isfinite(actual).all():
+                raise RuntimeError(f"student {name} buffer is malformed for camera_profile={self.camera_profile!r}")
+            if not torch.allclose(actual.detach().cpu().to(expected.dtype), expected, atol=atol, rtol=0):
+                raise RuntimeError(
+                    f"student {name} geometry does not match camera_profile={self.camera_profile!r}: the checkpoint "
+                    "was trained with another camera calibration; build the model with that profile instead"
+                )
+
 
     def init_hidden(self, num_envs, device):
         return torch.zeros(num_envs, 64, device=device)

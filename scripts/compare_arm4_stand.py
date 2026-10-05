@@ -69,7 +69,8 @@ teacher = runner.alg.policy
 teacher.eval()
 student = CameraPerceptionEncoder(num_cameras=4, gru_hidden_dim=64, latent_dim=32).to(args.device)
 ckpt = torch.load(bundle/'student/perception_12400.pt', map_location=args.device, weights_only=False)
-assert ckpt['camera_contract'] == camera_contract_for_policy(cfg.camera_profile, .01).manifest()
+from gd_lab.core.camera_contract import same_camera_contract  # noqa: E402
+assert same_camera_contract(ckpt['camera_contract'], camera_contract_for_policy(cfg.camera_profile, .01))
 student.load_state_dict(ckpt['model'])
 student.eval()
 results = {}
