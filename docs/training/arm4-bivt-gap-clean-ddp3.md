@@ -13,7 +13,7 @@ BIVT-Ray 선생 17206이 갭 위에서 발을 내렸다가 올리는 동작을, 
 
 | 항목 | 값 |
 |---|---|
-| 코드 | `vrl_models` `b9b5d3a` (작업 폴더 `gd_lab_vrl_worktrees/bivt-ray-ddp-newcam-17206`) |
+| 코드 | 이 문서를 포함한 `vrl_models` 커밋(`b9b5d3a` + Top-5 깨끗한 통과율 G). 작업 폴더 `gd_lab_vrl_worktrees/bivt-ray-ddp-newcam-17206` |
 | 태스크 | `Gd-VrlGapFinetuneCleanRaycast-Rbq10-Dreamwaq-v0` (렌더링 없는 raycast 가시성) |
 | 로봇 | ARM4 (`TRAIN_ARM=4`): 100 Hz(dt 0.005 × decimation 2), Kp hip 123.39 / knee 127.77, Kd 2.4 |
 | 카메라 | `vendor_new` (RBQ SDK 보정값) |
@@ -53,12 +53,15 @@ BIVT-Ray 선생 17206이 갭 위에서 발을 내렸다가 올리는 동작을, 
 
 - 체크포인트 100 iteration마다. 새 run이므로 리더보드는 비어서 시작한다.
 - Top-5는 매 iteration rollout의 완료 episode로 계산하는 online proxy다(`configs/online_top5.json`).
-- 점수: 0.40·G(갭 통과율, `platform_gap_crossing` 기준) + 0.25·B(1−몸통 접촉) + 0.15·P(전진)
-  + 0.10·T(추종) + 0.05·E(에너지) + 0.05·Q(총 보상). (family, level) macro 평균.
+- 점수: 0.40·G + 0.25·B(1−몸통 접촉) + 0.15·P(전진) + 0.10·T(추종) + 0.05·E(에너지) + 0.05·Q(총 보상).
+  (family, level) macro 평균.
+- **G = 깨끗한 통과율.** 갭 파인튜닝 태스크는 모니터가 있으므로 G는 `gap_clean_success`
+  (통과했고 clean 보너스를 받았고 옆으로 돌아가거나 넘어지지 않은 episode)의 비율이다.
+  모니터가 없는 태스크는 기존대로 통과율(`platform_gap_crossing`)을 쓴다. 리더보드 항목에
+  `gap_success_definition`(`clean_crossing`/`crossing`), `criteria_metrics.gap_crossing_rate`(통과율),
+  `criteria_metrics.gap_clean_crossing_rate`(깨끗한 통과율)를 함께 기록한다.
 - 통과 조건: 갭 평균 레벨 ≥ 8, 전체 평균 지형 레벨 ≥ 9, 몸통 접촉·갭 종료·계단 종료율 각각 ≤ 9%,
-  1위 대비 G 하락 ≤ 2%p, B 하락 ≤ 1%p, 후보 간격 100.
-- 주의: G는 통과 여부만 본다. clean 여부는 Q(0.05)에만 간접 반영된다. 체크포인트 선택 시
-  `Curriculum/platform_gap_diagnostics/clean_rate`를 함께 본다.
+  1위 대비 G(깨끗한 통과율) 하락 ≤ 2%p, B 하락 ≤ 1%p, 후보 간격 100.
 - gate C는 면제로 manifest에 기록한다:
   "user waived gate C on 2026-10-05: multi-GPU ARM4 Clean gap fine-tuning from 17206 with vendor_new cameras".
 
@@ -85,7 +88,7 @@ tmux new-session -d -s bivt_gap_clean_ddp3 \
 
 ## 사전 검증 (2026-10-05)
 
-- 컨테이너 테스트 292 passed / 1 failed(`test_gavd::test_onnx_export`, onnxruntime 미설치).
+- 컨테이너 테스트 297 passed / 1 failed(`test_gavd::test_onnx_export`, onnxruntime 미설치). Top-5 clean G 변경 후 기준.
 - Clean 3-GPU smoke(192 env, 3 update) EXIT=0: 3 rank 모두 17207 재개, manifest 확인
   (`vendor_new`, distributed, world_size 3, 보상 1/−3/1.5), loss 유한, GPU 3 메모리 불변.
 - 3-GPU 4096 env 동기화 smoke(17206 재개 32 update, 저장본 재개 12 update·4 update마다 상태 검사) EXIT=0.

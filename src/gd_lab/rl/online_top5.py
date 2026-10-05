@@ -14,6 +14,7 @@ from pathlib import Path
 WEIGHTS = {"G": 0.40, "B": 0.25, "P": 0.15, "T": 0.10, "E": 0.05, "Q": 0.05}
 DEFAULT_MIN_PLATFORM_GAP_MEAN_LEVEL = 8.0
 STAIR_FAMILY_PREFIX = "pyramid_stairs"
+CLEAN_KEY = "gap_clean_success"
 DEFAULT_TOP5_CRITERIA = {
     "top5_min_spacing": 100,
     "min_platform_gap_mean_level": 8.0,
@@ -98,7 +99,9 @@ def score_episodes(episodes: list[dict]) -> dict | None:
     """Macro-average episode metrics over observed (family, level) strata.
 
     G is averaged over gap strata only. A batch without a gap episode cannot
-    establish the safety gate and is not eligible for ranking.
+    establish the safety gate and is not eligible for ranking. When every gap
+    episode carries ``gap_clean_success`` (gap fine-tuning tasks), G counts only
+    crossings with no foot deeper than the clean threshold.
     """
     groups = defaultdict(list)
     for episode in episodes:
@@ -110,8 +113,9 @@ def score_episodes(episodes: list[dict]) -> dict | None:
     def macro(key: str, strata: dict) -> float:
         return sum(sum(row[key] for row in rows) / len(rows) for rows in strata.values()) / len(strata)
 
+    clean_scored = all(CLEAN_KEY in row for rows in gap_groups.values() for row in rows)
     components = {
-        "G": macro("gap_success", gap_groups),
+        "G": macro(CLEAN_KEY if clean_scored else "gap_success", gap_groups),
         "B": 1.0 - macro("base_contact", groups),
         "P": macro("progress", groups),
         "T": macro("tracking", groups),
@@ -129,8 +133,11 @@ def score_episodes(episodes: list[dict]) -> dict | None:
         "base_contact_rate": macro("base_contact", groups),
         "platform_gap_termination_rate": macro("base_contact", gap_groups),
         "stairs_termination_rate": macro("base_contact", stair_groups) if stair_groups else None,
+        "gap_crossing_rate": macro("gap_success", gap_groups),
+        "gap_clean_crossing_rate": macro(CLEAN_KEY, gap_groups) if clean_scored else None,
     }
     return {"score": score, "components": components, "criteria_metrics": criteria_metrics, "sample_counts": counts,
+            "gap_success_definition": "clean_crossing" if clean_scored else "crossing",
             "curriculum_snapshot": {"mean_level_by_family": curriculum}, "score_is_online_proxy": True}
 
 
@@ -261,5 +268,6 @@ def rotate_top5(directory: Path, entries: list[dict], candidate_iteration: int, 
 
 
 def validate_episode(row: dict) -> bool:
-    return all(isinstance(row[key], (int, float)) and math.isfinite(row[key]) for key in
-               ("gap_success", "base_contact", "progress", "tracking", "energy", "return"))
+    keys = ("gap_success", "base_contact", "progress", "tracking", "energy", "return")
+    keys += (CLEAN_KEY,) if CLEAN_KEY in row else ()
+    return all(isinstance(row[key], (int, float)) and math.isfinite(row[key]) for key in keys)
