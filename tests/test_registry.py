@@ -20,6 +20,10 @@ def test_registered_blind_and_vision_ids():
         "Gd-VrlBlindStart-Rbq10-Dreamwaq-v0",
         "Gd-VrlBlindStart-Rbq10-Dreamwaq-Vision-v0",
         "Gd-VrlBlindStartRaycast-Rbq10-Dreamwaq-v0",
+        # opt-in gap fine-tuning arms; every ID above is unchanged and keeps its position
+        "Gd-VrlGapFinetuneBaselineRaycast-Rbq10-Dreamwaq-v0",
+        "Gd-VrlGapFinetuneIntrusionRaycast-Rbq10-Dreamwaq-v0",
+        "Gd-VrlGapFinetuneCleanRaycast-Rbq10-Dreamwaq-v0",
     ]
 
 
