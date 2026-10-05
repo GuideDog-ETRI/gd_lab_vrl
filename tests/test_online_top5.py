@@ -14,6 +14,7 @@ from online_top5 import (
     rotate_top5,
     score_episodes,  # noqa: E402
     select_top5,
+    validate_episode,
 )
 
 
@@ -134,3 +135,25 @@ def test_only_rank_zero_reads_and_writes_top5(tmp_path: Path):
                                      episode(family="pyramid_stairs", level=9)], directory, 100, 100, save, 0)
     assert success == {"selected": True, "saved": True, "error": None}
     assert len(saves) == 1
+
+
+def test_clean_crossings_define_g_when_every_gap_episode_reports_them():
+    rows = [episode(gap_clean_success=1.0), episode(gap_clean_success=0.0),  # crossed, one not cleanly
+            episode(family="pyramid_stairs", level=9)]
+    result = score_episodes(rows)
+    assert result["components"]["G"] == 0.5
+    assert result["criteria_metrics"]["gap_crossing_rate"] == 1.0
+    assert result["criteria_metrics"]["gap_clean_crossing_rate"] == 0.5
+    assert result["gap_success_definition"] == "clean_crossing"
+
+
+def test_crossing_defines_g_without_clean_reports():
+    result = score_episodes([episode(gap_clean_success=0.0), episode()])  # one row lacks the key
+    assert result["components"]["G"] == 1.0
+    assert result["criteria_metrics"]["gap_clean_crossing_rate"] is None
+    assert result["gap_success_definition"] == "crossing"
+
+
+def test_non_finite_clean_report_is_rejected():
+    assert validate_episode(episode(gap_clean_success=1.0))
+    assert not validate_episode(episode(gap_clean_success=float("nan")))
