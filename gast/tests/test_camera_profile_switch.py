@@ -65,3 +65,19 @@ def test_gast_contract_check_refuses_missing_contracts_by_default():
     with pytest.raises(ValueError):
         cc.check_checkpoint_camera_contract(cc.camera_contract_for_policy("vendor_legacy", 0.01).manifest(), current,
                                             purpose="resume", environ={})
+
+
+def test_gast_tree_has_the_shared_package_helper_and_rank_agnostic_finite_check():
+    """train_student.py imports gd_lab.students.package from gast/src; hazard labels are 1-D per env."""
+    from gd_lab.students.package import find_teacher_env_yaml  # noqa: F401  (ImportError broke GAST launch)
+    root = Path(__file__).resolve().parents[2]
+    assert (root / "gast/src/gd_lab/students/package.py").read_bytes() == \
+        (root / "src/gd_lab/students/package.py").read_bytes()
+    source = (root / "gast/scripts/train_student.py").read_text()
+    assert "hazard_label.flatten(1)" not in source and "rows_finite(hazard_label)" in source
+    namespace = {"torch": torch}
+    start = source.index("def rows_finite(")
+    exec(source[start:source.index("\n\n\n", start)], namespace)
+    rows = namespace["rows_finite"]
+    assert rows(torch.tensor([1.0, float("nan"), 2.0])).tolist() == [True, False, True]
+    assert rows(torch.ones(2, 3, 4)).tolist() == [True, True]

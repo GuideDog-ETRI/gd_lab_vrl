@@ -148,6 +148,11 @@ def _resolve(path: str):
 
 
 @torch.no_grad()
+def rows_finite(value):
+    """Per-env finiteness for a packet tensor of any rank (hazard labels are 1-D: one value per env)."""
+    return torch.isfinite(value.reshape(value.shape[0], -1)).all(1)
+
+
 def capture_teacher_packet(env, obs, teacher, episode_ids, noise_cfg, gap_ghost):
     """Freeze images AND supervision at capture time, before simulated transit."""
     snapshot = getattr(env.unwrapped, "_vrl_camera_snapshot", None)
@@ -344,13 +349,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                     frames, teacher_latent, hazard_label, hazard_supervised, visible, captured_episodes, teacher_action = packet.payload[:7]
                     valid = delivery_mask(packet.capture_step, captured_episodes, episode_ids, last_delivered)
                     # One exploded env must not kill the run: drop its non-finite rows.
-                    finite = (torch.isfinite(frames.flatten(1)).all(1) & torch.isfinite(teacher_latent).all(1)
-                              & torch.isfinite(teacher_action).all(1) & torch.isfinite(hazard_label.flatten(1)).all(1)
-                              & torch.isfinite(visible.flatten(1)).all(1))
+                    finite = (rows_finite(frames) & rows_finite(teacher_latent) & rows_finite(teacher_action)
+                              & rows_finite(hazard_label) & rows_finite(visible))
                     if attention:
                         for value in packet.payload[7]:
                             if value.is_floating_point():
-                                finite &= torch.isfinite(value.flatten(1)).all(1)
+                                finite &= rows_finite(value)
                     bad_rows = valid & ~finite
                     if bad_rows.any():
                         # Same rule as main-tree distill_student.py: a non-finite packet
