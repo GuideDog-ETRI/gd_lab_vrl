@@ -10,7 +10,7 @@ iterations=${1:-20000}
 envs=${2:-64}
 run=${3:-bivt_ray17206_rvld_20k_$(date +%Y%m%d_%H%M%S)}
 bptt=${4:-16}
-teacher="$repo/logs/vision_rbq10_dreamwaq/arm_4/2026-10-03_18-52-19_dwb_v3_6_21_b1_18_ray_20k_1024_resume2000r1_20261003/best_top5/17206_top1.pt"
+teacher="$repo/checkpoints/teachers/bivt/ray_top1_17206_20261003/teacher/17206_top1.pt"
 expected_sha="a70adbda5b73925f5936eaef27ee3b33686d9f7489486afdda9bf40ddb0c326d"
 launch_dir="$repo/logs/${run}.launch"
 output_dir="$repo/logs/vision_rbq10_dreamwaq/arm_4/${run}"
@@ -36,8 +36,8 @@ fi
 
 mkdir "$launch_dir"
 cp "$teacher" "$launch_dir/teacher.pt"
-cp "$repo/logs/vision_rbq10_dreamwaq/arm_4/2026-10-03_18-52-19_dwb_v3_6_21_b1_18_ray_20k_1024_resume2000r1_20261003/params/env.yaml" "$launch_dir/teacher_env.yaml"
-cp "$repo/logs/vision_rbq10_dreamwaq/arm_4/2026-10-03_18-52-19_dwb_v3_6_21_b1_18_ray_20k_1024_resume2000r1_20261003/params/agent.yaml" "$launch_dir/teacher_agent.yaml"
+cp "$repo/checkpoints/teachers/bivt/ray_top1_17206_20261003/params/env.yaml" "$launch_dir/teacher_env.yaml"
+cp "$repo/checkpoints/teachers/bivt/ray_top1_17206_20261003/params/agent.yaml" "$launch_dir/teacher_agent.yaml"
 mkdir "$launch_dir/source"
 cp scripts/distill_student.py scripts/train_bivt_ray17206_rvld.sh "$launch_dir/source/"
 cp src/gd_lab/students/alignment.py src/gd_lab/students/rvld/model.py \
