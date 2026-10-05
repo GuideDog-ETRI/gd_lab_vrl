@@ -326,11 +326,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                     finite = torch.isfinite(frames.flatten(1)).all(1)
                     for value in (teacher_latent, teacher_terrain, hazard_label, visible, base_actor, teacher_action):
                         if value.is_floating_point():
-                            finite &= torch.isfinite(value.flatten(1)).all(1)
+                            finite &= torch.isfinite(value.reshape(value.shape[0], -1)).all(1)
                     if attention:
                         for value in packet.payload[9]:
                             if value.is_floating_point():
-                                finite &= torch.isfinite(value.flatten(1)).all(1)
+                                finite &= torch.isfinite(value.reshape(value.shape[0], -1)).all(1)
                     bad_rows = valid & ~finite
                     if bad_rows.any():
                         nonfinite_rows += int(bad_rows.sum().item())

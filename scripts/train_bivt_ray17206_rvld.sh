@@ -36,13 +36,17 @@ fi
 
 mkdir "$launch_dir"
 cp "$teacher" "$launch_dir/teacher.pt"
-cp "$repo/checkpoints/teachers/bivt/ray_top1_17206_20261003/params/env.yaml" "$launch_dir/teacher_env.yaml"
-cp "$repo/checkpoints/teachers/bivt/ray_top1_17206_20261003/params/agent.yaml" "$launch_dir/teacher_agent.yaml"
-mkdir "$launch_dir/source"
-cp scripts/distill_student.py scripts/train_bivt_ray17206_rvld.sh "$launch_dir/source/"
-cp src/gd_lab/students/alignment.py src/gd_lab/students/rvld/model.py \
-  src/gd_lab/students/rvld/distillation.py src/gd_lab/students/gavd/model.py \
-  "$launch_dir/source/"
+mkdir -p "$launch_dir/params"
+cp "$repo/checkpoints/teachers/bivt/ray_top1_17206_20261003/params/env.yaml" "$launch_dir/params/env.yaml"
+cp "$repo/checkpoints/teachers/bivt/ray_top1_17206_20261003/params/agent.yaml" "$launch_dir/params/agent.yaml"
+mkdir -p "$launch_dir/source/scripts" \
+  "$launch_dir/source/src/gd_lab/students/rvld" \
+  "$launch_dir/source/src/gd_lab/students/gavd"
+cp scripts/distill_student.py scripts/train_bivt_ray17206_rvld.sh "$launch_dir/source/scripts/"
+cp src/gd_lab/students/alignment.py "$launch_dir/source/src/gd_lab/students/"
+cp src/gd_lab/students/rvld/model.py src/gd_lab/students/rvld/distillation.py \
+  "$launch_dir/source/src/gd_lab/students/rvld/"
+cp src/gd_lab/students/gavd/model.py "$launch_dir/source/src/gd_lab/students/gavd/"
 git rev-parse HEAD > "$launch_dir/git_sha"
 printf '%s  %s\n' "$expected_sha" "teacher.pt" > "$launch_dir/teacher.sha256"
 printf 'architecture=cnn_gru\niterations=%s\nenvs=%s\nbptt=%s\nseed=42\nlr=0.0003\nsave_interval=1000\ncamera_interval_ms=70,100\ncamera_delay_ms=0,150\ncamera_drop_prob=0.05\n' \
@@ -50,10 +54,10 @@ printf 'architecture=cnn_gru\niterations=%s\nenvs=%s\nbptt=%s\nseed=42\nlr=0.000
 mkdir -p "$repo/logs/usd_tmp/$run"
 
 export PYTHONPATH="$repo/src"
-export CUDA_VISIBLE_DEVICES=0 TRAIN_ARM=4 OMNI_KIT_ACCEPT_EULA=YES PYTHONUNBUFFERED=1
+export CUDA_VISIBLE_DEVICES="${RVLD_GPU:-0}" TRAIN_ARM=4 OMNI_KIT_ACCEPT_EULA=YES PYTHONUNBUFFERED=1
 exec apptainer exec --nv --writable-tmpfs \
   --bind "$repo/logs/usd_tmp/$run:/tmp/IsaacLab" \
-  /home/user/workspace/gd_lab_isaaclab.sif /home/user/workspace/venv_apptainer/bin/python \
+  "${RVLD_IMAGE:-/home/user/workspace/gd_lab_isaaclab.sif}" "${RVLD_CONTAINER_PYTHON:-/home/user/workspace/venv_apptainer/bin/python}" \
   scripts/distill_student.py --task Gd-VrlRayStudent-Rbq10-Dreamwaq-Vision-v0 \
   --headless --device cuda:0 --num_envs "$envs" --seed 42 \
   --teacher_checkpoint "$launch_dir/teacher.pt" --student_arch cnn_gru \
