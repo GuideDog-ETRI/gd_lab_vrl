@@ -79,6 +79,33 @@ def _worker(rank: int, port: int, checkpoint_path: str) -> None:
         assert torch.allclose(norm._mean, torch.tensor([[1.0]]))
         assert torch.allclose(norm._var, torch.tensor([[1.0]]))
 
+        # Large mean, small spread: the global variance must match the variance
+        # of the concatenated batches (E[x^2]-E[x]^2 loses it entirely in float32).
+        offset = ToyNormalizer()
+        generator = torch.Generator().manual_seed(7 + rank)
+        local = 1.0e4 + 0.01 * torch.randn(512, 1, generator=generator)
+        synchronize_empirical_normalizer(offset, local)
+        gathered = [torch.empty_like(local) for _ in range(2)]
+        dist.all_gather(gathered, local)
+        expected = torch.cat(gathered).double().var(dim=0, unbiased=False, keepdim=True).float()
+        assert torch.allclose(offset._var, expected, rtol=1e-2), (offset._var, expected)
+
+        # A non-finite PPO gradient on one rank fails every rank identically,
+        # before any gradient is averaged or applied.
+        nan_policy = ToyPolicy()
+        nan_algorithm = SimpleNamespace(policy=nan_policy, rnd=None, device="cpu")
+        for parameter in nan_policy.actor.parameters():
+            parameter.grad = torch.ones_like(parameter)
+        if rank == 1:
+            nan_policy.actor.weight.grad[0, 0] = float("nan")
+        error = None
+        try:
+            DreamwaqPPO.reduce_parameters(nan_algorithm)
+        except RuntimeError as exc:
+            error = str(exc)
+        assert error is not None and "non-finite PPO gradient" in error
+        assert torch.all(nan_policy.actor.bias.grad == 1.0)  # not averaged
+
         policy.cenet.adaboot_update_count.fill_(1)
         policy.cenet.resample_adaboot()
         coin = [torch.empty_like(policy.cenet.inject_gt) for _ in range(2)]

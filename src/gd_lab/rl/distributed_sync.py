@@ -64,14 +64,16 @@ def synchronize_empirical_normalizer(normalizer: torch.nn.Module, samples: torch
         return
     batch_count = torch.tensor(samples.shape[0], dtype=torch.long, device=samples.device)
     batch_sum = samples.sum(dim=0, keepdim=True)
-    batch_sum_sq = samples.square().sum(dim=0, keepdim=True)
     dist.all_reduce(batch_count, op=dist.ReduceOp.SUM)
     dist.all_reduce(batch_sum, op=dist.ReduceOp.SUM)
-    dist.all_reduce(batch_sum_sq, op=dist.ReduceOp.SUM)
     if not batch_count.item():
         return
     batch_mean = batch_sum / batch_count
-    batch_var = (batch_sum_sq / batch_count - batch_mean.square()).clamp_min_(0)
+    # Two-pass (centred) variance: E[x^2]-E[x]^2 cancels badly in float32 for
+    # features whose mean is large relative to their spread.
+    batch_m2 = (samples - batch_mean).square().sum(dim=0, keepdim=True)
+    dist.all_reduce(batch_m2, op=dist.ReduceOp.SUM)
+    batch_var = batch_m2 / batch_count
     old_count = normalizer.count.clone()
     total_count = old_count + batch_count
     delta = batch_mean - normalizer._mean
@@ -107,8 +109,10 @@ def install_collective_optimizer_step(
 
     optimizer.step = collective_step
     optimizer._gd_lab_collective_step = True
+
+
 def raise_if_any(error: str | None, *, device: torch.device | str, context: str) -> None:
-    """Make local optimizer failures fail identically after a shared decision."""
+    """Make a rank-local failure fail identically on every rank after a shared decision."""
     if not any_rank(error is not None, device):
         return
     if distributed_active():
