@@ -94,3 +94,6 @@ proxy 영상을 직접 인코딩한다. 새 관측조건 전환 전 체크포인
 python -m pytest tests/teachers/bivt -q
 (cd blind_start && ruff check .)
 ```
+
+Clean 갭 파인튜닝(ARM4, 3-GPU, 17207부터 30,000회) 학습 조건은
+`docs/training/arm4-bivt-gap-clean-ddp3.md`에 있다.
