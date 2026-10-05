@@ -1,0 +1,25 @@
+{
+  "artifact_type": "bivt_ray_teacher",
+  "robot": "RBQ10",
+  "method": "DreamWaQ",
+  "training_variant": "bivt_ray_occlusion_v2",
+  "checkpoint_iteration": 17206,
+  "checkpoint_file": "teacher/17206_top1.pt",
+  "checkpoint_sha256": "a70adbda5b73925f5936eaef27ee3b33686d9f7489486afdda9bf40ddb0c326d",
+  "source_run": "logs/vision_rbq10_dreamwaq/arm_4/2026-10-03_18-52-19_dwb_v3_6_21_b1_18_ray_20k_1024_resume2000r1_20261003",
+  "source_branch": "vrl_models",
+  "source_repository_revision_at_packaging": "487a0c84c3aeb44a1d0148539315dd13099aa0d3",
+  "camera_profile": "vendor_legacy",
+  "terrain_latent_dim": 32,
+  "camera_transport": {
+    "interval_ms": [70.0, 100.0],
+    "delay_ms": [0.0, 50.0],
+    "drop_probability": 0.05,
+    "target_time": "capture"
+  },
+  "source_files": {
+    "environment": "params/env.yaml",
+    "agent": "params/agent.yaml",
+    "leaderboard": "leaderboard.json"
+  }
+}
