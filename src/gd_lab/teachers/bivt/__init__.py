@@ -9,7 +9,7 @@ Importing registers these tasks through gd_lab's registry:
 
 from gd_lab.core import registry
 
-from .gap_guard import GAP_ARMS
+from .gap_guard import GAP_ARMS, V2_ARMS
 
 _AGENT = "gd_lab.teachers.bivt.agent_cfg:BlindStartRunnerCfg"
 
@@ -32,4 +32,12 @@ GAP_FINETUNE_TASKS = tuple(
         env_cfg=f"gd_lab.teachers.bivt.tasks:GapFinetune{arm}RaycastEnvCfg", agent_cfg=_AGENT,
     )
     for arm in GAP_ARMS
+)
+
+GAP_V2_TASKS = tuple(
+    registry.register_task(
+        task=f"VrlGapFinetune{arm}Raycast", robot="Rbq10", method="Dreamwaq",
+        env_cfg=f"gd_lab.teachers.bivt.tasks:GapFinetune{arm}RaycastEnvCfg", agent_cfg=_AGENT,
+    )
+    for arm in V2_ARMS
 )

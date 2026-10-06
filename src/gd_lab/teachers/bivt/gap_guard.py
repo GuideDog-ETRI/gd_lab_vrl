@@ -17,7 +17,16 @@ GAP_ARMS = ("Baseline", "Intrusion", "Clean")
 GAP_TASK_IDS = tuple(
     make_task_id(task=f"VrlGapFinetune{arm}Raycast", robot="Rbq10", method="Dreamwaq") for arm in GAP_ARMS
 )
-RAYCAST_TASK_IDS = (make_task_id(task="VrlBlindStartRaycast", robot="Rbq10", method="Dreamwaq"), *GAP_TASK_IDS)
+# v2 (2026-10-06): Clean + gap/stair terms, resumed from a Clean-arm checkpoint pinned by an EXPLICIT sha256
+# (the Clean run's Top-1 is not known in advance), never from 17206 and never with a gate-C record.
+V2_ARMS = ("CleanV2",)
+V2_TASK_IDS = tuple(
+    make_task_id(task=f"VrlGapFinetune{arm}Raycast", robot="Rbq10", method="Dreamwaq") for arm in V2_ARMS
+)
+ALL_GAP_TASK_IDS = (*GAP_TASK_IDS, *V2_TASK_IDS)
+V2_SOURCE_TASKS = (make_task_id(task="VrlGapFinetuneCleanRaycast", robot="Rbq10", method="Dreamwaq"), *V2_TASK_IDS)
+V2_CAMERA_PROFILE = "vendor_new"
+RAYCAST_TASK_IDS = (make_task_id(task="VrlBlindStartRaycast", robot="Rbq10", method="Dreamwaq"), *ALL_GAP_TASK_IDS)
 CAMERA_FREE_TASK_IDS = (make_task_id(task="VrlBlindStart", robot="Rbq10", method="Dreamwaq"), *RAYCAST_TASK_IDS)
 
 PINNED_CHECKPOINT_NAME = "17206_top1.pt"
@@ -38,6 +47,8 @@ MIN_WAIVER_REASON = 20
 
 
 def arm_of(task: str) -> str | None:
+    if task in V2_TASK_IDS:
+        return V2_ARMS[V2_TASK_IDS.index(task)].lower()
     return GAP_ARMS[GAP_TASK_IDS.index(task)].lower() if task in GAP_TASK_IDS else None
 
 
@@ -82,9 +93,17 @@ def validate_gate_record(path) -> dict:
 
 def validate_cli(
     task, *, resume_checkpoint, force_ppo_lr, blind_init, distributed, rollout_only_steps, target_iterations=None,
-    baseline_gate=None, baseline_gate_waiver=None, hash_fn=sha256_file,
+    baseline_gate=None, baseline_gate_waiver=None, hash_fn=sha256_file, resume_sha256=None,
 ):
     """Raise ValueError for any unsafe combination. Cheap: no torch, no simulator."""
+    if task in V2_TASK_IDS:
+        return validate_cli_v2(
+            task, resume_checkpoint=resume_checkpoint, resume_sha256=resume_sha256, force_ppo_lr=force_ppo_lr,
+            blind_init=blind_init, distributed=distributed, rollout_only_steps=rollout_only_steps,
+            target_iterations=target_iterations, baseline_gate=baseline_gate,
+            baseline_gate_waiver=baseline_gate_waiver, hash_fn=hash_fn)
+    if resume_sha256 is not None:
+        raise ValueError("--resume_sha256 is only used by the v2 gap/stair task")
     if task not in GAP_TASK_IDS:
         if force_ppo_lr is not None or rollout_only_steps is not None:
             raise ValueError("--force_ppo_lr/--rollout_only_steps are only valid for the gap fine-tuning tasks")
@@ -184,3 +203,73 @@ def cenet_lr_report(policy, expected: float = EXPECTED_CENET_LR) -> dict:
     """CENet has its own optimizer (restored by runner.load); report, never change."""
     groups = [float(group["lr"]) for group in policy.cenet.optimizer.param_groups]
     return {"groups": groups, "expected": expected, "as_expected": all(value == expected for value in groups)}
+
+
+def _is_sha256(value) -> bool:
+    return isinstance(value, str) and len(value) == 64 and all(c in "0123456789abcdef" for c in value)
+
+
+def validate_cli_v2(
+    task, *, resume_checkpoint, resume_sha256, force_ppo_lr, blind_init, distributed, rollout_only_steps,
+    target_iterations, baseline_gate, baseline_gate_waiver, hash_fn=sha256_file,
+):
+    """v2: resume a Clean-arm checkpoint named by an explicit sha256; training needs a waiver (no gate C)."""
+    if distributed:
+        from gd_lab.rl import distributed_sync  # noqa: F401
+    if blind_init is not None:
+        raise ValueError("the v2 task resumes a Clean-arm teacher, not --blind_init")
+    if force_ppo_lr is None or not math.isfinite(force_ppo_lr) or force_ppo_lr <= 0:
+        raise ValueError("the v2 task requires --force_ppo_lr <finite positive value>")
+    if rollout_only_steps is not None and rollout_only_steps <= 0:
+        raise ValueError("--rollout_only_steps must be positive")
+    if rollout_only_steps is None and target_iterations is None:
+        raise ValueError("the v2 task requires --target_iterations (total completed updates)")
+    if baseline_gate:
+        raise ValueError("gate-C records belong to the 17206 arms; the v2 task needs --baseline_gate_waiver")
+    if rollout_only_steps is None and len(str(baseline_gate_waiver or "").strip()) < MIN_WAIVER_REASON:
+        raise ValueError(f"v2 training needs --baseline_gate_waiver with a reason of at least {MIN_WAIVER_REASON} characters")
+    if not _is_sha256(resume_sha256):
+        raise ValueError("the v2 task requires --resume_sha256 <64 lowercase hex> of the Clean-arm checkpoint")
+    if not resume_checkpoint or not Path(resume_checkpoint).is_file():
+        raise ValueError(f"v2 resume checkpoint does not exist: {resume_checkpoint}")
+    digest = hash_fn(Path(resume_checkpoint))
+    if digest != resume_sha256:
+        raise ValueError(f"resume checkpoint SHA256 mismatch: {digest} != {resume_sha256}")
+
+
+def inspect_checkpoint_v2(path, expected_sha256: str, target_iterations=None) -> dict:
+    """After the app launched: full resume state, Clean-arm provenance, vendor_new cameras, matching hash."""
+    import torch
+
+    loaded = torch.load(path, map_location="cpu", weights_only=False)
+    missing = [key for key in REQUIRED_CHECKPOINT_KEYS if key not in loaded]
+    if missing:
+        raise ValueError(f"checkpoint lacks required state {missing}")
+    extra = (loaded.get("infos") or {}).get("gd_lab") or {}
+    if "cenet_optimizer_state_dict" not in extra:
+        raise ValueError("checkpoint lacks the CENet optimizer state (infos.gd_lab)")
+    version = (extra.get("observation_context") or {}).get("version")
+    if version != OBSERVATION_VERSION:
+        raise ValueError(f"checkpoint observation contract {version!r} != {OBSERVATION_VERSION!r}")
+    source = extra.get("gap_finetune") or {}
+    if source.get("task") not in V2_SOURCE_TASKS:
+        raise ValueError(f"v2 must resume a Clean-arm checkpoint, got task {source.get('task')!r}")
+    if source.get("camera_profile") != V2_CAMERA_PROFILE:
+        raise ValueError(f"v2 needs {V2_CAMERA_PROFILE} cameras, checkpoint has {source.get('camera_profile')!r}")
+    digest = sha256_file(path)
+    if digest != expected_sha256:
+        raise ValueError(f"checkpoint changed since validation: {digest} != {expected_sha256}")
+    iteration = int(loaded["iter"])
+    if target_iterations is not None and target_iterations <= iteration + 1:
+        raise ValueError(f"--target_iterations {target_iterations} leaves no update after resuming at {iteration + 1}")
+    return {"iter": iteration, "sha256": digest, "source_task": source.get("task"),
+            "source_checkpoint": source.get("checkpoint")}
+
+
+def verify_restored_iteration_v2(runner_iteration: int, checkpoint: dict | None) -> int:
+    if checkpoint is None or "iter" not in checkpoint or "source_task" not in checkpoint:
+        raise RuntimeError("v2: the resume checkpoint was not inspected")
+    expected = expected_resumed_iteration(checkpoint["iter"])
+    if int(runner_iteration) != expected:
+        raise RuntimeError(f"resume counter {runner_iteration} != {expected}: the checkpoint state was not restored")
+    return expected
