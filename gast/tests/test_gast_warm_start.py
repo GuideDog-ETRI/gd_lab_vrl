@@ -123,3 +123,25 @@ def test_gast_actor_critic_adds_only_the_encoder_and_decoder():
     assert "self.terrain_encoder = TemporalTerrainEncoder()" in init
     assert "self.terrain_decoder = nn.Sequential(nn.Linear(32, 128), nn.ELU(), nn.Linear(128, 187*6))" in init
     assert init.count("self.") == 2
+
+
+def test_zero_latent_head_still_trains_the_encoder_after_one_step():
+    """Codex review 10/06: with a zero head the upstream encoder gets no gradient on the very first
+    step; the head itself does, and from the second step on the whole encoder learns."""
+    torch.manual_seed(0)
+    policy = _gast_policy()
+    ws.zero_latent_head(policy)
+    optimizer = ws.build_grouped_optimizer(policy, 1e-4, 1e-3, torch.optim.Adam(policy.parameters(), lr=1e-3))
+    encoder, history = policy.terrain_encoder, torch.randn(32, 8 * 375)
+    columns = torch.randn(policy.actor[0].weight.shape[0], 32) * 0.1  # trained latent columns are non-zero
+    upstream = [p for n, p in encoder.named_parameters() if not n.startswith("head.")]
+    flows = []
+    for _ in range(2):
+        optimizer.zero_grad()
+        latent = encoder(history)
+        (((latent @ columns.T) ** 2).mean() + latent.sum()).backward()
+        flows.append((float(encoder.head[0].weight.grad.abs().sum()),
+                      sum(float(p.grad.abs().sum()) for p in upstream if p.grad is not None)))
+        optimizer.step()
+    assert flows[0][0] > 0 and flows[0][1] == 0
+    assert flows[1][0] > 0 and flows[1][1] > 0
