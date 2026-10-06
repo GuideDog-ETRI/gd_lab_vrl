@@ -178,9 +178,21 @@ def test_v2_config_adds_terms_in_order_and_no_observations():
     tree = ast.parse((ROOT / "src/gd_lab/teachers/bivt/tasks.py").read_text())
     cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "GapFinetuneCleanV2RaycastEnvCfg")
     assert [b.id for b in cls.bases] == ["GapFinetuneCleanRaycastEnvCfg"]
-    source = ast.unparse(cls)
-    assert "observations" not in source  # a Clean checkpoint must resume unchanged
-    order = [name for name in ("stair_handle_disturbance", "stair_push_fall", "stair_push_slip") if name in source]
-    assert order == ["stair_handle_disturbance", "stair_push_fall", "stair_push_slip"]
-    assert source.index("rewards.stair_handle_disturbance") < source.index("rewards.stair_push_fall")
-    assert "strict_contact" in source and "(0.02, 0.26)" in source
+    assert "add_v2_terms(self)" in ast.unparse(cls) and "observations" not in ast.unparse(cls)
+    module = ast.parse((ROOT / "src/gd_lab/mdp/gap_stair_v2.py").read_text())
+    builder = ast.unparse(next(n for n in module.body if isinstance(n, ast.FunctionDef) and n.name == "add_v2_terms"))
+    assert "observations" not in builder  # a Clean checkpoint must resume unchanged
+    assert builder.index("rewards.stair_handle_disturbance") < builder.index("rewards.stair_push_fall")
+    assert builder.index("rewards.stair_handle_disturbance") < builder.index("rewards.stair_push_slip")
+    assert "strict_contact" in builder and "V2_GAP_WIDTH_RANGE" in builder
+
+
+def test_gast_teacher_uses_the_identical_v2_objective():
+    """BIVT-Ray CleanV2 and the GAST CleanV2 teacher must be trained on the same terms (byte-identical copies)."""
+    for name in ("gap_stair_v2.py", "gap_stair_v2_math.py", "platform_gap_attempts.py", "platform_gap_finetune.py"):
+        assert (ROOT / "src/gd_lab/mdp" / name).read_bytes() == (ROOT / "gast/src/gd_lab/mdp" / name).read_bytes(), name
+    gast_tasks = (ROOT / "gast/src/gd_lab/gast/tasks.py").read_text()
+    tree = ast.parse(gast_tasks)
+    cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "GastGapCleanV2TeacherCfg")
+    assert [b.id for b in cls.bases] == ["GastGapCleanTeacherCfg"] and "add_v2_terms(self)" in ast.unparse(cls)
+    assert "task='GastGapCleanV2'" in gast_tasks

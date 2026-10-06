@@ -43,7 +43,9 @@ class StepResult:
 
 
 class GapAttemptTracker:
-    def __init__(self, num_envs: int, device):
+    def __init__(self, num_envs: int, device, strict_contact: bool = False):
+        # strict_contact (v2): a foot touching anything while its centre is over the held slot also makes the attempt non-clean.
+        self.strict_contact = bool(strict_contact)
         self.n, self.device = num_envs, torch.device(device)
         zeros = lambda *shape, dtype=torch.long: torch.zeros(*shape, dtype=dtype, device=self.device)  # noqa: E731
         self.active = zeros(num_envs, dtype=torch.bool)
@@ -153,6 +155,8 @@ class GapAttemptTracker:
         self.att_dwell += (self.active & held_in.any(dim=1)).long()
         self.att_contact += (self.active & (held_in & contact).any(dim=1)).long()
         self.att_depth = torch.where(self.active, torch.maximum(self.att_depth, held_depth), self.att_depth)
+        if self.strict_contact:
+            violation = violation | (held_in & contact).any(dim=1)
         self.clean = self.clean & ~(self.active & violation)
 
         # 3) close attempts: success > retreat > reversal
