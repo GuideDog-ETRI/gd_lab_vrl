@@ -87,6 +87,9 @@ parser.add_argument(
     "off by default means noise IS applied; only disable for an apples-to-apples "
     "comparison against an older noiseless run.",
 )
+parser.add_argument("--v2_env", action="store_true", default=False,
+                    help="Distill a v2 teacher in its own env: 26 cm gaps and the stair hip-handle disturbance "
+                         "(full force from the first step).")
 parser.add_argument("--gap_loss_weight", type=float, default=1.0,
                     help="Loss weight for samples whose 11x17 body grid contains a known gap cell (1 = off).")
 parser.add_argument("--gap_terrain_columns", type=int, default=0,
@@ -233,15 +236,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     with open(checkpoint_path, "rb") as teacher_file:
         teacher_sha256 = hashlib.sha256(teacher_file.read()).hexdigest()
 
+    from gd_lab.mdp.gap_stair_v2 import add_student_v2_env, set_gap_terrain_columns
+    if args_cli.v2_env:
+        os.environ["GD_LAB_V2_FORCE_RAMP_STEPS"] = "0"  # the teacher already handles full-strength pushes
+        add_student_v2_env(env_cfg)
+        print("[INFO] v2 distillation env: 26 cm gaps + stair hip-handle disturbance at full force", flush=True)
     if args_cli.gap_terrain_columns:
-        generator = env_cfg.scene.terrain.terrain_generator
-        if "platform_gap" not in generator.sub_terrains:
-            raise RuntimeError("gap_terrain_columns needs a platform_gap sub-terrain")
-        for name, sub in generator.sub_terrains.items():
-            sub.proportion = float(args_cli.gap_terrain_columns) if name == "platform_gap" else 1.0
-        # One column per proportion unit keeps the family column allocation exact.
-        generator.num_cols = len(generator.sub_terrains) - 1 + args_cli.gap_terrain_columns
-        print(f"[INFO] Gap-focused terrain: platform_gap {args_cli.gap_terrain_columns}/{generator.num_cols} columns", flush=True)
+        cols = set_gap_terrain_columns(env_cfg, args_cli.gap_terrain_columns)
+        print(f"[INFO] Gap-focused terrain: platform_gap {args_cli.gap_terrain_columns}/{cols} columns", flush=True)
     configure_vrl_cameras(env_cfg)
     # A capture may fall on any policy tick. Render at policy boundaries so
     # scheduled camera reads are current, including asynchronous reset rows.

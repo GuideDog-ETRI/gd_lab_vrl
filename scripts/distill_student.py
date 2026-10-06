@@ -75,6 +75,19 @@ parser.add_argument(
     "off by default means noise IS applied; only disable for an apples-to-apples "
     "comparison against an older noiseless run.",
 )
+# --- v2 distillation (2026-10-07): common to GAST/RVLD/GAVD -------------------------------------------
+parser.add_argument("--v2_env", action="store_true", default=False,
+                    help="Distill a v2 teacher in its own env: 26 cm gaps and the stair hip-handle disturbance "
+                         "(full force from the first step).")
+parser.add_argument("--gap_loss_weight", type=float, default=1.0,
+                    help="Loss weight of near-gap samples (a gap inside the privileged body scan); 1 = off.")
+parser.add_argument("--gap_terrain_columns", type=int, default=0,
+                    help="Platform-gap terrain columns next to one per other family (0 = task default).")
+parser.add_argument("--top5_start_iteration", type=int, default=2000)
+parser.add_argument("--top5_keep", type=int, default=5)
+parser.add_argument("--top5_smoothing_windows", type=int, default=8)
+parser.add_argument("--gap_top5_min_rows", type=int, default=64,
+                    help="Minimum near-gap rows in a BPTT window for it to count toward the gap Top-5.")
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
@@ -82,6 +95,8 @@ if min(args_cli.iterations, args_cli.bptt_steps, args_cli.save_interval, args_cl
     parser.error("iterations, bptt_steps, save_interval and num_envs must be positive")
 if args_cli.lr <= 0 or args_cli.hazard_loss_coef < 0:
     parser.error("lr must be positive and hazard_loss_coef nonnegative")
+if args_cli.gap_loss_weight < 1 or args_cli.gap_terrain_columns < 0:
+    parser.error("gap_loss_weight must be >= 1 and gap_terrain_columns >= 0")
 if args_cli.student_warmup < 0 or args_cli.student_ramp < 1:
     parser.error("student_warmup must be nonnegative and student_ramp positive")
 try:
@@ -133,6 +148,9 @@ from gd_lab.students.rvld.model import CameraPerceptionEncoder, height_discontin
 from gd_lab.students.rvld.distillation import TerrainAlignmentHead
 from gd_lab.students.gavd.model import GridAttentionStudent, spatial_loss
 from gd_lab.tasks.vrl_cameras import configure_vrl_cameras
+from gd_lab.mdp.gap_stair_v2 import add_student_v2_env, set_gap_terrain_columns
+from gd_lab.students.gap_focus import near_gap_envs, row_mse, row_weights, weighted_mean
+from gd_lab.students.top5 import StudentTop5
 from gd_lab.teachers.cvtt.student_env import CameraNoiseCfg
 
 
@@ -163,8 +181,9 @@ def capture_teacher_packet(env, obs, teacher, episode_ids, noise_cfg, gap_ghost,
     supervised = ((grid[:, 1:, :] & grid[:, :-1, :]).flatten(1).any(1)
                   | (grid[:, :, 1:] & grid[:, :, :-1]).flatten(1).any(1))
     # Packet order is stable across RVLD and GAVD; CameraTransport preserves capture_step.
+    # [9] near-gap flag (privileged label at capture time, for loss weighting and the gap Top-5 only).
     return (frames.clone(), latent, terrain.clone(), hazard, supervised,
-            visibility.float().mean(-1), episode_ids.clone(), base_actor, teacher_action)
+            visibility.float().mean(-1), episode_ids.clone(), base_actor, teacher_action, near_gap_envs(env))
 
 
 @hydra_task_config(args_cli.task, args_cli.agent)
@@ -192,6 +211,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     with open(checkpoint_path, "rb") as teacher_file:
         teacher_sha256 = hashlib.sha256(teacher_file.read()).hexdigest()
 
+    if args_cli.v2_env:
+        os.environ["GD_LAB_V2_FORCE_RAMP_STEPS"] = "0"  # the teacher already handles full-strength pushes
+        add_student_v2_env(env_cfg)
+        print("[INFO] v2 distillation env: 26 cm gaps + stair hip-handle disturbance at full force", flush=True)
+    if args_cli.gap_terrain_columns:
+        cols = set_gap_terrain_columns(env_cfg, args_cli.gap_terrain_columns)
+        print(f"[INFO] Gap-focused terrain: platform_gap {args_cli.gap_terrain_columns}/{cols} columns", flush=True)
+    print(f"[INFO] Near-gap sample loss weight: {args_cli.gap_loss_weight}", flush=True)
     configure_vrl_cameras(env_cfg)
     # A capture may fall on any policy tick. Render at policy boundaries so
     # scheduled camera reads are current, including asynchronous reset rows.
@@ -265,6 +292,40 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     log_dir = os.path.join(log_root_path, run_name)
     os.makedirs(log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir=log_dir)
+    top5_common = dict(start_iteration=args_cli.top5_start_iteration, keep=args_cli.top5_keep,
+                       smoothing_windows=args_cli.top5_smoothing_windows, min_visible_fraction=None,
+                       min_visible_sample_fraction=0.95, min_hazard_supervised_fraction=0.95)
+    top5_manager = StudentTop5(os.path.join(log_dir, "top5"), **top5_common)
+    gap_top5_manager = StudentTop5(
+        os.path.join(log_dir, "top5_gap"), **top5_common, min_score_rows=args_cli.gap_top5_min_rows,
+        score_description="near_gap_action_mse: student-latent action vs teacher action on rows whose privileged "
+                          "body scan contains a gap (unweighted)")
+
+    def save_student(path, iteration, top5_selection=None):
+        payload = {
+            "model": student.state_dict(), "iteration": iteration,
+            "student_arch": args_cli.student_arch,
+            "alignment_head": alignment_head.state_dict() if alignment_head is not None else None,
+            "optimizer": optimizer.state_dict(),
+            "student_config": {"camera_profile": env_cfg.camera_profile} if attention else {},
+            "age_input": {"hidden_slot": 63, "units": "seconds_clipped_0_1"} if attention else None,
+            "distillation_args": vars(args_cli),
+            "camera_contract": camera_contract.manifest(),
+            "student_alignment_contract": 2,
+            "teacher_geometry_supervision": "teacher_visible_valid_finite_cells_only",
+            "teacher_visibility_supervision": "teacher_ray_mask_all_cells",
+            "teacher_behavior_target": "same_capture_step_teacher_action",
+            "teacher_checkpoint": checkpoint_path,
+            "teacher_sha256": teacher_sha256,
+            "camera_transport": transport_config.manifest(dt),
+            "camera_transport_seed": agent_cfg.seed,
+            "v2_distillation": {"v2_env": args_cli.v2_env, "gap_loss_weight": args_cli.gap_loss_weight,
+                                "gap_terrain_columns": args_cli.gap_terrain_columns},
+        }
+        if top5_selection is not None:
+            payload["student_top5_selection"] = top5_selection
+        torch.save(payload, path + ".tmp")
+        os.replace(path + ".tmp", path)
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
     print(f"[INFO] Perception log dir: {log_dir}")
@@ -290,6 +351,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         window_visible_sum, window_supervised_sum = 0.0, 0.0
         window_updates = 0
         window_delay_sum = 0.0
+        window_gap_action_sse, window_gap_rows = 0.0, 0
+        window_visible_sample_sum = window_visible_sample_count = 0
+        window_extra_sum = 0.0
 
         # Keep hidden states in-graph across delivered frames in this BPTT window.
         for _ in range(window_len):
@@ -334,18 +398,18 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                     payload = capture_teacher_packet(env.unwrapped, obs, teacher, episode_ids,
                                                      camera_noise_cfg, gap_ghost, camera_contract)
                     if attention:
-                        payload = (*payload, attention.capture(obs, payload[8], payload[7], payload[2]))
+                        payload = (*payload, attention.capture(obs, payload[8], payload[7], payload[2]))  # -> [10]
                     transport.capture(step, payload)
                 for packet in transport.receive(step):
                     (frames, teacher_latent, teacher_terrain, hazard_label, hazard_supervised,
-                     visible, captured_episodes, base_actor, teacher_action) = packet.payload[:9]
+                     visible, captured_episodes, base_actor, teacher_action, near_gap) = packet.payload[:10]
                     valid = delivery_mask(packet.capture_step, captured_episodes, episode_ids, last_delivered)
                     finite = torch.isfinite(frames.flatten(1)).all(1)
                     for value in (teacher_latent, teacher_terrain, hazard_label, visible, base_actor, teacher_action):
                         if value.is_floating_point():
                             finite &= torch.isfinite(value.reshape(value.shape[0], -1)).all(1)
                     if attention:
-                        for value in packet.payload[9]:
+                        for value in packet.payload[10]:
                             if value.is_floating_point():
                                 finite &= torch.isfinite(value.reshape(value.shape[0], -1)).all(1)
                     bad_rows = valid & ~finite
@@ -365,10 +429,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                         continue
                     rows = valid.nonzero(as_tuple=False).flatten()
                     extra_loss = torch.zeros((), device=device)
+                    gap_rows = near_gap[rows]
+                    weight = row_weights(gap_rows, args_cli.gap_loss_weight)
                     if attention:
                         student_latent, new_hidden, extra_loss = attention.update(
-                            frames[rows], hidden[rows], rows, packet.payload[9],
-                            (step-packet.capture_step)*dt, packet.capture_step*dt)
+                            frames[rows], hidden[rows], rows, packet.payload[10],
+                            (step-packet.capture_step)*dt, packet.capture_step*dt, row_weight=weight, near_gap=gap_rows)
+                        window_gap_action_sse += attention.near_gap_action_sse
+                        window_gap_rows += attention.near_gap_rows
                         action_value = attention.metrics["action_mse"]
                         geometry_value = attention.metrics["spatial_loss"]
                         height_value = attention.metrics["height_visible_loss"]
@@ -376,10 +444,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                     else:
                         student_latent, new_hidden = student(frames[rows], hidden[rows])
                         predicted_action = teacher.actor(torch.cat((base_actor[rows], student_latent), -1))
-                        action_loss = F.mse_loss(predicted_action, teacher_action[rows])
+                        per_row_action = row_mse(predicted_action, teacher_action[rows])
+                        action_loss = weighted_mean(per_row_action, weight)
+                        window_gap_action_sse += float(per_row_action[gap_rows].sum())
+                        window_gap_rows += int(gap_rows.sum())
                         spatial_prediction = alignment_head(new_hidden)
                         geometry_loss, height_loss, visibility_loss, _ = spatial_loss(
-                            spatial_prediction, teacher_terrain[rows], return_components=True)
+                            spatial_prediction, teacher_terrain[rows], return_components=True, row_weight=weight)
                         extra_loss = action_loss + 0.5 * geometry_loss
                         action_value, geometry_value = action_loss.item(), geometry_loss.item()
                         height_value, visibility_value = height_loss.item(), visibility_loss.item()
@@ -391,8 +462,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                     hazard_pred = student.hazard_head(new_hidden).squeeze(-1)
                     supervised = hazard_supervised[rows]
                     latent_target = teacher_latent[rows]
-                    latent_loss = F.mse_loss(student_latent, latent_target)
-                    hazard_loss = (F.mse_loss(hazard_pred[supervised], hazard_label[rows][supervised])
+                    latent_loss = weighted_mean(row_mse(student_latent, latent_target), weight)
+                    hazard_loss = (weighted_mean((hazard_pred[supervised] - hazard_label[rows][supervised]).pow(2),
+                                                 weight[supervised])
                                    if supervised.any() else hazard_pred.sum() * 0.0)
                     window_loss = window_loss + latent_loss + args_cli.hazard_loss_coef * hazard_loss + extra_loss
                     window_mse_sum += latent_loss.item()
@@ -402,6 +474,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                     window_height_sum += height_value
                     window_visibility_sum += visibility_value
                     window_visible_sum += visible[rows].mean().item()
+                    window_visible_sample_sum += int((visible[rows] > 0).sum())
+                    window_visible_sample_count += rows.numel()
+                    window_extra_sum += extra_loss.item()
                     window_supervised_sum += supervised.float().mean().item()
                     window_delay_sum += (step - packet.capture_step) * dt * 1000
                     window_updates += 1
@@ -458,27 +533,30 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                   f"visible={window_visible_sum / count:.4f} "
                   f"hazard_supervised={window_supervised_sum / count:.4f}")
 
+        if window_updates:
+            board_metrics = {"latent_mse": mse_val, "hazard_mse": hazard_val, "extra_loss": window_extra_sum / count,
+                             "visible_fraction": window_visible_sum / count,
+                             "visible_sample_fraction": window_visible_sample_sum / max(window_visible_sample_count, 1),
+                             "hazard_supervised_fraction": window_supervised_sum / count, "updates": window_updates}
+            total_val = mse_val + args_cli.hazard_loss_coef * hazard_val + window_extra_sum / count
+            result = top5_manager.consider(it, total_val, board_metrics,
+                                           save_fn=lambda path, record: save_student(str(path), it, record))
+            if result.get("saved"):
+                print(f"[TOP5] iter={it} score={result.get('score', float('nan')):.6f} rank={result.get('rank')}")
+            if window_gap_rows:
+                gap_val = window_gap_action_sse / window_gap_rows
+                writer.add_scalar("perception/near_gap_action_mse", gap_val, it)
+                writer.add_scalar("perception/near_gap_rows", window_gap_rows, it)
+                result = gap_top5_manager.consider(
+                    it, gap_val, {**board_metrics, "score_rows": window_gap_rows},
+                    save_fn=lambda path, record: save_student(str(path), it, {**record, "board": "gap"}))
+                if result.get("saved"):
+                    print(f"[TOP5_GAP] iter={it} near_gap_action_mse={gap_val:.6f} rows={window_gap_rows} "
+                          f"score={result.get('score', float('nan')):.6f} rank={result.get('rank')}")
+
         if it % args_cli.save_interval < window_len or it >= args_cli.iterations:
             ckpt_path = os.path.join(log_dir, f"perception_{it}.pt")
-            torch.save({
-                "model": student.state_dict(), "iteration": it,
-                "student_arch": args_cli.student_arch,
-                "alignment_head": alignment_head.state_dict() if alignment_head is not None else None,
-                "optimizer": optimizer.state_dict(),
-                "student_config": {"camera_profile": env_cfg.camera_profile} if attention else {},
-                "age_input": {"hidden_slot": 63, "units": "seconds_clipped_0_1"} if attention else None,
-                "distillation_args": vars(args_cli),
-                "camera_contract": camera_contract.manifest(),
-                "student_alignment_contract": 2,
-                "teacher_geometry_supervision": "teacher_visible_valid_finite_cells_only",
-                "teacher_visibility_supervision": "teacher_ray_mask_all_cells",
-                "teacher_behavior_target": "same_capture_step_teacher_action",
-                "teacher_checkpoint": checkpoint_path,
-                "teacher_sha256": teacher_sha256,
-                "camera_transport": transport_config.manifest(dt),
-                "camera_transport_seed": agent_cfg.seed,
-            }, ckpt_path + ".tmp")
-            os.replace(ckpt_path + ".tmp", ckpt_path)
+            save_student(ckpt_path, it)
             print(f"[INFO] Saved {ckpt_path}")
 
     print(f"[INFO] Distillation complete: captures={transport.captured} dropped={transport.dropped} "

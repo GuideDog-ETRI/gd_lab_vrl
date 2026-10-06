@@ -381,3 +381,30 @@ def add_v2_terms(cfg) -> None:
     cfg.rewards.stair_push_slip = RewardTermCfg(
         func=stair_push_slip, weight=w["stair_push_slip"], params={"asset_cfg": feet, "sensor_cfg": contacts})
     cfg.curriculum.gap_stair_v2_diagnostics = CurriculumTermCfg(func=gap_stair_v2_diagnostics, params={})
+
+
+def add_student_v2_env(cfg) -> None:
+    """Distillation env of a v2 teacher (any student: GAST, RVLD, GAVD): the same 26 cm gaps and the same stair
+    hip-handle disturbance the teacher was trained with, so the student sees the states the teacher recovers
+    from. Only the disturbance term is added (its reward is never used by distillation, but a RewardManager term
+    with nonzero weight is what applies the force each step). Full force from the first step: set
+    GD_LAB_V2_FORCE_RAMP_STEPS=0 (the distillation scripts do)."""
+    from isaaclab.managers import RewardTermCfg
+
+    contacts = SceneEntityCfg("contact_forces", body_names=".*_foot")
+    cfg.scene.terrain.terrain_generator.sub_terrains["platform_gap"].gap_width_range = V2_GAP_WIDTH_RANGE
+    cfg.rewards.stair_handle_disturbance = RewardTermCfg(
+        func=StairHandleDisturbance, weight=V2_WEIGHTS["stair_handle_disturbance"],
+        params={"asset_cfg": SceneEntityCfg("robot"), "sensor_cfg": contacts, **V2_DISTURBANCE})
+
+
+def set_gap_terrain_columns(cfg, gap_columns: int) -> int:
+    """Give platform gaps ``gap_columns`` terrain columns next to one column per other family (exact allocation).
+    Returns the new number of columns."""
+    generator = cfg.scene.terrain.terrain_generator
+    if "platform_gap" not in generator.sub_terrains or gap_columns < 1:
+        raise ValueError("set_gap_terrain_columns needs a platform_gap sub-terrain and gap_columns >= 1")
+    for name, sub in generator.sub_terrains.items():
+        sub.proportion = float(gap_columns) if name == "platform_gap" else 1.0
+    generator.num_cols = len(generator.sub_terrains) - 1 + int(gap_columns)
+    return generator.num_cols
