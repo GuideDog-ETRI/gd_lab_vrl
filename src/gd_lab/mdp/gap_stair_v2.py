@@ -351,7 +351,9 @@ V2_GAP_WIDTH_RANGE = (0.02, 0.26)
 # MuJoCo baseline of BIVT-Ray 21068 on the 15 cm stair course (2026-10-06): a 0.6 s back-and-down handle pull
 # of 100 N was absorbed, 150 N lifted both front feet for 0.5 s, 200 N flipped the robot backward down the
 # stairs; downhill pushes of 80-120 N were absorbed. Training covers that failure range.
-V2_DISTURBANCE = {"ascend_force": (0.0, 200.0), "descend_force": (0.0, 150.0)}
+# Onset rate while eligible: 0.3/s gave ~0.09 events per episode over all tiles in a 25-update local smoke
+# (eligibility = forward walking along the slope), too few to learn from; 1.0/s with the 2 s cooldown.
+V2_DISTURBANCE = {"ascend_force": (0.0, 200.0), "descend_force": (0.0, 150.0), "rate_hz": 1.0}
 
 
 def add_v2_terms(cfg) -> None:
