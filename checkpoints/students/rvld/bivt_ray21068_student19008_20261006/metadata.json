@@ -1,0 +1,52 @@
+{
+  "artifact_type": "rvld_student_checkpoint",
+  "selection": "user_requested_iteration_19008; no held_out_or_top1_student_ranking",
+  "checkpoint_iteration": 19008,
+  "student_checkpoint": "student/perception_19008.pt",
+  "student_sha256": "e5ede9b6369e9395152fca0a713f6af0f24426ff3a6c2030e10c359f84fe3727",
+  "student_architecture": "cnn_gru",
+  "teacher_checkpoint_in_repository": "checkpoints/teachers/bivt/ray_gap_clean_vendor_new_top1_21068_20261005/teacher/21068_top1.pt",
+  "teacher_sha256": "fa397d22a949e24f74312b5270b5954a4ddb15c7451ea85ba8f64dbeeb7c9501",
+  "teacher_package_metadata": "checkpoints/teachers/bivt/ray_gap_clean_vendor_new_top1_21068_20261005/metadata.json",
+  "source_run": "rvld21068_512env_20k_20261006_080741",
+  "source_repository_revision": "448a385ed510dc2844eab8dc209c6c1ee57af847",
+  "training": {
+    "task": "Gd-VrlRayStudent-Rbq10-Dreamwaq-Vision-v0",
+    "num_envs": 512,
+    "iterations": 20000,
+    "bptt_steps": 16,
+    "lr": 0.0003,
+    "save_interval": 1000,
+    "gru_hidden_dim": 64,
+    "student_warmup": 1000,
+    "student_ramp": 4000,
+    "seed": 42
+  },
+  "camera_profile": "vendor_new",
+  "camera_contract_file": "camera_contract.json",
+  "camera_transport": {
+    "interval_ms": [
+      70.0,
+      100.0
+    ],
+    "delay_ms": [
+      0.0,
+      150.0
+    ],
+    "drop_probability": 0.05,
+    "policy_dt": 0.01,
+    "sampling": "uniform_integer_policy_steps",
+    "scope": "shared_batch_four_camera_set",
+    "target_time": "capture",
+    "out_of_order": "discard_older_than_last_delivered"
+  },
+  "supervision": {
+    "student_alignment_contract": 2,
+    "teacher_geometry_supervision": "teacher_visible_valid_finite_cells_only",
+    "teacher_visibility_supervision": "teacher_ray_mask_all_cells",
+    "teacher_behavior_target": "same_capture_step_teacher_action"
+  },
+  "source_snapshot": "source/",
+  "student_params": "params/",
+  "evaluation": "No held-out terrain/deployment test included; training loss is not a policy-performance ranking."
+}

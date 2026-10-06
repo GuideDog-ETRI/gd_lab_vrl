@@ -1,0 +1,10 @@
+architecture=cnn_gru
+iterations=20000
+envs=512
+bptt=16
+seed=42
+lr=0.0003
+save_interval=1000
+camera_interval_ms=70,100
+camera_delay_ms=0,150
+camera_drop_prob=0.05
