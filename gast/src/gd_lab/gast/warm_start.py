@@ -22,6 +22,8 @@ TERRAIN_PREFIXES = ("terrain_encoder.", "terrain_decoder.")
 GROUP_KEY = "gd_lab_group"
 # The only BIVT-Ray teachers a GAST Clean-gap teacher may start from (checked, never assumed).
 EXPECTED_SOURCE_TASK = "Gd-VrlGapFinetuneCleanRaycast-Rbq10-Dreamwaq-v0"
+# A BIVT-Ray teacher trained with the v2 gap/stair terms (same observations) is an equally valid source.
+ACCEPTED_SOURCE_TASKS = (EXPECTED_SOURCE_TASK, "Gd-VrlGapFinetuneCleanV2Raycast-Rbq10-Dreamwaq-v0")
 EXPECTED_SOURCE_CAMERA = "vendor_new"
 EXPECTED_OBSERVATION_VERSION = "bivt_ray_occlusion_v2"
 
@@ -94,9 +96,9 @@ def validate_source(checkpoint: dict, digest: str, expected_sha256: str | None =
     gap = extra.get("gap_finetune") or {}
     recorded = {"task": gap.get("task"), "camera_profile": gap.get("camera_profile"),
                 "observation_version": (extra.get("observation_context") or {}).get("version")}
-    expected = {"task": EXPECTED_SOURCE_TASK, "camera_profile": EXPECTED_SOURCE_CAMERA,
-                "observation_version": EXPECTED_OBSERVATION_VERSION}
-    wrong = {k: recorded[k] for k in expected if recorded[k] != expected[k]}
+    expected = {"task": ACCEPTED_SOURCE_TASKS, "camera_profile": (EXPECTED_SOURCE_CAMERA,),
+                "observation_version": (EXPECTED_OBSERVATION_VERSION,)}
+    wrong = {k: recorded[k] for k in expected if recorded[k] not in expected[k]}
     if wrong:
         raise ValueError(f"BIVT-Ray teacher contract mismatch or missing record: {wrong}, expected {expected}")
 

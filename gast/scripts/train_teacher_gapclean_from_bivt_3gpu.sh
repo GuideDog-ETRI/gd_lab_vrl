@@ -53,7 +53,7 @@ exec apptainer exec --nv --writable-tmpfs --bind "$root/logs/usd_tmp:/tmp/IsaacL
  "${GD_LAB_SIF:-/data/users/bsseo/gd_lab_isaaclab.sif}" \
  "${GD_LAB_PYTHON:-/data/users/bsseo/venv/bin/python}" -m torch.distributed.run --standalone --nnodes=1 \
  --nproc_per_node="$nproc" scripts/train_teacher.py --headless --distributed --total_envs "$envs" --seed 42 \
- --task Gd-GastGapClean-Rbq10-Dreamwaq-v0 --warm_start_bivt "$teacher" "${sha_args[@]}" --policy_lr 1e-4 --terrain_lr 1e-3 \
+ --task "${GAST_TASK:-Gd-GastGapClean-Rbq10-Dreamwaq-v0}" --warm_start_bivt "$teacher" "${sha_args[@]}" --policy_lr 1e-4 --terrain_lr 1e-3 \
  --logger tensorboard --experiment_name gast/arm4 --max_iterations "$updates" \
  agent.num_steps_per_env="$horizon" agent.algorithm.num_mini_batches=4 agent.algorithm.num_learning_epochs=5 \
  agent.algorithm.schedule=fixed agent.save_interval=100 agent.top5_min_spacing=100 "$@"

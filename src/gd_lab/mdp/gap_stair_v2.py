@@ -202,8 +202,8 @@ class StairHandleDisturbance(ManagerTermBase):
 
     def __call__(self, env, asset_cfg: SceneEntityCfg, sensor_cfg: SceneEntityCfg, front_feet: tuple = ("FL_foot", "FR_foot"),
                  rate_hz: float = 0.3, cooldown_s: float = 2.0, after_s: float = 1.0, ramp_steps: int = 150_000,
-                 ascend_force=(0.0, 150.0), ascend_duration=(0.3, 1.0), ascend_angle_deg=(20.0, 45.0),
-                 descend_force=(0.0, 120.0), descend_duration=(0.1, 0.5), descend_angle_deg=(-10.0, 30.0),
+                 ascend_force=(0.0, 200.0), ascend_duration=(0.3, 1.0), ascend_angle_deg=(20.0, 45.0),
+                 descend_force=(0.0, 150.0), descend_duration=(0.1, 0.5), descend_angle_deg=(-10.0, 30.0),
                  handle_pos=(-0.33, 0.0, 0.12), body_name: str = "trunk", fall_tilt_cos: float = 0.5):
         robot, sensor = self.robot, env.scene[sensor_cfg.name]
         dt, dev, n = env.step_dt, env.device, env.num_envs
@@ -307,3 +307,48 @@ def gap_stair_v2_diagnostics(env, env_ids):
         out["stair_push_front_lift_fraction"] = float(term.lift_steps[ids].sum() / term.window_steps[ids].sum().clamp_min(1))
         out["stair_push_force_scale"] = term._scale(env, manager.get_term_cfg(DISTURBANCE).params.get("ramp_steps", 150_000))
     return out
+
+
+# One definition for every teacher that uses v2 (BIVT-Ray CleanV2 and the GAST CleanV2 teacher), so the
+# two teachers are trained on the same objective. gast/src keeps a byte-identical copy of this file
+# (tests/test_gap_stair_v2.py pins it).
+V2_WEIGHTS = {
+    "gap_foothold_margin": -0.5,  # per fully violating touchdown
+    "stair_foothold_margin": -0.2,
+    "gap_slot_probe": -1.0,  # per second, mean over feet
+    "stair_handle_disturbance": -1.0,  # front-lift cost per second inside the disturbance window
+    "stair_push_fall": -5.0,  # per disturbance window, on top of termination_penalty
+    "stair_push_slip": -0.2,
+}
+V2_GAP_WIDTH_RANGE = (0.02, 0.26)
+# MuJoCo baseline of BIVT-Ray 21068 on the 15 cm stair course (2026-10-06): a 0.6 s back-and-down handle pull
+# of 100 N was absorbed, 150 N lifted both front feet for 0.5 s, 200 N flipped the robot backward down the
+# stairs; downhill pushes of 80-120 N were absorbed. Training covers that failure range.
+V2_DISTURBANCE = {"ascend_force": (0.0, 200.0), "descend_force": (0.0, 150.0)}
+
+
+def add_v2_terms(cfg) -> None:
+    """Add the v2 gap/stair terms to a Clean-arm teacher cfg (after its gap monitor). Observations unchanged."""
+    from isaaclab.managers import CurriculumTermCfg, RewardTermCfg
+
+    feet = SceneEntityCfg("robot", body_names=".*_foot")
+    contacts = SceneEntityCfg("contact_forces", body_names=".*_foot")
+    cfg.scene.terrain.terrain_generator.sub_terrains["platform_gap"].gap_width_range = V2_GAP_WIDTH_RANGE
+    cfg.rewards.platform_gap_monitor.params["strict_contact"] = True
+    w = V2_WEIGHTS
+    cfg.rewards.gap_foothold_margin = RewardTermCfg(
+        func=FootholdMargin, weight=w["gap_foothold_margin"],
+        params={"mode": "gap", "asset_cfg": feet, "sensor_cfg": contacts, "margin": 0.04, "min_command": 0.2})
+    cfg.rewards.stair_foothold_margin = RewardTermCfg(
+        func=FootholdMargin, weight=w["stair_foothold_margin"],
+        params={"mode": "stair", "asset_cfg": feet, "sensor_cfg": contacts, "margin": 0.04, "min_command": 0.2})
+    cfg.rewards.gap_slot_probe = RewardTermCfg(
+        func=SlotProbe, weight=w["gap_slot_probe"], params={"asset_cfg": feet, "sensor_cfg": contacts})
+    # Order matters: the disturbance term first; fall/slip read its state in the same step.
+    cfg.rewards.stair_handle_disturbance = RewardTermCfg(
+        func=StairHandleDisturbance, weight=w["stair_handle_disturbance"],
+        params={"asset_cfg": SceneEntityCfg("robot"), "sensor_cfg": contacts, **V2_DISTURBANCE})
+    cfg.rewards.stair_push_fall = RewardTermCfg(func=stair_push_fall, weight=w["stair_push_fall"], params={})
+    cfg.rewards.stair_push_slip = RewardTermCfg(
+        func=stair_push_slip, weight=w["stair_push_slip"], params={"asset_cfg": feet, "sensor_cfg": contacts})
+    cfg.curriculum.gap_stair_v2_diagnostics = CurriculumTermCfg(func=gap_stair_v2_diagnostics, params={})

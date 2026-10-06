@@ -91,9 +91,23 @@ class GastGapCleanTeacherCfg(GastTeacherCfg):
         self.curriculum.platform_gap_diagnostics = CurriculumTermCfg(func=platform_gap_diagnostics, params={})
 
 
+@configclass
+class GastGapCleanV2TeacherCfg(GastGapCleanTeacherCfg):
+    """GAST teacher with the v2 gap/stair terms of the BIVT-Ray CleanV2 arm (same function, same weights,
+    same disturbance), so the two teacher families are compared on one objective."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        from gd_lab.mdp.gap_stair_v2 import add_v2_terms
+
+        add_v2_terms(self)
+
+
 registry.register_task(task='Gast', robot='Rbq10', method='Dreamwaq',
     env_cfg='gd_lab.gast.tasks:GastTeacherCfg', agent_cfg='gd_lab.gast.teacher:GastRunnerCfg')
 registry.register_task(task='GastGapClean', robot='Rbq10', method='Dreamwaq',
     env_cfg='gd_lab.gast.tasks:GastGapCleanTeacherCfg', agent_cfg='gd_lab.gast.teacher:GastRunnerCfg')
+registry.register_task(task='GastGapCleanV2', robot='Rbq10', method='Dreamwaq',
+    env_cfg='gd_lab.gast.tasks:GastGapCleanV2TeacherCfg', agent_cfg='gd_lab.gast.teacher:GastRunnerCfg')
 registry.register_task(task='Gast', robot='Rbq10', method='Dreamwaq', mode='Vision',
     env_cfg='gd_lab.gast.tasks:GastStudentCfg', agent_cfg='gd_lab.gast.teacher:GastRunnerCfg')

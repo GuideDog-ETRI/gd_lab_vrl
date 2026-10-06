@@ -16,14 +16,7 @@ from gd_lab.mdp.platform_gap_finetune import (
     gap_intrusion_penalty,
     platform_gap_diagnostics,
 )
-from gd_lab.mdp.gap_stair_v2 import (
-    FootholdMargin,
-    SlotProbe,
-    StairHandleDisturbance,
-    gap_stair_v2_diagnostics,
-    stair_push_fall,
-    stair_push_slip,
-)
+from gd_lab.mdp.gap_stair_v2 import add_v2_terms
 from gd_lab.mdp.terrains.gap_metadata_generator import GapMetadataTerrainGenerator
 from gd_lab.tasks.blind_rough import BlindRoughSceneCfg
 from gd_lab.teachers.cvtt.tasks import VrlTeacherEnvCfg
@@ -123,35 +116,10 @@ class GapFinetuneCleanV2RaycastEnvCfg(GapFinetuneCleanRaycastEnvCfg):
     Gap: drop-off foothold margin at touchdown, slot probing/edge contact below the higher deck, strict
     clean (no contact over the slot), widths up to 26 cm. Stairs: nose-side foothold margin and the hip-handle
     disturbance (pull back-and-down while ascending, push while descending) with front-lift / fall / slip costs.
-    Observations are unchanged, so a Clean-arm checkpoint resumes as is.
+    Terms, weights and force ranges come from ``gd_lab.mdp.gap_stair_v2.add_v2_terms``, shared with the GAST
+    CleanV2 teacher. Observations are unchanged, so a Clean-arm checkpoint resumes as is.
     """
-
-    gap_margin_weight: float = -0.5  # per fully violating touchdown
-    stair_margin_weight: float = -0.2
-    slot_probe_weight: float = -1.0  # per second, mean over feet
-    front_lift_weight: float = -1.0  # per second inside the disturbance window
-    push_fall_weight: float = -5.0  # per disturbance window, on top of termination_penalty
-    push_slip_weight: float = -0.2
 
     def __post_init__(self):
         super().__post_init__()
-        feet = SceneEntityCfg("robot", body_names=".*_foot")
-        contacts = SceneEntityCfg("contact_forces", body_names=".*_foot")
-        self.scene.terrain.terrain_generator.sub_terrains["platform_gap"].gap_width_range = (0.02, 0.26)
-        self.rewards.platform_gap_monitor.params["strict_contact"] = True
-        self.rewards.gap_foothold_margin = RewardTermCfg(
-            func=FootholdMargin, weight=self.gap_margin_weight,
-            params={"mode": "gap", "asset_cfg": feet, "sensor_cfg": contacts, "margin": 0.04, "min_command": 0.2})
-        self.rewards.stair_foothold_margin = RewardTermCfg(
-            func=FootholdMargin, weight=self.stair_margin_weight,
-            params={"mode": "stair", "asset_cfg": feet, "sensor_cfg": contacts, "margin": 0.04, "min_command": 0.2})
-        self.rewards.gap_slot_probe = RewardTermCfg(
-            func=SlotProbe, weight=self.slot_probe_weight, params={"asset_cfg": feet, "sensor_cfg": contacts})
-        # Order matters: the disturbance term first; fall/slip read its state in the same step.
-        self.rewards.stair_handle_disturbance = RewardTermCfg(
-            func=StairHandleDisturbance, weight=self.front_lift_weight,
-            params={"asset_cfg": SceneEntityCfg("robot"), "sensor_cfg": contacts})
-        self.rewards.stair_push_fall = RewardTermCfg(func=stair_push_fall, weight=self.push_fall_weight, params={})
-        self.rewards.stair_push_slip = RewardTermCfg(
-            func=stair_push_slip, weight=self.push_slip_weight, params={"asset_cfg": feet, "sensor_cfg": contacts})
-        self.curriculum.gap_stair_v2_diagnostics = CurriculumTermCfg(func=gap_stair_v2_diagnostics, params={})
+        add_v2_terms(self)
