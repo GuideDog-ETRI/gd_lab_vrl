@@ -189,6 +189,10 @@ class StairHandleDisturbance(ManagerTermBase):
         self.fall_paid = torch.zeros(n, dtype=torch.bool, device=dev)
         self.fall_event = torch.zeros(n, dtype=torch.bool, device=dev)
         self.events = torch.zeros(n, device=dev)
+        self.jerks = torch.zeros(n, device=dev)
+        self.ascents = torch.zeros(n, device=dev)  # disturbances started while ascending (handle pulls)
+        self.eligible_up = torch.zeros(n, device=dev)  # env steps eligible for an ascending pull
+        self.eligible_down = torch.zeros(n, device=dev)
         self.falls = torch.zeros(n, device=dev)
         self.window_steps = torch.zeros(n, device=dev)
         self.lift_steps = torch.zeros(n, device=dev)
@@ -201,7 +205,8 @@ class StairHandleDisturbance(ManagerTermBase):
         ids = slice(None) if env_ids is None else env_ids
         for t in (self.active, self.in_window, self.fell, self.fall_paid, self.fall_event):
             t[ids] = False
-        for t in (self.ends, self.cooldown_until, self.time, self.events, self.falls, self.window_steps,
+        for t in (self.ends, self.cooldown_until, self.time, self.events, self.jerks, self.ascents, self.eligible_up,
+                  self.eligible_down, self.falls, self.window_steps,
                   self.lift_steps):
             t[ids] = 0
         self.window_end[ids] = -1.0
@@ -217,6 +222,7 @@ class StairHandleDisturbance(ManagerTermBase):
                  front_feet: tuple = ("FL_foot", "FR_foot"),
                  rate_hz: float = 0.3, cooldown_s: float = 2.0, after_s: float = 1.0, ramp_steps: int = 150_000,
                  ascend_force=(0.0, 200.0), ascend_duration=(0.3, 1.0), ascend_angle_deg=(20.0, 45.0),
+                 ascend_jerk_prob: float = 0.0, ascend_jerk_force=(300.0, 400.0), ascend_jerk_duration=(0.1, 0.3),
                  descend_force=(0.0, 150.0), descend_duration=(0.1, 0.5), descend_angle_deg=(-10.0, 30.0),
                  handle_pos=(-0.33, 0.0, 0.12), body_name: str = "trunk", fall_tilt_cos: float = 0.5):
         robot, sensor = self.robot, env.scene[sensor_cfg.name]
@@ -234,6 +240,8 @@ class StairHandleDisturbance(ManagerTermBase):
         command_vx = env.command_manager.get_command("base_velocity")[:, 0]
         ascending, descending = stair_push_modes(uphill, heading, robot.data.root_lin_vel_w[:, :2], command_vx)
 
+        self.eligible_up += (band & ascending).float()
+        self.eligible_down += (band & descending).float()
         # finish forces
         finished = self.active & (self.time >= self.ends)
         self.active &= ~finished
@@ -245,8 +253,14 @@ class StairHandleDisturbance(ManagerTermBase):
         if start.any():
             u = lambda r: r[0] + (r[1] - r[0]) * torch.rand(n, device=dev)  # noqa: E731
             scale = self._scale(env, ramp_steps)
-            magnitude = torch.where(ascending, u(ascend_force), u(descend_force)) * scale
+            magnitude = torch.where(ascending, u(ascend_force), u(descend_force))
             duration = torch.where(ascending, u(ascend_duration), u(descend_duration))
+            # Short hard yank of the handle (a person snatching the stick): same direction, higher force, short.
+            jerk = ascending & (torch.rand(n, device=dev) < ascend_jerk_prob)
+            magnitude = torch.where(jerk, u(ascend_jerk_force), magnitude) * scale
+            duration = torch.where(jerk, u(ascend_jerk_duration), duration)
+            self.jerks += (start & jerk).float()
+            self.ascents += (start & ascending).float()
             angle = torch.deg2rad(torch.where(ascending, u(ascend_angle_deg), u(descend_angle_deg)))
             force = downhill_force(uphill, magnitude, angle)
             self.force_w = torch.where(start[:, None], force, self.force_w)
@@ -328,6 +342,10 @@ def gap_stair_v2_diagnostics(env, env_ids):
         term = _disturbance(env)
         events = term.events[ids].sum()
         out["stair_push_events_per_episode"] = float(events / max(1, len(ids)))
+        out["stair_push_jerk_fraction"] = float(term.jerks[ids].sum() / events.clamp_min(1))
+        out["stair_push_ascend_fraction"] = float(term.ascents[ids].sum() / events.clamp_min(1))
+        out["stair_eligible_up_s_per_episode"] = float(term.eligible_up[ids].sum() * env.step_dt / max(1, len(ids)))
+        out["stair_eligible_down_s_per_episode"] = float(term.eligible_down[ids].sum() * env.step_dt / max(1, len(ids)))
         out["stair_push_fall_rate"] = float(term.falls[ids].sum() / events.clamp_min(1))
         window = term.window_steps[ids].sum().clamp_min(1)
         out["stair_push_front_lift_fraction"] = float(term.lift_steps[ids].sum() / window)
@@ -353,7 +371,11 @@ V2_GAP_WIDTH_RANGE = (0.02, 0.26)
 # stairs; downhill pushes of 80-120 N were absorbed. Training covers that failure range.
 # Onset rate while eligible: 0.3/s gave ~0.09 events per episode over all tiles in a 25-update local smoke
 # (eligibility = forward walking along the slope), too few to learn from; 1.0/s with the 2 s cooldown.
-V2_DISTURBANCE = {"ascend_force": (0.0, 200.0), "descend_force": (0.0, 150.0), "rate_hz": 1.0}
+# Main-training addition (user, 2026-10-07): 30% of ascending pulls are short hard yanks, 300-400 N for 0.1-0.3 s
+# (an adult snatching the handle; 200 N ~ holding a 20 kg dumbbell). Impulse 30-120 N*s, like the regular pulls,
+# but a much higher instantaneous acceleration (300 N / 46.7 kg -> ~5.6 m/s^2 before the legs push back).
+V2_DISTURBANCE = {"ascend_force": (0.0, 200.0), "descend_force": (0.0, 150.0), "rate_hz": 1.0,
+                  "ascend_jerk_prob": 0.3, "ascend_jerk_force": (300.0, 400.0), "ascend_jerk_duration": (0.1, 0.3)}
 
 
 def add_v2_terms(cfg) -> None:
