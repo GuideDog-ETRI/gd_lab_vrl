@@ -37,18 +37,32 @@ def targets(clean, teacher_terrain=None):
     return y, mask
 
 
-def reconstruction_loss(pred, clean, teacher_terrain=None, return_components=False):
+def near_gap_rows(clean):
+    """[B] bool: a known gap cell (semantic gap map, never missing depth) lies in the 11x17 grid around the body."""
+    _, _, gap, known = clean.reshape(-1, 4, 11, 17).unbind(1)
+    return ((gap > .5) & known.bool()).flatten(1).any(1)
+
+
+def weighted_mean(values, weight):
+    """Per-row values [B] averaged with row weights; equals values.mean() when every weight is 1."""
+    return (values * weight).sum() / weight.sum().clamp_min(1e-6)
+
+
+def reconstruction_loss(pred, clean, teacher_terrain=None, return_components=False, row_weight=None):
+    """``row_weight`` [B] scales whole samples (e.g. near-gap emphasis); None keeps every row at 1."""
     y, mask = targets(clean, teacher_terrain)
     loss = torch.cat((F.smooth_l1_loss(pred[..., :1], y[..., :1], reduction='none'),
                       F.binary_cross_entropy_with_logits(pred[..., 1:], y[..., 1:], reduction='none')), -1)
     weight = torch.ones_like(loss)
     weight[..., 2:5] = 1 + 4 * y[..., 2:5]
+    if row_weight is not None:
+        weight = weight * row_weight[:, None, None]
     weighted = loss * mask * weight
     total = weighted.sum() / (mask * weight).sum().clamp_min(1)
     if not return_components:
         return total
-    height = weighted[..., 0].sum() / mask[..., 0].sum().clamp_min(1)
-    visibility = weighted[..., 1].sum() / mask[..., 1].sum().clamp_min(1)
+    height = weighted[..., 0].sum() / (mask * weight)[..., 0].sum().clamp_min(1)
+    visibility = weighted[..., 1].sum() / (mask * weight)[..., 1].sum().clamp_min(1)
     visible_fraction = y[..., 1].mean()
     return total, height, visibility, visible_fraction
 

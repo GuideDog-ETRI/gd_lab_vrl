@@ -87,6 +87,15 @@ parser.add_argument(
     "off by default means noise IS applied; only disable for an apples-to-apples "
     "comparison against an older noiseless run.",
 )
+parser.add_argument("--gap_loss_weight", type=float, default=1.0,
+                    help="Loss weight for samples whose 11x17 body grid contains a known gap cell (1 = off).")
+parser.add_argument("--gap_terrain_columns", type=int, default=0,
+                    help="Platform-gap terrain columns next to one column per other family (0 = task default). "
+                         "E.g. 20 gives 20/30 gap columns instead of 5/15.")
+parser.add_argument("--gap_top5_min_rows", type=int, default=64,
+                    help="Minimum near-gap rows in a BPTT window for it to count toward the gap Top-5.")
+parser.add_argument("--resume_lr", type=float, default=None,
+                    help="With --student_resume: set this learning rate instead of the checkpoint optimizer's.")
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
@@ -98,6 +107,10 @@ if (args_cli.top5_start_iteration < 0 or args_cli.top5_keep < 1 or args_cli.top5
     parser.error("invalid Top-5 checkpoint criteria")
 if args_cli.lr <= 0 or args_cli.hazard_loss_coef < 0:
     parser.error("lr must be positive and hazard_loss_coef nonnegative")
+if args_cli.gap_loss_weight < 1 or args_cli.gap_terrain_columns < 0:
+    parser.error("gap_loss_weight must be >= 1 and gap_terrain_columns >= 0")
+if args_cli.resume_lr is not None and (args_cli.resume_lr <= 0 or not args_cli.student_resume):
+    parser.error("resume_lr must be positive and requires --student_resume")
 if args_cli.student_warmup < 0 or args_cli.student_ramp < 1:
     parser.error("student_warmup must be nonnegative and student_ramp positive")
 try:
@@ -139,6 +152,7 @@ import gd_lab.gast.bivt_student_task
 from gd_lab.gast.student import GastStudent
 from gd_lab.core.camera_contract import check_checkpoint_camera_contract
 from gd_lab.gast.distillation import GastDistillation
+from gd_lab.gast.geometry import weighted_mean
 if args_cli.task == 'Gd-VrlRayStudent-Rbq10-Dreamwaq-Vision-v0':
     import gd_lab.teachers.bivt.student_task  # noqa: F401
 from gd_lab.core.camera_contract import camera_contract_for_policy
@@ -219,6 +233,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     with open(checkpoint_path, "rb") as teacher_file:
         teacher_sha256 = hashlib.sha256(teacher_file.read()).hexdigest()
 
+    if args_cli.gap_terrain_columns:
+        generator = env_cfg.scene.terrain.terrain_generator
+        if "platform_gap" not in generator.sub_terrains:
+            raise RuntimeError("gap_terrain_columns needs a platform_gap sub-terrain")
+        for name, sub in generator.sub_terrains.items():
+            sub.proportion = float(args_cli.gap_terrain_columns) if name == "platform_gap" else 1.0
+        # One column per proportion unit keeps the family column allocation exact.
+        generator.num_cols = len(generator.sub_terrains) - 1 + args_cli.gap_terrain_columns
+        print(f"[INFO] Gap-focused terrain: platform_gap {args_cli.gap_terrain_columns}/{generator.num_cols} columns", flush=True)
     configure_vrl_cameras(env_cfg)
     # A capture may fall on any policy tick. Render at policy boundaries so
     # scheduled camera reads are current, including asynchronous reset rows.
@@ -249,7 +272,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
 
     student = GastStudent(env_cfg.camera_profile).to(device)
     attention = GastDistillation(teacher, student, env.unwrapped, camera_contract,
-                                args_cli.student_warmup, args_cli.student_ramp)
+                                args_cli.student_warmup, args_cli.student_ramp, args_cli.gap_loss_weight)
+    print(f"[INFO] Near-gap sample loss weight: {args_cli.gap_loss_weight}", flush=True)
     optimizer = torch.optim.Adam(student.parameters(), lr=args_cli.lr)
     start_iteration = 0
     if args_cli.student_resume:
@@ -265,6 +289,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         student.load_state_dict(saved['model'], strict=True)
         optimizer.load_state_dict(saved['optimizer'])
         start_iteration = int(saved['iteration'])
+        if args_cli.resume_lr is not None:
+            for group in optimizer.param_groups:
+                group['lr'] = args_cli.resume_lr
+            args_cli.lr = args_cli.resume_lr  # live-config baseline and checkpoint record follow the fine-tune lr
+            print(f'[INFO] Fine-tune learning rate {args_cli.resume_lr} (checkpoint optimizer state kept)', flush=True)
         if not 0 <= start_iteration < args_cli.iterations:
             raise ValueError('Resume iteration must be below total target')
         print(f'[INFO] Student/optimizer resumed at {start_iteration}; physics, curriculum, hidden state and transport reset', flush=True)
@@ -282,6 +311,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         smoothing_windows=args_cli.top5_smoothing_windows,
         min_visible_fraction=None, min_visible_sample_fraction=args_cli.top5_min_visible_sample_fraction,
         min_hazard_supervised_fraction=args_cli.top5_min_hazard_supervised_fraction)
+    gap_top5_manager = StudentTop5(os.path.join(log_dir, "top5_gap"),
+        start_iteration=args_cli.top5_start_iteration, keep=args_cli.top5_keep,
+        smoothing_windows=args_cli.top5_smoothing_windows,
+        min_visible_fraction=None, min_visible_sample_fraction=args_cli.top5_min_visible_sample_fraction,
+        min_hazard_supervised_fraction=args_cli.top5_min_hazard_supervised_fraction,
+        score_description="near_gap_action_mse: student-latent action vs teacher action on rows with a known gap "
+                          "cell in the body grid (unweighted, frames present)",
+        min_score_rows=args_cli.gap_top5_min_rows)
     writer = SummaryWriter(log_dir=log_dir)
     dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
     dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
@@ -362,6 +399,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         window_visible_sample_sum = window_visible_sample_count = 0
         window_updates = 0
         window_delay_sum = 0.0
+        window_gap_action_sse, window_gap_rows = 0.0, 0
 
         # Keep hidden states in-graph across delivered frames in this BPTT window.
         for _ in range(window_len):
@@ -421,12 +459,18 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                             frames[rows], hidden[rows], rows, packet.payload[7], (step-packet.capture_step)*dt)
                     else:
                         student_latent, new_hidden = student(frames[rows], hidden[rows])
+                    if attention:
+                        window_gap_action_sse += attention.near_gap_action_sse
+                        window_gap_rows += attention.near_gap_rows
                     hidden = hidden.index_copy(0, rows, new_hidden)
                     last_delivered[rows] = packet.capture_step
                     hazard_pred = student.hazard_head(student.hazard_input(new_hidden)).squeeze(-1)
                     supervised = hazard_supervised[rows]
-                    latent_loss = F.mse_loss(student_latent, teacher_latent[rows]*attention.target_gate)
-                    hazard_loss = (F.mse_loss(hazard_pred[supervised], hazard_label[rows][supervised])
+                    row_weight = attention.row_weight
+                    latent_loss = weighted_mean(
+                        (student_latent - teacher_latent[rows]*attention.target_gate).pow(2).mean(-1), row_weight)
+                    hazard_loss = (weighted_mean((hazard_pred[supervised] - hazard_label[rows][supervised]).pow(2),
+                                                 row_weight[supervised])
                                    if supervised.any() else hazard_pred.sum() * 0.0)
                     window_loss = window_loss + latent_loss + args_cli.hazard_loss_coef * hazard_loss + extra_loss
                     latent_value, hazard_value, extra_value = latent_loss.item(), hazard_loss.item(), extra_loss.item()
@@ -478,6 +522,21 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                  "hazard_supervised_fraction": supervised_val,
                  "updates": window_updates},
                 save_fn=lambda path, record: write_student_checkpoint(str(path), it, record))
+        gap_action_val = window_gap_action_sse / max(window_gap_rows, 1)
+        gap_top5_result = None
+        if window_updates and window_gap_rows:
+            gap_top5_result = gap_top5_manager.consider(it, gap_action_val,
+                {"latent_mse": mse_val, "hazard_mse": hazard_val, "extra_loss": extra_val,
+                 "visible_fraction": visible_val, "visible_sample_fraction": visible_sample_val,
+                 "hazard_supervised_fraction": supervised_val, "updates": window_updates,
+                 "score_rows": window_gap_rows},
+                save_fn=lambda path, record: write_student_checkpoint(str(path), it, {**record, "board": "gap"}))
+            writer.add_scalar("perception/near_gap_action_mse", gap_action_val, it)
+            writer.add_scalar("perception/near_gap_rows", window_gap_rows, it)
+        if gap_top5_result and gap_top5_result.get("evaluated"):
+            print(f"[TOP5_GAP] iter={it} near_gap_action_mse={gap_action_val:.6f} rows={window_gap_rows} "
+                  f"score={gap_top5_result.get('score', float('nan')):.6f} rank={gap_top5_result.get('rank', '-')} "
+                  f"saved={gap_top5_result.get('saved', False)} reason={gap_top5_result.get('reason', '-')}")
         if window_updates:
             writer.add_scalar("perception/mse", mse_val, it)
             writer.add_scalar("perception/hazard_mse", hazard_val, it)

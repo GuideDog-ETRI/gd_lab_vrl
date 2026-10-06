@@ -6,7 +6,7 @@ from pathlib import Path
 class StudentTop5:
     def __init__(self, directory, *, start_iteration=5000, keep=5, smoothing_windows=8,
                  min_visible_fraction=.95, min_visible_sample_fraction=None,
-                 min_hazard_supervised_fraction=.95):
+                 min_hazard_supervised_fraction=.95, score_description=None, min_score_rows=0):
         if start_iteration < 0 or keep < 1 or smoothing_windows < 1:
             raise ValueError("invalid Top-5 settings")
         if ((min_visible_fraction is not None and not 0 <= min_visible_fraction <= 1)
@@ -21,7 +21,7 @@ class StudentTop5:
         self.min_hazard_supervised_fraction=min_hazard_supervised_fraction
         self.criteria={"version":2,"start_iteration":start_iteration,"keep":keep,
             "rolling_optimizer_windows":smoothing_windows,
-            "score":"latent_mse + hazard_loss_coef * hazard_mse + extra_loss",
+            "score":score_description or "latent_mse + hazard_loss_coef * hazard_mse + extra_loss",
             "order":"ascending (lower is better)",
             "min_visible_fraction":min_visible_fraction,
             "min_visible_sample_fraction":min_visible_sample_fraction,
@@ -31,6 +31,9 @@ class StudentTop5:
                 else "mean fraction of map cells marked visible (legacy gate)"),
             "min_hazard_supervised_fraction":min_hazard_supervised_fraction,
             "score_scope":"training windows, not held-out validation"}
+        self.min_score_rows=int(min_score_rows)
+        if self.min_score_rows:
+            self.criteria["min_score_rows_per_window"]=self.min_score_rows
         self._write(self.directory/"criteria.json",self.criteria)
         self.entries=self._load()
 
@@ -72,6 +75,8 @@ class StudentTop5:
             return {"evaluated":True,"saved":False,"reason":"invalid_metrics"}
         if updates<=0 or not all(math.isfinite(v) for v in [score,*vals.values()]):
             return {"evaluated":True,"saved":False,"reason":"invalid_metrics"}
+        if self.min_score_rows and int(metrics.get("score_rows",0))<self.min_score_rows:
+            return {"evaluated":True,"saved":False,"reason":"too_few_score_rows"}
         if self.min_visible_sample_fraction is not None:
             if "visible_sample_fraction" not in vals:
                 return {"evaluated":True,"saved":False,"reason":"missing_visibility_sample_coverage"}
