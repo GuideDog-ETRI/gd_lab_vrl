@@ -6,10 +6,12 @@ Disturbance (``StairHandleDisturbance``): on pyramid-stair tiles, while the robo
 down the slope, a force is applied at the hip handle (base frame ``handle_pos``) pointing DOWNHILL:
 ascending -- a person below pulls the handle back and down (nose-up moment, the real failure where the
 front feet lift and the robot tips backward); descending -- a push from behind. The force keeps its world
-direction for its duration (re-expressed in the body frame once per policy step). The term itself returns the front-lift cost inside the disturbance window
-(force on + ``after_s``); ``stair_push_fall`` and ``stair_push_slip`` read its state. Nothing new enters
-the observations: the onset impulse/mass is written to the existing ``push_delta_v`` critic buffer, so a
-checkpoint of the same task family resumes unchanged.
+direction for its duration (re-expressed in the body frame once per policy step). The term itself returns
+the front-lift cost inside the disturbance window (force on + ``after_s``); ``stair_push_fall`` and
+``stair_push_slip`` read its state. Nothing new enters the observations: while the force acts, the
+velocity change it causes over 0.2 s is written to the existing ``push_delta_v`` critic buffer, so a
+checkpoint of the same task family resumes unchanged. The regular interval push may overwrite that stamp
+for one step; both are critic-only.
 """
 
 from __future__ import annotations
@@ -211,7 +213,8 @@ class StairHandleDisturbance(ManagerTermBase):
         ramp = int(os.environ.get("GD_LAB_V2_FORCE_RAMP_STEPS", ramp_steps))
         return 1.0 if ramp <= 0 else min(1.0, float(env.common_step_counter) / ramp)
 
-    def __call__(self, env, asset_cfg: SceneEntityCfg, sensor_cfg: SceneEntityCfg, front_feet: tuple = ("FL_foot", "FR_foot"),
+    def __call__(self, env, asset_cfg: SceneEntityCfg, sensor_cfg: SceneEntityCfg,
+                 front_feet: tuple = ("FL_foot", "FR_foot"),
                  rate_hz: float = 0.3, cooldown_s: float = 2.0, after_s: float = 1.0, ramp_steps: int = 150_000,
                  ascend_force=(0.0, 200.0), ascend_duration=(0.3, 1.0), ascend_angle_deg=(20.0, 45.0),
                  descend_force=(0.0, 150.0), descend_duration=(0.1, 0.5), descend_angle_deg=(-10.0, 30.0),
@@ -265,8 +268,9 @@ class StairHandleDisturbance(ManagerTermBase):
                 env.push_step_buf = torch.full((n,), -(10**9), dtype=torch.long, device=dev)
             delta_v = self.force_w * 0.2 / self.mass[:, None]
             yaw_frame = quat_apply_inverse(yaw_quat(robot.data.root_quat_w), delta_v)
-            env.push_delta_v_buf[self.active] = yaw_frame[self.active]
-            env.push_step_buf[self.active] = int(env.common_step_counter)
+            stamp = self.active & ~env.reset_buf  # a terminating env is reset after this: no stale stamp
+            env.push_delta_v_buf[stamp] = yaw_frame[stamp]
+            env.push_step_buf[stamp] = int(env.common_step_counter)
 
         # apply (body frame, at the handle); zero for everyone else
         forces_b = quat_apply_inverse(robot.data.root_quat_w, self.force_w) * self.active[:, None]
@@ -325,8 +329,10 @@ def gap_stair_v2_diagnostics(env, env_ids):
         events = term.events[ids].sum()
         out["stair_push_events_per_episode"] = float(events / max(1, len(ids)))
         out["stair_push_fall_rate"] = float(term.falls[ids].sum() / events.clamp_min(1))
-        out["stair_push_front_lift_fraction"] = float(term.lift_steps[ids].sum() / term.window_steps[ids].sum().clamp_min(1))
-        out["stair_push_force_scale"] = term._scale(env, manager.get_term_cfg(DISTURBANCE).params.get("ramp_steps", 150_000))
+        window = term.window_steps[ids].sum().clamp_min(1)
+        out["stair_push_front_lift_fraction"] = float(term.lift_steps[ids].sum() / window)
+        ramp = manager.get_term_cfg(DISTURBANCE).params.get("ramp_steps", 150_000)
+        out["stair_push_force_scale"] = term._scale(env, ramp)
     return out
 
 
