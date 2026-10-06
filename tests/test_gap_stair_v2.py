@@ -197,6 +197,12 @@ def test_gast_teacher_uses_the_identical_v2_objective():
     cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "GastGapCleanV2TeacherCfg")
     assert [b.id for b in cls.bases] == ["GastGapCleanTeacherCfg"] and "add_v2_terms(self)" in ast.unparse(cls)
     assert "task='GastGapCleanV2'" in gast_tasks
+    scratch = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "GastScratchV2TeacherCfg")
+    source = ast.unparse(scratch)
+    assert [b.id for b in scratch.bases] == ["GastTeacherCfg"] and "add_v2_terms(self)" in source
+    assert "range_multiplier" not in source  # from scratch keeps the command curriculum
+    assert source.index("platform_gap_monitor") < source.index("add_v2_terms(self)")
+    assert "task='GastScratchV2'" in gast_tasks
 
 
 def test_nosing_lips_move_the_drop_off():
