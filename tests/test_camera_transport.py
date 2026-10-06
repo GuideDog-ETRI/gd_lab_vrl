@@ -113,7 +113,8 @@ def test_capture_function_freezes_frames_and_teacher_labels():
     ns = dict(torch=torch, validate_teacher_camera_capture=validate,
               terrain_family_gate=lambda *a: torch.zeros(2),
               augment_student_camera_frames=lambda frames, *a: frames.clone(),
-              height_discontinuity_metres=lambda h, *a: h.mean(-1))
+              height_discontinuity_metres=lambda h, *a: h.mean(-1),
+              near_gap_envs=lambda e: torch.tensor([True, False]))
     exec(compile(tree, str(path), "exec"), ns)
     payload = ns["capture_teacher_packet"](env, {"terrain": terrain}, teacher,
                                              torch.zeros(2), None, None, object())
@@ -122,6 +123,7 @@ def test_capture_function_freezes_frames_and_teacher_labels():
     assert payload[0].sum() > 0 and payload[1].sum() == 10
     assert payload[2].shape == (2, 374) and torch.equal(payload[2], expected_terrain)
     assert payload[8].shape == (2, 3)
+    assert payload[9].tolist() == [True, False]  # v2: privileged near-gap label rides with the packet
     env._vrl_camera_snapshot_steps[0] = 7
     with pytest.raises(RuntimeError, match="stale"):
         ns["capture_teacher_packet"](env, {"terrain": terrain}, teacher,

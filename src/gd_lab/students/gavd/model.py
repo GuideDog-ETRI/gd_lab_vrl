@@ -140,19 +140,23 @@ def spatial_targets(terrain, threshold=.04):
     return target, mask
 
 
-def spatial_loss(prediction, terrain, return_components=False):
-    """Supervise the teacher's visible height map; unknown cells are never zero labels."""
+def spatial_loss(prediction, terrain, return_components=False, row_weight=None):
+    """Supervise the teacher's visible height map; unknown cells are never zero labels.
+
+    ``row_weight`` [B] scales whole samples (near-gap emphasis); None keeps every row at 1 (unchanged)."""
     target, mask = spatial_targets(terrain)
     errors = torch.cat((F.smooth_l1_loss(prediction[..., :1], target[..., :1], reduction="none"),
                         F.binary_cross_entropy_with_logits(prediction[..., 1:], target[..., 1:], reduction="none")), -1)
     # Rare edges are weighted; invisible height/edges never become invented ground truth.
     weight = torch.ones_like(errors)
     weight[..., 2:4] = 1 + 4 * target[..., 2:4]
+    if row_weight is not None:
+        weight = weight * row_weight[:, None, None]
     weighted = errors * mask * weight
     total = (weighted.sum((0, 1)) / (mask * weight).sum((0, 1)).clamp_min(1)).mean()
     if not return_components:
         return total
-    height = weighted[..., 0].sum() / mask[..., 0].sum().clamp_min(1)
-    visibility = weighted[..., 1].sum() / mask[..., 1].sum().clamp_min(1)
+    height = weighted[..., 0].sum() / (mask * weight)[..., 0].sum().clamp_min(1)
+    visibility = weighted[..., 1].sum() / (mask * weight)[..., 1].sum().clamp_min(1)
     visible_fraction = target[..., 1].mean()
     return total, height, visibility, visible_fraction

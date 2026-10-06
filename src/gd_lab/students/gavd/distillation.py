@@ -3,6 +3,7 @@
 import torch
 from torch.nn import functional as F
 
+from gd_lab.students.gap_focus import row_mse, weighted_mean
 from gd_lab.students.gavd.model import spatial_loss
 
 
@@ -48,7 +49,9 @@ class AttentionDistillation:
         self.latent[done] = 0
         self.stamp[done] = -100.0
 
-    def update(self, frames, hidden, rows, extra, age_seconds, capture_time_seconds=None):
+    def update(self, frames, hidden, rows, extra, age_seconds, capture_time_seconds=None, row_weight=None,
+               near_gap=None):
+        """``row_weight`` [B] near-gap emphasis (None = 1); ``near_gap`` [B] bool for the gap Top-5 metric."""
         base, actions, terrain = (x[rows] for x in extra)
         frames = frames.clone()
         dropped = torch.rand(frames.shape[:2], device=frames.device) < .08
@@ -57,9 +60,15 @@ class AttentionDistillation:
         timed_hidden = torch.cat((hidden[:, :63], torch.full_like(hidden[:, 63:64], min(age_seconds, 1.))), -1)
         latent, memory, spatial = self.student.encode(frames, timed_hidden)
         predicted_action = self.teacher.actor(torch.cat((base, latent), -1))
-        action_loss = F.mse_loss(predicted_action, actions)
+        weight = torch.ones(len(rows), device=frames.device) if row_weight is None else row_weight
+        per_row = row_mse(predicted_action, actions)
+        action_loss = weighted_mean(per_row, weight)
         geometry_loss, height_loss, visibility_loss, visible_fraction = spatial_loss(
-            spatial, terrain, return_components=True)
+            spatial, terrain, return_components=True, row_weight=row_weight)
+        with torch.no_grad():
+            gap = torch.zeros_like(weight, dtype=torch.bool) if near_gap is None else near_gap
+            self.near_gap_action_sse = float(per_row[gap].sum())
+            self.near_gap_rows = int(gap.sum())
         self.latent[rows] = latent.detach()
         self.ready[rows] = True
         # Production supplies the packet timestamp on the simulation clock.
