@@ -210,3 +210,15 @@ def test_nosing_lips_move_the_drop_off():
     assert nosed_edges(edges, 0.0, False) == edges
     assert nosed_edges(edges, 0.03, False) == pytest.approx([3.03, 2.73, 2.43])  # outward lips, every edge
     assert nosed_edges(edges, 0.03, True) == pytest.approx([3.0, 2.67, 2.37])  # inward lips, not the outermost
+
+
+def test_main_training_adds_short_hard_yanks_within_the_critic_clip():
+    module = ast.parse((ROOT / "src/gd_lab/mdp/gap_stair_v2.py").read_text())
+    cfg = next(n for n in module.body if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "V2_DISTURBANCE")
+    disturbance = ast.literal_eval(cfg.value)
+    assert disturbance["ascend_jerk_prob"] == 0.3
+    assert disturbance["ascend_jerk_force"] == (300.0, 400.0) and disturbance["ascend_jerk_duration"] == (0.1, 0.3)
+    # critic stamp = F * 0.2 s / mass inside the +-2 observation clip: true with the usual 6 kg payload (46.7 kg);
+    # only the extreme corner (400 N on the lightest robot, 38.7 kg) saturates at the clip (2.07), still "maximal".
+    assert 400.0 * 0.2 / 46.684 < 2.0
+    assert 400.0 * 0.2 / (40.684 - 2.0) < 2.1
