@@ -182,6 +182,8 @@ class DreamwaqRunner(OnPolicyRunner):
             extra["cenet_optimizer_state_dict"] = policy.cenet.optimizer.state_dict()
         if self.deploy_context is not None:
             extra["deploy_context"] = self.deploy_context
+        if getattr(self, "gast_warm_start", None):
+            extra["gast_warm_start"] = self.gast_warm_start
         family_columns = getattr(self, "_top5_family_columns", None)
         if family_columns:
             means = capture_family_level_means(self.env.unwrapped.scene.terrain, family_columns)
@@ -198,8 +200,11 @@ class DreamwaqRunner(OnPolicyRunner):
         extra = (infos or {}).get("gd_lab", {})
         if "learning_rate" in extra:
             self.alg.learning_rate = extra["learning_rate"]
-            for group in self.alg.optimizer.param_groups:
-                group["lr"] = self.alg.learning_rate
+            # A grouped optimizer (GAST warm start: backbone vs terrain encoder) keeps the per-group
+            # rates its saved state restored; only a single-rate optimizer is reset to the saved rate.
+            if not any("gd_lab_group" in group for group in self.alg.optimizer.param_groups):
+                for group in self.alg.optimizer.param_groups:
+                    group["lr"] = self.alg.learning_rate
         family_columns = getattr(self, "_top5_family_columns", None)
         if family_columns:
             means = extra.get("terrain_level_means_by_family") or {}

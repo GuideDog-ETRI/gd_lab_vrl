@@ -27,9 +27,23 @@ parser.add_argument("--distributed", action="store_true", default=False, help="M
 parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
 parser.add_argument("--video_length", type=int, default=200, help="Recorded video length (steps).")
 parser.add_argument("--video_interval", type=int, default=2000, help="Interval between recordings (steps).")
+parser.add_argument("--warm_start_bivt", type=str, default=None,
+                    help="BIVT-Ray teacher checkpoint: copy its DreamWaQ backbone (actor/critic/normalizers/CENet) into "
+                         "a fresh GAST terrain encoder (gd_lab.gast.warm_start). Starts a new run at iteration 0.")
+parser.add_argument("--policy_lr", type=float, default=None, help="Fixed PPO lr of the backbone group (with --terrain_lr).")
+parser.add_argument("--terrain_lr", type=float, default=None, help="Fixed PPO lr of the GAST terrain encoder/decoder group.")
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
+if (args_cli.policy_lr is None) != (args_cli.terrain_lr is None):
+    parser.error("--policy_lr and --terrain_lr go together")
+if args_cli.warm_start_bivt is not None:
+    if args_cli.policy_lr is None:
+        parser.error("--warm_start_bivt needs --policy_lr and --terrain_lr")
+    if not os.path.isfile(args_cli.warm_start_bivt):
+        parser.error(f"--warm_start_bivt not found: {args_cli.warm_start_bivt}")
+    if getattr(args_cli, "resume", False):
+        parser.error("--warm_start_bivt starts a new GAST run; resume a warm-started run with --resume (and the same lrs)")
 if args_cli.total_envs is not None and (not args_cli.distributed or args_cli.total_envs < int(os.environ.get("WORLD_SIZE", "1"))):
     parser.error("--total_envs requires --distributed and at least one environment per process")
 
@@ -152,6 +166,36 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     except (ValueError, AttributeError, KeyError, TypeError) as exc:
         print(f"[WARN] Deployment metadata unavailable; checkpoints will not carry it: {exc}")
     runner.add_git_repo_to_log(__file__)
+    warm_start = None
+    if args_cli.policy_lr is not None:
+        from gd_lab.gast.warm_start import build_grouped_optimizer, group_learning_rates, warm_start_from_bivt
+        if args_cli.warm_start_bivt is not None:
+            warm_start = warm_start_from_bivt(runner.alg, args_cli.warm_start_bivt, args_cli.policy_lr, args_cli.terrain_lr)
+            means = warm_start.get("terrain_level_means_by_family") or {}
+            family_columns = getattr(runner, "_top5_family_columns", None)
+            if means and family_columns:
+                from gd_lab.rl.terrain_resume import restore_family_start_levels
+                scene = env.unwrapped.scene
+                warm_start["terrain_levels_restored"] = bool(
+                    restore_family_start_levels(scene.terrain, scene.env_origins, family_columns, means))
+        else:  # resuming a warm-started run: the saved optimizer state has the two groups
+            if agent_cfg.algorithm.schedule != "fixed":
+                raise ValueError("per-group learning rates need agent.algorithm.schedule=fixed")
+            runner.alg.optimizer = build_grouped_optimizer(
+                runner.alg.policy, args_cli.policy_lr, args_cli.terrain_lr, runner.alg.optimizer)
+            runner.alg.learning_rate = args_cli.policy_lr
+        manager = env.unwrapped.reward_manager
+        gap_terms = [n for n in ("platform_gap_foot_drop", "platform_gap_crossing", "platform_gap_monitor",
+                                 "platform_gap_intrusion", "platform_gap_clean") if n in manager.active_terms]
+        runner.gast_warm_start = {
+            **(warm_start or {"resumed_grouped_run": True}), "task": args_cli.task,
+            "train_arm_env": os.environ.get("TRAIN_ARM"),
+            "reward_weights": {n: float(manager.get_term_cfg(n).weight) for n in gap_terms},
+            "learning_rates_requested": {"policy": args_cli.policy_lr, "terrain": args_cli.terrain_lr},
+            "learning_rates": group_learning_rates(runner.alg.optimizer),
+            "schedule": agent_cfg.algorithm.schedule}
+        runner.gast_warm_start.pop("terrain_level_means_by_family", None)
+        print(f"[INFO] GAST warm start: {runner.gast_warm_start}", flush=True)
     if agent_cfg.resume:
         print(f"[INFO] Loading checkpoint: {resume_path}")
         runner.load(resume_path)
@@ -163,6 +207,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     if not runner.disable_logs:
         dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
         dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
+        if getattr(runner, "gast_warm_start", None):
+            dump_yaml(os.path.join(log_dir, "params", "gast_warm_start.yaml"), runner.gast_warm_start)
 
     started = time.perf_counter()
     runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
