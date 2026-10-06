@@ -57,7 +57,7 @@ class GapMonitor(ManagerTermBase):
     def __init__(self, cfg, env):
         super().__init__(cfg, env)
         self.geometry = GapTileGeometry(env)
-        self.tracker = GapAttemptTracker(env.num_envs, env.device)
+        self.tracker = GapAttemptTracker(env.num_envs, env.device, strict_contact=bool(getattr(cfg, "params", None) and cfg.params.get("strict_contact", False)))
         self.cost = torch.zeros(env.num_envs, device=env.device)
         self.clean_event = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
         self._crossing = None
@@ -91,7 +91,7 @@ class GapMonitor(ManagerTermBase):
         if pick(robot_names, asset_cfg.body_ids) != pick(sensor_names, sensor_cfg.body_ids):
             raise RuntimeError("robot and contact-sensor foot order differ: per-foot contact would be mismatched")
 
-    def __call__(self, env, asset_cfg: SceneEntityCfg, sensor_cfg: SceneEntityCfg):
+    def __call__(self, env, asset_cfg: SceneEntityCfg, sensor_cfg: SceneEntityCfg, strict_contact: bool = False):
         if self._crossing is None:
             self._check_order(env)
             self._check_feet(env, asset_cfg, sensor_cfg)

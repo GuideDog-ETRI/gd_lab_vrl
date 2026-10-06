@@ -21,8 +21,12 @@ from isaaclab.app import AppLauncher
 import cli_args  # isort: skip
 from gd_lab.core.experiments import training_arm_overrides
 from gd_lab.teachers.bivt.gap_guard import (
+    ALL_GAP_TASK_IDS,
     CAMERA_FREE_TASK_IDS,
     GAP_TASK_IDS,
+    V2_TASK_IDS,
+    inspect_checkpoint_v2,
+    verify_restored_iteration_v2,
     OBSERVATION_VERSION,
     RAYCAST_TASK_IDS,
     apply_force_ppo_lr,
@@ -50,6 +54,8 @@ parser.add_argument("--video_length", type=int, default=200, help="Recorded vide
 parser.add_argument("--video_interval", type=int, default=2000, help="Interval between recordings (steps).")
 parser.add_argument("--blind_init", type=str, default=None, help="Blind DreamWaQ model_*.pt to warm-start the policy from.")
 parser.add_argument('--resume_checkpoint', type=str, help='Absolute checkpoint path, including Top5 checkpoints.')
+parser.add_argument('--resume_sha256', type=str, default=None,
+                    help='v2 gap/stair task only: sha256 of the Clean-arm --resume_checkpoint (required there).')
 parser.add_argument('--target_iterations', type=int, help='Total completed PPO updates, not additional updates.')
 parser.add_argument('--force_ppo_lr', type=float, default=None,
                     help='Gap fine-tuning only: fixed PPO LR applied after the checkpoint is loaded (required there).')
@@ -77,6 +83,7 @@ try:  # fail closed before the simulator starts
         blind_init=args_cli.blind_init, distributed=args_cli.distributed,
         rollout_only_steps=args_cli.rollout_only_steps, target_iterations=args_cli.target_iterations,
         baseline_gate=args_cli.baseline_gate, baseline_gate_waiver=args_cli.baseline_gate_waiver,
+        resume_sha256=args_cli.resume_sha256,
     )
 except ValueError as exc:
     parser.error(str(exc))
@@ -131,7 +138,10 @@ def _resolve(path: str) -> type[OnPolicyRunner]:
 
 def _finalize_gap_run(env, runner, agent_cfg, env_cfg, checkpoint) -> dict:
     """Gap arms only: prove the 17206 state was restored, pin the PPO LR, record the effective setup."""
-    verify_restored_iteration(runner.current_learning_iteration, checkpoint)  # load() resumes at iter + 1
+    if args_cli.task in V2_TASK_IDS:
+        verify_restored_iteration_v2(runner.current_learning_iteration, checkpoint)
+    else:
+        verify_restored_iteration(runner.current_learning_iteration, checkpoint)  # load() resumes at iter + 1
     ppo_lr = apply_force_ppo_lr(runner.alg, args_cli.force_ppo_lr)  # after load: load restores the saved LR
     cenet = cenet_lr_report(runner.alg.policy)
     if not cenet["as_expected"]:
@@ -144,11 +154,16 @@ def _finalize_gap_run(env, runner, agent_cfg, env_cfg, checkpoint) -> dict:
         if args_cli.baseline_gate_waiver is not None:
             gate = {"waived": True, "reason": args_cli.baseline_gate_waiver.strip()}
             print(f"[WARN] Gate C waived for this run: {gate['reason']}", flush=True)
+        elif args_cli.task in V2_TASK_IDS:
+            raise RuntimeError("v2 training needs a gate waiver")
         else:
             validate_gate_record(args_cli.baseline_gate)
             gate = {"path": str(args_cli.baseline_gate), "sha256": sha256_file(args_cli.baseline_gate)}
-    terms = ("platform_gap_monitor", "platform_gap_intrusion", "platform_gap_clean")
     manager = env.unwrapped.reward_manager
+    terms = [name for name in ("platform_gap_monitor", "platform_gap_intrusion", "platform_gap_clean",
+                               "gap_foothold_margin", "stair_foothold_margin", "gap_slot_probe",
+                               "stair_handle_disturbance", "stair_push_fall", "stair_push_slip")
+             if name in manager.active_terms]
     manifest = {
         "task": args_cli.task, "arm": arm_of(args_cli.task), "checkpoint": checkpoint,
         "camera_profile": env_cfg.camera_profile,
@@ -271,7 +286,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     gap_checkpoint = None
     if agent_cfg.resume:
         print(f"[INFO] Loading checkpoint: {resume_path}")
-        if args_cli.task in GAP_TASK_IDS:
+        if args_cli.task in V2_TASK_IDS:
+            gap_checkpoint = inspect_checkpoint_v2(resume_path, args_cli.resume_sha256, args_cli.target_iterations)
+        elif args_cli.task in GAP_TASK_IDS:
             gap_checkpoint = inspect_checkpoint(resume_path)  # raises if any required state is missing
         runner.load(resume_path)
     if args_cli.blind_init is not None:
@@ -283,7 +300,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         print(f"[INFO] Warm-started from blind checkpoint: {args_cli.blind_init}", flush=True)
 
     gap_manifest = None
-    if args_cli.task in GAP_TASK_IDS:
+    if args_cli.task in ALL_GAP_TASK_IDS:
         gap_manifest = _finalize_gap_run(env, runner, agent_cfg, env_cfg, gap_checkpoint)
         runner.gap_finetune_manifest = gap_manifest
 
