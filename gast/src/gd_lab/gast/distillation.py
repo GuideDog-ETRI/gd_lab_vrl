@@ -1,6 +1,6 @@
 import torch
 from torch.nn import functional as F
-from gd_lab.gast.geometry import reconstruction_loss
+from gd_lab.gast.geometry import near_gap_rows, reconstruction_loss, weighted_mean
 from gd_lab.gast.targets import gated_teacher_action
 from gd_lab.gast.observations import pose_xyyaw
 from gd_lab.core.camera_contract import load_camera_contract
@@ -37,7 +37,11 @@ def _validate_camera_capture(env, snapshot, contract):
 
 
 class GastDistillation:
-    def __init__(self, teacher, student, env, camera_contract, warmup=1000, ramp=4000):
+    def __init__(self, teacher, student, env, camera_contract, warmup=1000, ramp=4000, gap_weight=1.0):
+        if gap_weight < 1:
+            raise ValueError("gap_weight must be >= 1 (1 = no near-gap emphasis)")
+        self.gap_weight = float(gap_weight)
+        self.row_weight = None
         self.teacher, self.student, self.env = teacher, student, env
         self.camera_contract = camera_contract
         self.ray_contract = load_camera_contract(env.cfg.camera_profile)
@@ -116,16 +120,25 @@ class GastDistillation:
         # when the gate is 1. Missing frames give exactly zero latent (no gradient).
         expected = gated_teacher_action(self.teacher, base, teacher_latent, self.target_gate)
         seen = ~missing
-        action_loss = (F.mse_loss(actual[seen], expected[seen]) if seen.any()
+        near_gap = near_gap_rows(clean)
+        weight = 1 + (self.gap_weight - 1) * near_gap.float()
+        self.row_weight = weight
+        action_loss = (weighted_mean((actual[seen] - expected[seen]).pow(2).mean(-1), weight[seen]) if seen.any()
                        else actual.sum() * 0.0)
         geometry_loss, height_loss, visibility_loss, visible_fraction = reconstruction_loss(
-            spatial, clean, teacher_terrain, return_components=True)
-        quality_loss = F.binary_cross_entropy_with_logits(logits[:,0], quality_target)
+            spatial, clean, teacher_terrain, return_components=True, row_weight=weight)
+        with torch.no_grad():
+            near_seen = near_gap & seen
+            self.near_gap_action_sse = float((actual[near_seen] - expected[near_seen]).pow(2).mean(-1).sum())
+            self.near_gap_rows = int(near_seen.sum())
+            self.near_gap = near_gap
+        quality_loss = weighted_mean(F.binary_cross_entropy_with_logits(logits[:,0], quality_target, reduction='none'),
+                                     weight)
         self.latent[rows] = latent.detach()
         self.ready[rows] = True
         self.stamp[rows] = stamp
         self.metrics.update(action_mse=action_loss.item(), spatial_loss=geometry_loss.item(),
             height_visible_loss=height_loss.item(), visibility_bce=visibility_loss.item(),
             teacher_visible_fraction=visible_fraction.item(), quality_loss=quality_loss.item(),
-            quality_gate=gate.mean().item())
+            quality_gate=gate.mean().item(), near_gap_row_fraction=near_gap.float().mean().item())
         return latent, memory, action_loss+.5*geometry_loss+.1*quality_loss
