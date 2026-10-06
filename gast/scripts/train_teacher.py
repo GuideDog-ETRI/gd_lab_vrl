@@ -202,7 +202,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         record = warm_start if warm_start is not None else resumed_provenance(resume_path)
         manager = env.unwrapped.reward_manager
         gap_terms = [n for n in ("platform_gap_foot_drop", "platform_gap_crossing", "platform_gap_monitor",
-                                 "platform_gap_intrusion", "platform_gap_clean") if n in manager.active_terms]
+                                 "platform_gap_intrusion", "platform_gap_clean", "gap_foothold_margin",
+                                 "stair_foothold_margin", "gap_slot_probe", "stair_handle_disturbance",
+                                 "stair_push_fall", "stair_push_slip") if n in manager.active_terms]
         runner.gast_warm_start = {
             **record, "task": args_cli.task,
             "train_arm_env": os.environ.get("TRAIN_ARM"),

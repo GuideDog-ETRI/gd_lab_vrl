@@ -38,6 +38,8 @@ export PYTHONPATH="$root/src" TRAIN_ARM=4 PYTHONUNBUFFERED=1 OMNI_KIT_ACCEPT_EUL
 export CUDA_VISIBLE_DEVICES="$gpus" OMP_NUM_THREADS=4 MKL_NUM_THREADS=4
 export GAST_RUN_ID="${GAST_RUN_ID:-$(date +%Y-%m-%d_%H-%M-%S)_gast_gapclean_from_bivt_${mode}}"
 export GAST_VERIFY_SYNC_EVERY="$verify"
+# v2 force ramp (only GastGapCleanV2 uses it): smoke = full force at once.
+if [ "$mode" = smoke ]; then export GD_LAB_V2_FORCE_RAMP_STEPS=0; elif [ -n "${GAST_V2_FORCE_RAMP_STEPS:-}" ]; then export GD_LAB_V2_FORCE_RAMP_STEPS="$GAST_V2_FORCE_RAMP_STEPS"; fi
 export GD_LAB_TOP5_CRITERIA_FILE="$root/configs/online_top5_gapclean.json"
 launch="$root/logs/launches/$GAST_RUN_ID"
 mkdir -p "$root/logs/usd_tmp" "$launch"
