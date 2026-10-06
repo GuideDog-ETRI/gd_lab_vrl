@@ -33,6 +33,11 @@ def install_episode_collector(env, family_columns: dict[str, list[int]]) -> list
         crossing = self.reward_manager.get_term_cfg("platform_gap_crossing").func
         achieved = crossing.achieved[ids].any(dim=1).detach().cpu().tolist()
         bypassed = crossing.bypassed[ids].detach().cpu().tolist()
+        # Gap fine-tuning tasks: the monitor's one-shot clean bonus, still held before the reward reset.
+        clean = None
+        if "platform_gap_monitor" in self.reward_manager.active_terms:
+            monitor = self.reward_manager.get_term_cfg("platform_gap_monitor").func
+            clean = monitor.tracker.paid[ids].any(dim=1).detach().cpu().tolist()
         max_level = max(1, self.scene.terrain.cfg.terrain_generator.num_rows - 1)
         for index, column in enumerate(types):
             family = column_family.get(column)
@@ -53,6 +58,8 @@ def install_episode_collector(env, family_columns: dict[str, list[int]]) -> list
                    "tracking": tracking, "energy": 1.0 / (1.0 + penalties / seconds),
                    "return": 1.0 / (1.0 + math.exp(max(-60.0, min(60.0, -total_return / seconds /
                                                                   (1.0 + levels[index] / max_level)))))}
+            if clean is not None:
+                row["gap_clean_success"] = float(bool(clean[index]) and not bypassed[index] and not base[index])
             if validate_episode(row):
                 records.append(row)
         return original_reset(ids)

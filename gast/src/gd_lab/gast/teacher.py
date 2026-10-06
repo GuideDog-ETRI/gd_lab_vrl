@@ -127,8 +127,10 @@ class GastPPO(DreamwaqPPO):
         self.optimizer.load_state_dict(_clone_state(optimizer))
         self.policy.cenet.optimizer.load_state_dict(_clone_state(cenet_optimizer))
         self.learning_rate = learning_rate
-        for group in self.optimizer.param_groups:
-            group['lr'] = learning_rate
+        from gd_lab.gast.warm_start import is_grouped
+        if not is_grouped(self.optimizer):  # per-group rates were restored by load_state_dict above
+            for group in self.optimizer.param_groups:
+                group['lr'] = learning_rate
         self.optimizer.zero_grad(set_to_none=True)
         self.policy.cenet.optimizer.zero_grad(set_to_none=True)
 

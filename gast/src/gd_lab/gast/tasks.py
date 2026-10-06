@@ -55,7 +55,45 @@ class GastStudentCfg(GastTeacherCfg):
         self.observations.terrain.camera_visible = ObservationTermCfg(func=StudentTerrain)
 
 
+@configclass
+class GastGapCleanTeacherCfg(GastTeacherCfg):
+    """GAST teacher with the Clean gap rewards of the BIVT-Ray gap fine-tuning (same terms, same weights).
+
+    Used to continue a BIVT-Ray Clean teacher as a GAST teacher (gd_lab.gast.warm_start): intrusion of any
+    foot into a gap slot is penalised (-3, per second, cost in [0, 1]) and a crossing with no foot deeper
+    than the clean threshold earns +1.5, on top of the inherited foot_drop (-2) / crossing (+0.5).
+    """
+
+    intrusion_weight: float = -3.0
+    clean_weight: float = 1.5
+
+    def __post_init__(self):
+        super().__post_init__()
+        from isaaclab.managers import CurriculumTermCfg, RewardTermCfg, SceneEntityCfg
+        from gd_lab.mdp.platform_gap_finetune import (
+            GapMonitor, gap_clean_bonus, gap_intrusion_penalty, platform_gap_diagnostics)
+        from gd_lab.mdp.terrains.gap_metadata_generator import GapMetadataTerrainGenerator
+
+        self.scene.terrain.terrain_generator.class_type = GapMetadataTerrainGenerator
+        # The warm-started teacher already walks the full command range (as in the BIVT-Ray gap run).
+        for name in ("command_levels_lin_vel", "command_levels_ang_vel"):
+            term = getattr(self.curriculum, name, None)
+            if term is not None:
+                term.params["range_multiplier"] = (1.0, 1.0)
+        # Order matters: after platform_gap_crossing (appended by the base task), monitor first.
+        self.rewards.platform_gap_monitor = RewardTermCfg(
+            func=GapMonitor, weight=1.0,
+            params={"asset_cfg": SceneEntityCfg("robot", body_names=".*_foot"),
+                    "sensor_cfg": SceneEntityCfg("contact_forces", body_names=".*_foot")})
+        self.rewards.platform_gap_intrusion = RewardTermCfg(
+            func=gap_intrusion_penalty, weight=self.intrusion_weight, params={})
+        self.rewards.platform_gap_clean = RewardTermCfg(func=gap_clean_bonus, weight=self.clean_weight, params={})
+        self.curriculum.platform_gap_diagnostics = CurriculumTermCfg(func=platform_gap_diagnostics, params={})
+
+
 registry.register_task(task='Gast', robot='Rbq10', method='Dreamwaq',
     env_cfg='gd_lab.gast.tasks:GastTeacherCfg', agent_cfg='gd_lab.gast.teacher:GastRunnerCfg')
+registry.register_task(task='GastGapClean', robot='Rbq10', method='Dreamwaq',
+    env_cfg='gd_lab.gast.tasks:GastGapCleanTeacherCfg', agent_cfg='gd_lab.gast.teacher:GastRunnerCfg')
 registry.register_task(task='Gast', robot='Rbq10', method='Dreamwaq', mode='Vision',
     env_cfg='gd_lab.gast.tasks:GastStudentCfg', agent_cfg='gd_lab.gast.teacher:GastRunnerCfg')
