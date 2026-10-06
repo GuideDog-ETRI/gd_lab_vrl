@@ -57,7 +57,8 @@ class GapMonitor(ManagerTermBase):
     def __init__(self, cfg, env):
         super().__init__(cfg, env)
         self.geometry = GapTileGeometry(env)
-        self.tracker = GapAttemptTracker(env.num_envs, env.device, strict_contact=bool(getattr(cfg, "params", None) and cfg.params.get("strict_contact", False)))
+        self.tracker = GapAttemptTracker(env.num_envs, env.device, strict_contact=bool(
+            getattr(cfg, "params", None) and cfg.params.get("strict_contact", False)))
         self.cost = torch.zeros(env.num_envs, device=env.device)
         self.clean_event = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
         self._crossing = None
