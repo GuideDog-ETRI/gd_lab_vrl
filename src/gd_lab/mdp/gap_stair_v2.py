@@ -6,7 +6,7 @@ Disturbance (``StairHandleDisturbance``): on pyramid-stair tiles, while the robo
 down the slope, a force is applied at the hip handle (base frame ``handle_pos``) pointing DOWNHILL:
 ascending -- a person below pulls the handle back and down (nose-up moment, the real failure where the
 front feet lift and the robot tips backward); descending -- a push from behind. The force keeps its world
-direction for its duration. The term itself returns the front-lift cost inside the disturbance window
+direction for its duration (re-expressed in the body frame once per policy step). The term itself returns the front-lift cost inside the disturbance window
 (force on + ``after_s``); ``stair_push_fall`` and ``stair_push_slip`` read its state. Nothing new enters
 the observations: the onset impulse/mass is written to the existing ``push_delta_v`` critic buffer, so a
 checkpoint of the same task family resumes unchanged.
@@ -15,6 +15,7 @@ checkpoint of the same task family resumes unchanged.
 from __future__ import annotations
 
 import math
+import os
 
 import torch
 from isaaclab.managers import ManagerTermBase, SceneEntityCfg
@@ -25,6 +26,7 @@ from gd_lab.mdp.gap_stair_v2_math import (
     downhill_force,
     front_lift_cost,
     gap_edge_margin_cost,
+    nosed_edges,
     pyramid_step_edges,
     slot_low_or_contact_cost,
     stair_nose_margin_cost,
@@ -63,6 +65,9 @@ class _StairGeometry:
             sub = gen.sub_terrains[name]
             size = float(min(gen.size))  # the generator builds every sub-terrain at its own tile size
             edges = pyramid_step_edges(size, float(sub.border_width), float(sub.platform_width), float(sub.step_width))
+            # Nosing lips (gd_lab.mdp.terrains.nosing_stairs) move the real drop-off by nose_depth: outward at
+            # every pyramid edge; inward at every inverted edge except the outermost one, which has no lip.
+            edges = nosed_edges(edges, float(getattr(sub, "nose_depth", 0.0) or 0.0), inverted)
             for col in cols[name].tolist():
                 edges_per_col[col] = edges
                 self.is_stair[col] = True
@@ -186,6 +191,9 @@ class StairHandleDisturbance(ManagerTermBase):
         self.window_steps = torch.zeros(n, device=dev)
         self.lift_steps = torch.zeros(n, device=dev)
         self.handle = torch.tensor(p.get("handle_pos", (-0.33, 0.0, 0.12)), device=dev)
+        self.mass = torch.ones(n, device=dev)
+        print(f"[INFO] stair handle disturbance: force ramp steps="
+              f"{os.environ.get('GD_LAB_V2_FORCE_RAMP_STEPS', p.get('ramp_steps', 150_000))}", flush=True)
 
     def reset(self, env_ids=None):
         ids = slice(None) if env_ids is None else env_ids
@@ -198,7 +206,10 @@ class StairHandleDisturbance(ManagerTermBase):
         self.force_w[ids] = 0
 
     def _scale(self, env, ramp_steps):
-        return min(1.0, float(env.common_step_counter) / max(1, ramp_steps))
+        """Force ramp over this process's env steps. ``common_step_counter`` restarts at 0 on every launch, so a
+        run that resumes an already-trained v2 checkpoint (or a smoke) sets GD_LAB_V2_FORCE_RAMP_STEPS=0."""
+        ramp = int(os.environ.get("GD_LAB_V2_FORCE_RAMP_STEPS", ramp_steps))
+        return 1.0 if ramp <= 0 else min(1.0, float(env.common_step_counter) / ramp)
 
     def __call__(self, env, asset_cfg: SceneEntityCfg, sensor_cfg: SceneEntityCfg, front_feet: tuple = ("FL_foot", "FR_foot"),
                  rate_hz: float = 0.3, cooldown_s: float = 2.0, after_s: float = 1.0, ramp_steps: int = 150_000,
@@ -225,7 +236,8 @@ class StairHandleDisturbance(ManagerTermBase):
         self.active &= ~finished
         self.force_w[finished] = 0
         # start new forces
-        idle = ~self.active & (self.time >= self.cooldown_until) & band & (ascending | descending)
+        # never start on the step an env terminates (it is reset right after the reward computation)
+        idle = ~self.active & (self.time >= self.cooldown_until) & band & (ascending | descending) & ~env.reset_buf
         start = idle & (torch.rand(n, device=dev) < rate_hz * dt)
         if start.any():
             u = lambda r: r[0] + (r[1] - r[0]) * torch.rand(n, device=dev)  # noqa: E731
@@ -240,15 +252,21 @@ class StairHandleDisturbance(ManagerTermBase):
             self.window_end = torch.where(start, self.time + duration + after_s, self.window_end)
             self.cooldown_until = torch.where(start, self.time + duration + cooldown_s, self.cooldown_until)
             self.events += start.float()
-            # Critic-only stamp in the existing push buffer (no new observation dims): impulse / mass.
-            mass = robot.data.default_mass.sum(-1).to(dev)
-            delta_v = force * duration[:, None] / mass[:, None]
+            # live mass, including the randomized payload / base mass of this episode
+            masses = robot.root_physx_view.get_masses().sum(-1).to(dev)
+            self.mass = torch.where(start, masses, self.mass)
+
+        # Critic-only stamp in the existing push buffer (no new observation dims), refreshed every step while the
+        # force acts: the velocity change it would cause over the buffer's 0.2 s hold (200 N / 29 kg -> 1.4 m/s,
+        # inside the +-2 observation clip). It stays visible until 0.2 s after the force ends.
+        if self.active.any():
             if not hasattr(env, "push_delta_v_buf"):
                 env.push_delta_v_buf = torch.zeros(n, 3, device=dev)
                 env.push_step_buf = torch.full((n,), -(10**9), dtype=torch.long, device=dev)
+            delta_v = self.force_w * 0.2 / self.mass[:, None]
             yaw_frame = quat_apply_inverse(yaw_quat(robot.data.root_quat_w), delta_v)
-            env.push_delta_v_buf[start] = yaw_frame[start]
-            env.push_step_buf[start] = int(env.common_step_counter)
+            env.push_delta_v_buf[self.active] = yaw_frame[self.active]
+            env.push_step_buf[self.active] = int(env.common_step_counter)
 
         # apply (body frame, at the handle); zero for everyone else
         forces_b = quat_apply_inverse(robot.data.root_quat_w, self.force_w) * self.active[:, None]
@@ -273,7 +291,10 @@ class StairHandleDisturbance(ManagerTermBase):
 
 
 def _disturbance(env) -> StairHandleDisturbance:
-    return env.reward_manager.get_term_cfg(DISTURBANCE).func
+    cfg = env.reward_manager.get_term_cfg(DISTURBANCE)
+    if not cfg.weight:  # RewardManager skips zero-weight terms: no force would be applied, state would be stale
+        raise RuntimeError(f"{DISTURBANCE} has weight 0; give it a nonzero weight or remove the push fall/slip terms")
+    return cfg.func
 
 
 def stair_push_fall(env):

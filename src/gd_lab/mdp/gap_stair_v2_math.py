@@ -59,6 +59,16 @@ def pyramid_step_edges(size: float, border_width: float, platform_width: float, 
     return [outer - k * step_width for k in range(num_steps + 1)]
 
 
+def nosed_edges(edges: list[float], nose_depth: float, inverted: bool) -> list[float]:
+    """Drop-off radii with nosing lips (gd_lab nosing stairs): every pyramid lip protrudes outward by
+    ``nose_depth``; inverted lips protrude inward at every edge except the outermost (no lip there)."""
+    if not nose_depth:
+        return list(edges)
+    if inverted:
+        return [edges[0]] + [e - nose_depth for e in edges[1:]]
+    return [e + nose_depth for e in edges]
+
+
 def slot_low_or_contact_cost(foot_x: torch.Tensor, foot_z: torch.Tensor, contact: torch.Tensor, slots: torch.Tensor,
                              upper_decks: torch.Tensor, clearance: float = 0.02) -> torch.Tensor:
     """[N] mean over feet: the foot is over a slot (+- radius) and either touching or lower than the

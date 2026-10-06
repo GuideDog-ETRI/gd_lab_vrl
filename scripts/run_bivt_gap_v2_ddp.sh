@@ -31,6 +31,8 @@ run_id="$(date +%Y-%m-%d_%H-%M-%S)_gap_cleanv2_from${iter}_ddp${nproc}_s${seed}_
 export PYTHONPATH="$root/src" TRAIN_ARM=4 OMNI_KIT_ACCEPT_EULA=YES PYTHONUNBUFFERED=1
 export CUDA_VISIBLE_DEVICES="$gpus" OMP_NUM_THREADS=4 MKL_NUM_THREADS=4
 export GD_LAB_TOP5_CRITERIA_FILE="$root/configs/online_top5.json"
+# Force ramp (env steps of THIS process): smoke = full force at once; resuming a v2 checkpoint: GAP_V2_FORCE_RAMP_STEPS=0.
+if [ "$mode" = smoke ]; then export GD_LAB_V2_FORCE_RAMP_STEPS=0; else export GD_LAB_V2_FORCE_RAMP_STEPS="${GAP_V2_FORCE_RAMP_STEPS:-150000}"; fi
 export GD_LAB_STOP_FILE="$root/logs/${run_id}.stop"
 full_patch() { git diff --binary HEAD; for f in $(git ls-files --others --exclude-standard); do git diff --no-index --binary /dev/null "$f" || true; done; }
 export GD_LAB_SOURCE_COMMIT="$(git rev-parse HEAD)"

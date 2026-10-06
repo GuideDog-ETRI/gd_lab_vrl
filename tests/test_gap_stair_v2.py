@@ -12,6 +12,7 @@ from gd_lab.mdp.gap_stair_v2_math import (
     downhill_force,
     front_lift_cost,
     gap_edge_margin_cost,
+    nosed_edges,
     pyramid_step_edges,
     slot_low_or_contact_cost,
     stair_nose_margin_cost,
@@ -196,3 +197,10 @@ def test_gast_teacher_uses_the_identical_v2_objective():
     cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "GastGapCleanV2TeacherCfg")
     assert [b.id for b in cls.bases] == ["GastGapCleanTeacherCfg"] and "add_v2_terms(self)" in ast.unparse(cls)
     assert "task='GastGapCleanV2'" in gast_tasks
+
+
+def test_nosing_lips_move_the_drop_off():
+    edges = [3.0, 2.7, 2.4]
+    assert nosed_edges(edges, 0.0, False) == edges
+    assert nosed_edges(edges, 0.03, False) == pytest.approx([3.03, 2.73, 2.43])  # outward lips, every edge
+    assert nosed_edges(edges, 0.03, True) == pytest.approx([3.0, 2.67, 2.37])  # inward lips, not the outermost
