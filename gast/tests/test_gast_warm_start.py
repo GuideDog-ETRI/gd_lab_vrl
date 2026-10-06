@@ -145,3 +145,99 @@ def test_zero_latent_head_still_trains_the_encoder_after_one_step():
         optimizer.step()
     assert flows[0][0] > 0 and flows[0][1] == 0
     assert flows[1][0] > 0 and flows[1][1] > 0
+
+
+# --- Codex static review 10/06: source contract, resume records, launcher paths -----------------------------
+
+def _checkpoint_dict(checkpoint):
+    return torch.load(checkpoint, map_location="cpu", weights_only=False)
+
+
+def test_source_teacher_contract_is_checked_not_assumed(checkpoint):
+    import copy
+    import hashlib
+
+    loaded = _checkpoint_dict(checkpoint)
+    digest = hashlib.sha256(checkpoint.read_bytes()).hexdigest()
+    ws.validate_source(loaded, digest)
+    ws.validate_source(loaded, digest, expected_sha256=digest.upper())
+    with pytest.raises(ValueError, match="sha256"):
+        ws.validate_source(loaded, digest, expected_sha256="0" * 64)
+    mutations = {
+        "task": lambda g: g["gap_finetune"].__setitem__("task", "Gd-VrlBlindStartRaycast-Rbq10-Dreamwaq-v0"),
+        "camera": lambda g: g["gap_finetune"].__setitem__("camera_profile", "vendor_legacy"),
+        "observation": lambda g: g["observation_context"].__setitem__("version", "bivt_ray_occlusion_v1"),
+        "missing gap record": lambda g: g.pop("gap_finetune"),
+        "missing observation record": lambda g: g.pop("observation_context"),
+    }
+    for name, mutate in mutations.items():
+        broken = {"infos": {"gd_lab": copy.deepcopy(loaded["infos"]["gd_lab"])}}
+        mutate(broken["infos"]["gd_lab"])
+        with pytest.raises(ValueError, match="contract"):
+            ws.validate_source(broken, digest)
+
+
+def test_resume_checks_the_restored_rates_and_keeps_the_original_provenance(tmp_path):
+    policy = _gast_policy()
+    saved = ws.build_grouped_optimizer(policy, 1e-4, 1e-3, torch.optim.Adam(policy.parameters(), lr=5e-4))
+    restored = ws.build_grouped_optimizer(policy, 1e-4, 1e-3, torch.optim.Adam(policy.parameters(), lr=5e-4))
+    restored.load_state_dict(saved.state_dict())
+    assert ws.check_resumed_rates(restored, 1e-4, 1e-3) == {"policy": 1e-4, "terrain": 1e-3}
+    with pytest.raises(ValueError, match="differ"):
+        ws.check_resumed_rates(restored, 2e-4, 1e-3)  # CLI rate != restored rate
+    origin = {"source": "a.pt", "source_sha256": "f" * 64, "learning_rates": {"policy": 1e-4, "terrain": 1e-3}}
+    first = tmp_path / "model_100.pt"
+    torch.save({"iter": 100, "infos": {"gd_lab": {"gast_warm_start": origin}}}, first)
+    record = ws.resumed_provenance(str(first))
+    assert record["origin"] == origin and record["resumed_from"]["iteration"] == 100
+    second = tmp_path / "model_200.pt"
+    torch.save({"iter": 200, "infos": {"gd_lab": {"gast_warm_start": {**record, "task": "x"}}}}, second)
+    again = ws.resumed_provenance(str(second))
+    assert again["origin"] == origin and again["resumed_from"]["iteration"] == 200  # the original survives resumes
+    bare = tmp_path / "model_300.pt"
+    torch.save({"iter": 300, "infos": {"gd_lab": {}}}, bare)
+    with pytest.raises(ValueError, match="no gast_warm_start"):
+        ws.resumed_provenance(str(bare))
+    trainer = (ROOT / "gast/scripts/train_teacher.py").read_text()
+    assert trainer.index("runner.load(resume_path)") < trainer.index("check_resumed_rates(")
+
+
+def _run_launcher(tmp_path, *args, sha=None):
+    import os
+    import subprocess
+
+    stub = tmp_path / "bin"
+    stub.mkdir(exist_ok=True)
+    (stub / "apptainer").write_text(f'#!/bin/bash\nprintf "%s\\n" "$@" > "{tmp_path}/apptainer.args"\n')
+    (stub / "apptainer").chmod(0o755)
+    env = {k: v for k, v in os.environ.items() if k != "GAST_BIVT_TEACHER_SHA256"}
+    env.update(PATH=f"{stub}:{env['PATH']}", GAST_RUN_ID=f"pytest_launcher_{tmp_path.name}")
+    if sha:
+        env["GAST_BIVT_TEACHER_SHA256"] = sha
+    try:
+        return subprocess.run(["bash", "gast/scripts/train_teacher_gapclean_from_bivt_3gpu.sh", *args], cwd=ROOT,
+                              env=env, capture_output=True, text=True, timeout=120)
+    finally:
+        import shutil
+        shutil.rmtree(ROOT / "gast/logs/launches" / env["GAST_RUN_ID"], ignore_errors=True)
+
+
+def test_launcher_works_from_the_repo_root_with_relative_paths(tmp_path, checkpoint):
+    relative = str(checkpoint.relative_to(ROOT))  # caller-relative, resolved before the launcher changes directory
+    result = _run_launcher(tmp_path, "smoke", relative)
+    assert result.returncode == 0, result.stderr
+    args = (tmp_path / "apptainer.args").read_text().split("\n")
+    assert args[args.index("--warm_start_bivt") + 1] == str(checkpoint)
+    assert "--warm_start_sha256" not in args
+    result = _run_launcher(tmp_path, "train", relative)
+    assert result.returncode != 0 and "GAST_BIVT_TEACHER_SHA256" in result.stderr
+    result = _run_launcher(tmp_path, "train")
+    assert result.returncode != 0 and "teacher path" in result.stderr
+    result = _run_launcher(tmp_path, "train", relative, sha="ab" * 32)
+    assert result.returncode == 0, result.stderr
+    args = (tmp_path / "apptainer.args").read_text().split("\n")
+    assert args[args.index("--warm_start_sha256") + 1] == "ab" * 32
+    assert "--total_envs" in args and args[args.index("--total_envs") + 1] == "4096"
+    for launcher in ("train_teacher_gapclean_from_bivt_3gpu.sh", "train_teacher_3gpu.sh"):
+        text = (ROOT / "gast/scripts" / launcher).read_text()
+        assert 'cp "$0"' not in text and text.index('realpath "${BASH_SOURCE[0]}"') < text.index('cd "$root"')

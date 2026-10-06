@@ -30,6 +30,8 @@ parser.add_argument("--video_interval", type=int, default=2000, help="Interval b
 parser.add_argument("--warm_start_bivt", type=str, default=None,
                     help="BIVT-Ray teacher checkpoint: copy its DreamWaQ backbone (actor/critic/normalizers/CENet) into "
                          "a fresh GAST terrain encoder (gd_lab.gast.warm_start). Starts a new run at iteration 0.")
+parser.add_argument("--warm_start_sha256", type=str, default=None,
+                    help="Expected sha256 of --warm_start_bivt; the 3-GPU launcher requires it for train runs.")
 parser.add_argument("--policy_lr", type=float, default=None, help="Fixed PPO lr of the backbone group (with --terrain_lr).")
 parser.add_argument("--terrain_lr", type=float, default=None, help="Fixed PPO lr of the GAST terrain encoder/decoder group.")
 cli_args.add_rsl_rl_args(parser)
@@ -168,9 +170,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     runner.add_git_repo_to_log(__file__)
     warm_start = None
     if args_cli.policy_lr is not None:
-        from gd_lab.gast.warm_start import build_grouped_optimizer, group_learning_rates, warm_start_from_bivt
+        from gd_lab.gast.warm_start import build_grouped_optimizer, warm_start_from_bivt
         if args_cli.warm_start_bivt is not None:
-            warm_start = warm_start_from_bivt(runner.alg, args_cli.warm_start_bivt, args_cli.policy_lr, args_cli.terrain_lr)
+            warm_start = warm_start_from_bivt(runner.alg, args_cli.warm_start_bivt, args_cli.policy_lr,
+                                              args_cli.terrain_lr, expected_sha256=args_cli.warm_start_sha256)
             means = warm_start.get("terrain_level_means_by_family") or {}
             family_columns = getattr(runner, "_top5_family_columns", None)
             if means and family_columns:
@@ -184,18 +187,6 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             runner.alg.optimizer = build_grouped_optimizer(
                 runner.alg.policy, args_cli.policy_lr, args_cli.terrain_lr, runner.alg.optimizer)
             runner.alg.learning_rate = args_cli.policy_lr
-        manager = env.unwrapped.reward_manager
-        gap_terms = [n for n in ("platform_gap_foot_drop", "platform_gap_crossing", "platform_gap_monitor",
-                                 "platform_gap_intrusion", "platform_gap_clean") if n in manager.active_terms]
-        runner.gast_warm_start = {
-            **(warm_start or {"resumed_grouped_run": True}), "task": args_cli.task,
-            "train_arm_env": os.environ.get("TRAIN_ARM"),
-            "reward_weights": {n: float(manager.get_term_cfg(n).weight) for n in gap_terms},
-            "learning_rates_requested": {"policy": args_cli.policy_lr, "terrain": args_cli.terrain_lr},
-            "learning_rates": group_learning_rates(runner.alg.optimizer),
-            "schedule": agent_cfg.algorithm.schedule}
-        runner.gast_warm_start.pop("terrain_level_means_by_family", None)
-        print(f"[INFO] GAST warm start: {runner.gast_warm_start}", flush=True)
     if agent_cfg.resume:
         print(f"[INFO] Loading checkpoint: {resume_path}")
         runner.load(resume_path)
@@ -203,6 +194,24 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         if terrain_term is not None:
             terrain_term.step_offset = runner.current_learning_iteration * agent_cfg.num_steps_per_env
             print(f'[INFO] GAST noise ramp resumes at step offset {terrain_term.step_offset}')
+    if args_cli.policy_lr is not None:
+        # Recorded AFTER any load: the rates actually in the optimizer, and on a resume the original
+        # warm-start provenance carried by the checkpoint (never replaced by a placeholder).
+        from gd_lab.gast.warm_start import check_resumed_rates, resumed_provenance
+        actual = check_resumed_rates(runner.alg.optimizer, args_cli.policy_lr, args_cli.terrain_lr)
+        record = warm_start if warm_start is not None else resumed_provenance(resume_path)
+        manager = env.unwrapped.reward_manager
+        gap_terms = [n for n in ("platform_gap_foot_drop", "platform_gap_crossing", "platform_gap_monitor",
+                                 "platform_gap_intrusion", "platform_gap_clean") if n in manager.active_terms]
+        runner.gast_warm_start = {
+            **record, "task": args_cli.task,
+            "train_arm_env": os.environ.get("TRAIN_ARM"),
+            "reward_weights": {n: float(manager.get_term_cfg(n).weight) for n in gap_terms},
+            "learning_rates_requested": {"policy": args_cli.policy_lr, "terrain": args_cli.terrain_lr},
+            "learning_rates": actual,
+            "schedule": agent_cfg.algorithm.schedule}
+        runner.gast_warm_start.pop("terrain_level_means_by_family", None)
+        print(f"[INFO] GAST warm start: {runner.gast_warm_start}", flush=True)
 
     if not runner.disable_logs:
         dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)

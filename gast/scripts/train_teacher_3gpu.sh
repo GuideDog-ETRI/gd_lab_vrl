@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+script="$(realpath "${BASH_SOURCE[0]}")"  # before cd: a caller-relative $0 breaks after it
+root="$(cd "$(dirname "$script")/.." && pwd)"
 cd "$root"
 mode="${1:-train}"
 shift || true
@@ -19,7 +20,7 @@ mkdir -p "$root/logs/usd_tmp" "$root/logs/launches/$GAST_RUN_ID"
 git -C "$root" rev-parse HEAD > "$root/logs/launches/$GAST_RUN_ID/commit.txt"
 git -C "$root" diff --binary > "$root/logs/launches/$GAST_RUN_ID/tracked_changes.patch"
 cp "$GD_LAB_TOP5_CRITERIA_FILE" "$root/logs/launches/$GAST_RUN_ID/online_top5.json"
-cp "$0" "$root/logs/launches/$GAST_RUN_ID/launcher.sh"
+cp "$script" "$root/logs/launches/$GAST_RUN_ID/launcher.sh"
 tar --exclude='__pycache__' -czf "$root/logs/launches/$GAST_RUN_ID/source.tar.gz" -C "$root" src scripts configs
 exec apptainer exec --nv --writable-tmpfs --bind "$root/logs/usd_tmp:/tmp/IsaacLab" \
  /data/users/bsseo/gd_lab_isaaclab.sif \
