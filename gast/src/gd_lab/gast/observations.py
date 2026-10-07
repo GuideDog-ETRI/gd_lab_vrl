@@ -133,3 +133,26 @@ class StudentTerrain(NoisyTerrain):
             env._gast_history = self.history.update(env, self.cached)
             self.last_step = env.common_step_counter
         return self.cached.clone()
+
+
+class CleanTerrainHistory(ManagerTermBase):
+    """A frozen GAST teacher's own input inside a student env: the clean full grid (no noise, no blackout,
+    like StudentTerrain's labels) and its 8-step ego-aligned memory, packed exactly as the teacher's
+    gast_history group. The student env keeps its camera-visible 'terrain' group for the student labels."""
+
+    def __init__(self, cfg, env):
+        super().__init__(cfg, env)
+        self.history = TerrainHistory(env)
+        self.last_step = -1
+        self.cached = None
+
+    def reset(self, env_ids=None):
+        if hasattr(self, 'history'):
+            self.history.reset(env_ids)
+        self.last_step = -1
+
+    def __call__(self, env):
+        if self.last_step != env.common_step_counter or self.cached is None:
+            self.cached = self.history.update(env, clean_terrain(env)[:, :374])
+            self.last_step = env.common_step_counter
+        return self.cached.clone()
