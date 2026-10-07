@@ -6,6 +6,13 @@ from pathlib import Path
 import types
 
 
+def task_source(root, task):
+    """Select this repository, never an unrelated editable gd_lab install."""
+    root = Path(root).resolve()
+    gast = root / "gast/src"
+    return gast if task.startswith("Gd-Gast") and (gast / "gd_lab/gast").is_dir() else root / "src"
+
+
 def validate_window(num_envs, seconds, warmup, vx):
     if type(num_envs) is not int or not 1 <= num_envs <= 128:
         raise ValueError("num_envs must be an integer in [1, 128]")
@@ -59,6 +66,7 @@ def environment_metadata(base):
         return x.detach().cpu().tolist() if hasattr(x, "detach") else x
     return {"TRAIN_ARM": os.environ.get("TRAIN_ARM"), "sim_dt": base.cfg.sim.dt,
             "decimation": base.cfg.decimation, "step_dt": base.step_dt,
+            "pulse_prob": getattr(getattr(base.command_manager.get_term("base_velocity"), "cfg", None), "pulse_prob", None),
             "actuator_gains": {name: {key: values(getattr(a, key, None))
                                      for key in ("stiffness", "damping")}
                                for name, a in actuators.items()}}

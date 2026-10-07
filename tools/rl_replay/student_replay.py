@@ -33,10 +33,12 @@ def run(env, teacher, student, attention, transport, args, agent_cfg, env_cfg, t
                         gamma=float(agent_cfg.algorithm.gamma), lam=float(agent_cfg.algorithm.lam),
                         steps=round(args.replay_seconds / dt), vx=args.replay_vx, live=args.replay_live,
                         student_view=True, camera_profile=env_cfg.camera_profile, cloud_envs=args.replay_cloud_envs,
+                        terrain_history=getattr(args, "replay_terrain_history", False),
                         terrain_source="gast_history" if type(teacher).__name__ == "GastTeacherView" else "terrain",
                         extra_meta={"driver": "student", "teacher_checkpoint": str(Path(teacher_path).resolve()),
                             "teacher_sha256": hashlib.sha256(Path(teacher_path).read_bytes()).hexdigest(),
                             "student_iteration": iteration, "training_augmentation": False,
+                            "camera_noise": False, "gap_ghost": False,
                             "camera_transport": transport.config.manifest(dt),
                             "camera_interval_ms": args.camera_interval_ms, "camera_delay_ms": args.camera_delay_ms,
                             "camera_drop_prob": args.camera_drop_prob, **environment_metadata(base)})
