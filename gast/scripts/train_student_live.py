@@ -87,6 +87,9 @@ parser.add_argument(
     "off by default means noise IS applied; only disable for an apples-to-apples "
     "comparison against an older noiseless run.",
 )
+parser.add_argument("--v21_env", action="store_true", default=False,
+                    help="Distill a v2.1 teacher in its own env: --v2_env plus the v2.1 commands (up to 1.2 m/s) "
+                         "and v2.1 stair disturbance (gd_lab.mdp.gap_stair_v21.add_student_v21_env).")
 parser.add_argument("--v2_env", action="store_true", default=False,
                     help="Distill a v2 teacher in its own env: 26 cm gaps and the stair hip-handle disturbance "
                          "(full force from the first step).")
@@ -152,6 +155,7 @@ import gd_lab  # noqa: F401  (registers the tasks)
 import gd_lab.gast.tasks
 import gd_lab.gast.cvtt_student_task
 import gd_lab.gast.bivt_student_task
+import gd_lab.gast.gast_teacher_student_task
 from gd_lab.gast.student import GastStudent
 from gd_lab.core.camera_contract import check_checkpoint_camera_contract
 from gd_lab.gast.distillation import GastDistillation
@@ -237,7 +241,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         teacher_sha256 = hashlib.sha256(teacher_file.read()).hexdigest()
 
     from gd_lab.mdp.gap_stair_v2 import add_student_v2_env, set_gap_terrain_columns
-    if args_cli.v2_env:
+    if args_cli.v21_env:
+        from gd_lab.mdp.gap_stair_v21 import add_student_v21_env
+        os.environ["GD_LAB_V2_FORCE_RAMP_STEPS"] = "0"  # the teacher already handles full-strength pushes
+        add_student_v21_env(env_cfg)
+        print("[INFO] v2.1 distillation env: 26 cm gaps, stair disturbance at full force, v2.1 commands", flush=True)
+    elif args_cli.v2_env:
         os.environ["GD_LAB_V2_FORCE_RAMP_STEPS"] = "0"  # the teacher already handles full-strength pushes
         add_student_v2_env(env_cfg)
         print("[INFO] v2 distillation env: 26 cm gaps + stair hip-handle disturbance at full force", flush=True)
@@ -263,6 +272,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     for p in teacher.parameters():
         p.requires_grad_(False)
     print(f'[INFO] Frozen teacher class={type(teacher).__name__} sha256={teacher_sha256}', flush=True)
+    from gd_lab.gast.teacher import GastActorCritic
+    if isinstance(teacher, GastActorCritic):
+        # GAST teacher: full-grid memory input from the clean gast_history group (see gast_teacher_student_task).
+        if "gast_history" not in env.unwrapped.observation_manager.active_terms:
+            raise RuntimeError("A GAST teacher needs the GastTeacherGastStudent task (gast_history group)")
+        from gd_lab.gast.gast_teacher_student_task import GastTeacherView
+        teacher = GastTeacherView(teacher)
+        print("[INFO] GAST teacher: latent and actions from the clean full-grid 8-step memory", flush=True)
     device = env.unwrapped.device
 
     dt = env.unwrapped.step_dt
@@ -374,6 +391,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             "distillation_args": vars(args_cli), "camera_contract": camera_contract.manifest(),
             "camera_noise_enabled": camera_noise_cfg is not None,
             "teacher_checkpoint": checkpoint_path, "teacher_sha256": teacher_sha256,
+            "teacher_kind": "gast_clean_full_grid_memory" if type(teacher).__name__ == "GastTeacherView" else "bivt_ray",
             "camera_transport": transport_config.manifest(dt), "camera_transport_seed": agent_cfg.seed,
             "gast_distillation_contract": 2,
             "student_geometry_supervision": "teacher_ray_visible_valid_cells_only",
