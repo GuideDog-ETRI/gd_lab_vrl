@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RL Rollout Replay</title>
+<style>
+:root{--bg:#fafaf9;--panel:#ffffff;--ink:#1c1917;--quiet:#57534e;--line:#d6d3d1;--pos:#15803d;--neg:#b91c1c;--accent:#2563eb;--warn:#b45309}
+@media (prefers-color-scheme: dark){:root{--bg:#141414;--panel:#1d1d1d;--ink:#eeeeec;--quiet:#a8a29e;--line:#3a3a3a;--pos:#4ade80;--neg:#f87171;--accent:#60a5fa;--warn:#fbbf24}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel)}
+header b{font-size:14px;margin-right:8px}
+button,select,input[type=file]{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:3px 8px}
+#slider{flex:1;min-width:160px}
+main{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:10px;padding:10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px}
+.card h3{margin:0 0 6px;font-size:13px}
+canvas{width:100%;display:block}
+#view{height:420px;cursor:grab}
+#info{font-variant-numeric:tabular-nums}
+#info table{border-collapse:collapse;width:100%}
+#info td{padding:2px 6px;border-bottom:1px solid var(--line)}
+#info td:last-child{text-align:right}
+.why{margin-top:8px;color:var(--quiet)}
+.row{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.full{grid-column:1/-1}
+#drop{padding:40px;text-align:center;color:var(--quiet)}
+@media (max-width:900px){main,.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <b>RL Rollout Replay</b>
+  <input type="file" id="file" accept=".json">
+  <select id="env"></select>
+  <button id="play">▶</button>
+  <button id="back">◀ 1</button><button id="fwd">1 ▶</button>
+  <select id="speed"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option></select>
+  <input type="range" id="slider" min="0" max="0" value="0">
+  <span id="clock">t=0.00 s</span>
+</header>
+<div id="drop" class="card" style="margin:10px">기록 파일(record_rollout.py가 만든 .json)을 열거나 여기에 끌어다 놓으세요.</div>
+<main id="app" hidden>
+  <div class="card"><h3>로봇 (드래그: 회전, 휠: 확대, 발 색: 접지)</h3><canvas id="view"></canvas></div>
+  <div class="card" id="info"></div>
+  <div class="row">
+    <div class="card"><h3>이번 스텝 보상 (항목별, 가중치 적용, 크기순)</h3><canvas id="now"></canvas></div>
+    <div class="card"><h3>미래 보상 G<sub>t</sub> = Σ γ<sup>i</sup> r<sub>t+i</sub> 의 항목별 몫</h3><canvas id="future"></canvas></div>
+  </div>
+  <div class="card full"><h3>타임라인: 가치 V(s), 실제 미래 보상 G<sub>t</sub>, advantage A<sub>t</sub>, 보상 r<sub>t</sub></h3><canvas id="timeline"></canvas></div>
+  <div class="card full"><h3>행동 (관절별 정책 평균 ± std, 실제 출력)</h3><canvas id="actions"></canvas></div>
+</main>
+<script>
+"use strict";
+let D=null, E=null, t=0, playing=false, last=0, acc=0;
+let yaw=-0.7, pitch=0.4, dist=1.5;
+const $=id=>document.getElementById(id);
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+function load(text){
+  D=JSON.parse(text);
+  const sel=$("env"); sel.innerHTML="";
+  D.envs.forEach((e,i)=>{const o=document.createElement("option");o.value=i;
+    const ret=e.reward.reduce((a,b)=>a+b,0);o.textContent=`env ${i} (Σr=${ret.toFixed(2)}${e.done.some(x=>x)?", 종료":""})`;sel.appendChild(o)});
+  $("drop").hidden=true; $("app").hidden=false;
+  selectEnv(0);
+}
+function selectEnv(i){E=D.envs[i];t=0;$("slider").max=D.meta.steps-1;$("slider").value=0;draw()}
+$("file").onchange=e=>{const f=e.target.files[0]; if(f) f.text().then(load)};
+document.addEventListener("dragover",e=>e.preventDefault());
+document.addEventListener("drop",e=>{e.preventDefault();const f=e.dataTransfer.files[0]; if(f) f.text().then(load)});
+$("env").onchange=e=>selectEnv(+e.target.value);
+$("slider").oninput=e=>{t=+e.target.value;draw()};
+$("back").onclick=()=>{t=Math.max(0,t-1);draw()};
+$("fwd").onclick=()=>{t=Math.min(D.meta.steps-1,t+1);draw()};
+$("play").onclick=()=>{playing=!playing;$("play").textContent=playing?"⏸":"▶";last=performance.now();if(playing)requestAnimationFrame(tick)};
+document.addEventListener("keydown",e=>{if(!D)return;if(e.key===" "){$("play").click();e.preventDefault()}
+  if(e.key==="ArrowRight")$("fwd").click(); if(e.key==="ArrowLeft")$("back").click()});
+function tick(now){if(!playing)return;acc+=(now-last)/1000*(+$("speed").value);last=now;
+  const dt=D.meta.dt; while(acc>=dt){acc-=dt;t++; if(t>=D.meta.steps){t=D.meta.steps-1;playing=false;$("play").textContent="▶";break}}
+  draw(); requestAnimationFrame(tick)}
+
+// ---------- 3D view (own projection: no libraries, works offline) ----------
+const view=$("view"); let drag=null;
+view.onmousedown=e=>{drag=[e.clientX,e.clientY,yaw,pitch];view.style.cursor="grabbing"};
+window.onmouseup=()=>{drag=null;view.style.cursor="grab"};
+window.onmousemove=e=>{if(!drag)return;yaw=drag[2]-(e.clientX-drag[0])*0.01;pitch=Math.max(-0.2,Math.min(1.4,drag[3]+(e.clientY-drag[1])*0.01));draw()};
+view.onwheel=e=>{e.preventDefault();dist=Math.max(0.8,Math.min(8,dist*(e.deltaY>0?1.1:0.9)));draw()};
+
+function fit(c,h){const r=window.devicePixelRatio||1,w=c.clientWidth;c.width=w*r;c.height=h*r;c.style.height=h+"px";const g=c.getContext("2d");g.setTransform(r,0,0,r,0,0);return [g,w,h]}
+function project(p,center,w,h){
+  const x=p[0]-center[0],y=p[1]-center[1],z=p[2]-center[2];
+  const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+  const xr=cy*x+sy*y, yr=-sy*x+cy*y;            // rotate about z
+  const depth=xr*cp+z*sp+dist, up=-xr*sp+z*cp;  // camera looks along +x after rotation
+  const f=h*0.9/Math.max(0.2,depth);
+  return [w/2+yr*-f, h*0.55-up*f, depth];
+}
+function legChains(names){
+  const order=["hip","thigh","calf","foot"], legs={};
+  names.forEach((n,i)=>{const m=n.match(/^([A-Za-z]{2})_(\w+)/); if(!m)return; const k=order.findIndex(o=>m[2].toLowerCase().includes(o));
+    if(k<0)return; (legs[m[1]]=legs[m[1]]||[]).push([k,i])});
+  return Object.values(legs).map(l=>l.sort((a,b)=>a[0]-b[0]).map(x=>x[1]));
+}
+function drawView(){
+  const [g,w,h]=fit(view,420); g.clearRect(0,0,w,h);
+  const base=E.base_pos[t], center=[base[0],base[1],base[2]-0.25];
+  // terrain scan points coloured by height under the body
+  const scan=E.scan[t]||[];
+  const pts=scan.map(p=>[project(p,center,w,h),p[2]]).sort((a,b)=>b[0][2]-a[0][2]);
+  const zs=scan.map(p=>p[2]).filter(Number.isFinite), zmin=Math.min(...zs), zmax=Math.max(...zs,zmin+0.05);
+  for(const [q,z] of pts){ if(!Number.isFinite(z))continue; const k=(z-zmin)/(zmax-zmin);
+    g.fillStyle=`hsl(${210-170*k} 70% ${45+15*k}%)`; g.globalAlpha=0.75; g.fillRect(q[0]-2,q[1]-2,4,4)}
+  g.globalAlpha=1;
+  // path of the base so far
+  g.strokeStyle=css("--quiet"); g.lineWidth=1; g.beginPath();
+  for(let i=Math.max(0,t-300);i<=t;i++){const q=project(E.base_pos[i],center,w,h); i===Math.max(0,t-300)?g.moveTo(q[0],q[1]):g.lineTo(q[0],q[1])} g.stroke();
+  // robot: base to each leg chain
+  const B=E.bodies[t], chains=legChains(D.meta.body_names);
+  const segs=[]; chains.forEach(c=>{segs.push([0,c[0]]); for(let i=1;i<c.length;i++)segs.push([c[i-1],c[i]])});
+  const hips=chains.map(c=>c[0]);
+  for(let i=0;i<hips.length;i++)for(let j=i+1;j<hips.length;j++)segs.push([hips[i],hips[j],"trunk"]);
+  const drawn=segs.map(s=>{const a=project(B[s[0]],center,w,h),b=project(B[s[1]],center,w,h);return [a,b,s[2]]}).sort((x,y)=>(y[0][2]+y[1][2])-(x[0][2]+x[1][2]));
+  for(const [a,b,kind] of drawn){g.strokeStyle=kind?css("--quiet"):css("--ink");g.lineWidth=kind?1.5:4;g.lineCap="round";g.beginPath();g.moveTo(a[0],a[1]);g.lineTo(b[0],b[1]);g.stroke()}
+  const feet=D.meta.foot_names.map(n=>D.meta.body_names.indexOf(n));
+  feet.forEach((fi,k)=>{const q=project(B[fi],center,w,h);g.fillStyle=E.foot_contact[t][k]?css("--pos"):css("--neg");g.beginPath();g.arc(q[0],q[1],6,0,7);g.fill()});
+  g.fillStyle=css("--quiet"); g.font="12px system-ui";
+  g.fillText(`명령 vx=${E.command[t][0].toFixed(2)}  실제 vx=${E.base_lin_vel_b[t][0].toFixed(2)} m/s`,10,18);
+}
+
+// ---------- charts ----------
+function bars(canvas,items,title){ // items: [label,value]
+  const rowH=16,[g,w]=fit(canvas,Math.max(60,items.length*rowH+24)); const h=items.length*rowH;
+  const maxAbs=Math.max(1e-9,...items.map(x=>Math.abs(x[1])));
+  const lab=Math.min(190,w*0.38), mid=lab+(w-lab-60)/2, half=(w-lab-60)/2;
+  g.font="11.5px system-ui"; g.textBaseline="middle";
+  g.strokeStyle=css("--line"); g.beginPath(); g.moveTo(mid,0); g.lineTo(mid,h); g.stroke();
+  items.forEach(([name,v],i)=>{const y=i*rowH+rowH/2, len=v/maxAbs*half;
+    g.fillStyle=v>=0?css("--pos"):css("--neg"); g.fillRect(Math.min(mid,mid+len),y-5,Math.abs(len),10);
+    g.fillStyle=css("--ink"); g.textAlign="right"; g.fillText(name.length>28?name.slice(0,27)+"…":name,lab-6,y);
+    g.textAlign="left"; g.fillStyle=css("--quiet"); g.fillText(v.toFixed(4),w-56,y)});
+  if(title){g.fillStyle=css("--quiet");g.textAlign="left";g.fillText(title,4,h+14)}
+}
+function drawNow(){
+  const names=D.meta.term_names, v=E.terms[t];
+  const items=names.map((n,i)=>[n,v[i]]).filter(x=>Math.abs(x[1])>1e-6).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1]));
+  bars($("now"),items,`합계 r_t = ${E.reward[t].toFixed(4)}  (0인 항목 ${names.length-items.length}개 생략)`);
+}
+function drawFuture(){
+  const names=D.meta.term_names, v=E.term_returns[t];
+  const items=names.map((n,i)=>[n,v[i]]).filter(x=>Math.abs(x[1])>1e-5).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1])).slice(0,16);
+  bars($("future"),items,`G_t = ${E.return[t].toFixed(3)}  vs  V(s_t) = ${E.value[t].toFixed(3)}  (상위 16개 항목)`);
+}
+function drawTimeline(){
+  const [g,w,h]=fit($("timeline"),190), n=D.meta.steps, pad=34;
+  const series=[["V(s)",E.value,css("--accent")],["G_t",E.return,css("--ink")],["A_t",E.advantage,css("--warn")],["r_t ×20",E.reward.map(x=>x*20),css("--pos")]];
+  const all=series.flatMap(s=>s[1]); const lo=Math.min(...all,0), hi=Math.max(...all,0.01);
+  const X=i=>pad+i/(n-1)*(w-pad-8), Y=v=>8+(hi-v)/(hi-lo)*(h-30);
+  g.strokeStyle=css("--line"); g.beginPath(); g.moveTo(pad,Y(0)); g.lineTo(w-8,Y(0)); g.stroke();
+  g.fillStyle=css("--quiet"); g.font="11px system-ui"; g.textAlign="right"; g.fillText(hi.toFixed(2),pad-4,12); g.fillText(lo.toFixed(2),pad-4,h-24);
+  E.done.forEach((d,i)=>{if(d){g.fillStyle=css("--neg");g.fillRect(X(i)-1,8,2,h-30)}});
+  series.forEach(([name,vals,col],k)=>{g.strokeStyle=col;g.lineWidth=1.5;g.beginPath();vals.forEach((v,i)=>i?g.lineTo(X(i),Y(v)):g.moveTo(X(i),Y(v)));g.stroke();
+    g.fillStyle=col;g.textAlign="left";g.fillText(name,pad+k*90,h-6)});
+  g.strokeStyle=css("--ink"); g.lineWidth=1; g.setLineDash([4,3]); g.beginPath(); g.moveTo(X(t),6); g.lineTo(X(t),h-22); g.stroke(); g.setLineDash([]);
+}
+function drawActions(){
+  const [g,w,h]=fit($("actions"),150), names=D.meta.joint_names, n=names.length;
+  const m=E.action_mean[t], s=E.action_std[t], a=E.action[t];
+  const lim=Math.max(1,...m.map((v,i)=>Math.abs(v)+s[i])), colW=(w-20)/n, Y=v=>h/2-28-v/lim*(h/2-36)+28;
+  g.strokeStyle=css("--line"); g.beginPath(); g.moveTo(10,Y(0)); g.lineTo(w-10,Y(0)); g.stroke();
+  g.font="10.5px system-ui"; g.textAlign="center";
+  names.forEach((nm,i)=>{const x=10+colW*(i+0.5);
+    g.fillStyle=css("--accent"); g.fillRect(x-colW*0.25,Math.min(Y(0),Y(m[i])),colW*0.5,Math.abs(Y(m[i])-Y(0)));
+    g.strokeStyle=css("--ink"); g.beginPath(); g.moveTo(x,Y(m[i]-s[i])); g.lineTo(x,Y(m[i]+s[i])); g.stroke();
+    g.fillStyle=css("--warn"); g.beginPath(); g.arc(x,Y(a[i]),3,0,7); g.fill();
+    g.fillStyle=css("--quiet"); g.fillText(nm.replace(/_joint$/,""),x,h-4)});
+}
+function drawInfo(){
+  const v=E.value[t],G=E.return[t],A=E.advantage[t],d=E.delta[t];
+  const verdict=A>0.02?`이 행동은 critic의 기대(V)보다 결과가 좋았습니다 (A=${A.toFixed(3)}). PPO는 이 상태에서 이 행동의 확률을 높입니다.`
+    :A<-0.02?`이 행동은 기대보다 결과가 나빴습니다 (A=${A.toFixed(3)}). PPO는 이 행동의 확률을 낮춥니다.`
+    :`기대와 결과가 거의 같습니다 (A≈0). 이 스텝은 정책을 크게 바꾸지 않습니다.`;
+  const top=D.meta.term_names.map((n,i)=>[n,E.term_returns[t][i]]).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1])).slice(0,3)
+    .map(x=>`${x[0]} (${x[1]>=0?"+":""}${x[1].toFixed(3)})`).join(", ");
+  $("info").innerHTML=`<h3>스텝 ${t} / ${D.meta.steps-1} · ${D.meta.task}</h3><table>
+    <tr><td>가치 V(s<sub>t</sub>) — critic이 예상한 미래 보상</td><td>${v.toFixed(3)}</td></tr>
+    <tr><td>실제 미래 보상 G<sub>t</sub> (γ=${D.meta.gamma})</td><td>${G.toFixed(3)}</td></tr>
+    <tr><td>advantage A<sub>t</sub> (GAE λ=${D.meta.lam})</td><td>${A.toFixed(3)}</td></tr>
+    <tr><td>TD 오차 δ<sub>t</sub> = r<sub>t</sub> + γV(s<sub>t+1</sub>) − V(s<sub>t</sub>)</td><td>${d.toFixed(4)}</td></tr>
+    <tr><td>이번 보상 r<sub>t</sub></td><td>${E.reward[t].toFixed(4)}</td></tr>
+    <tr><td>명령 (vx, vy, ωz)</td><td>${E.command[t].map(x=>x.toFixed(2)).join(", ")}</td></tr>
+    <tr><td>발 접지 (${D.meta.foot_names.map(n=>n.split("_")[0]).join(" ")})</td><td>${E.foot_contact[t].join(" ")}</td></tr>
+    <tr><td>행동 방식</td><td>${D.meta.stochastic?"샘플 (학습과 같음)":"평균 (배포와 같음)"}</td></tr></table>
+    <div class="why"><b>왜 이 행동인가:</b> ${verdict}<br>미래 보상을 가장 크게 움직이는 항목: ${top}.</div>`;
+  $("clock").textContent=`t=${(t*D.meta.dt).toFixed(2)} s`;
+}
+function draw(){ if(!E)return; $("slider").value=t; drawView(); drawInfo(); drawNow(); drawFuture(); drawTimeline(); drawActions(); }
+window.onresize=draw;
+if(location.hash.startsWith("#url=")) fetch(decodeURIComponent(location.hash.slice(5))).then(r=>r.text()).then(load);
+</script>
+</body>
+</html>
