@@ -102,9 +102,23 @@ parser.add_argument("--gap_top5_min_rows", type=int, default=64,
                     help="Minimum near-gap rows in a BPTT window for it to count toward the gap Top-5.")
 parser.add_argument("--resume_lr", type=float, default=None,
                     help="With --student_resume: set this learning rate instead of the checkpoint optimizer's.")
+parser.add_argument("--replay_out", default=None,
+                    help="Analysis replay (tools/rl_replay): load --student_resume frozen, let the student drive, "
+                         "record --replay_seconds of every step to this JSON and exit. Nothing is trained or saved.")
+parser.add_argument("--replay_seconds", type=float, default=4.0)
+parser.add_argument("--replay_warmup_seconds", type=float, default=1.5, help="walk this long before recording")
+parser.add_argument("--replay_vx", type=float, default=None, help="fix the forward command (m/s)")
+parser.add_argument("--replay_live", default=None, help="also stream each step (NDJSON) for the live viewer")
+parser.add_argument("--replay_cloud_envs", type=int, default=2)
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
+if args_cli.replay_out:
+    if not args_cli.student_resume:
+        parser.error("--replay_out needs --student_resume (the student to replay)")
+    # Student always drives, never learns, never saves; the run stops when the recording is full.
+    args_cli.student_warmup, args_cli.student_ramp = 0, 1
+    args_cli.iterations = args_cli.save_interval = args_cli.top5_start_iteration = 10**9
 if min(args_cli.iterations, args_cli.bptt_steps, args_cli.save_interval, args_cli.num_envs) <= 0:
     parser.error("iterations, bptt_steps, save_interval and num_envs must be positive")
 if (args_cli.top5_start_iteration < 0 or args_cli.top5_keep < 1 or args_cli.top5_smoothing_windows < 1
@@ -405,6 +419,56 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         torch.save(make_student_checkpoint(iteration, top5_selection), temporary_path)
         os.replace(temporary_path, path)
 
+    replay = None
+    if args_cli.replay_out:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "rl_replay"))
+        from rollout_log import RolloutLog
+        base_env = env.unwrapped
+        replay_skip = int(round(args_cli.replay_warmup_seconds / dt))
+        replay = {"log": None, "skip": replay_skip}
+
+        def replay_command():
+            if args_cli.replay_vx is not None:
+                term = base_env.command_manager.get_term("base_velocity")
+                term.vel_command_b[:, 0] = args_cli.replay_vx
+                term.vel_command_b[:, 1:] = 0.0
+
+        def replay_before(obs, actions):
+            if replay["skip"] > 0:
+                return
+            if replay["log"] is None:
+                replay["log"] = RolloutLog(
+                    base_env, task=args_cli.task, checkpoint=args_cli.student_resume,
+                    gamma=float(agent_cfg.algorithm.gamma), lam=float(agent_cfg.algorithm.lam),
+                    steps=int(round(args_cli.replay_seconds / dt)), vx=args_cli.replay_vx, live=args_cli.replay_live,
+                    student_view=True, camera_profile=env_cfg.camera_profile, cloud_envs=args_cli.replay_cloud_envs,
+                    extra_meta={"driver": "student", "teacher_checkpoint": os.path.abspath(checkpoint_path),
+                                "student_iteration": start_iteration,
+                                "student_note": "actions = teacher actor with the student's terrain latent "
+                                                "(zero when its frame is older than 0.3 s); value = teacher critic"})
+            age = base_env.common_step_counter * dt - attention.stamp
+            fresh = (age < .3) & attention.ready
+            student_latent = attention.latent * fresh[:, None]
+            teacher_latent = teacher.terrain_latent(obs)
+            replay["log"].before_step(
+                obs, mean=actions, std=torch.zeros_like(actions), action=actions,
+                value=teacher.evaluate(obs).reshape(-1), latent=student_latent,
+                command=base_env.command_manager.get_command("base_velocity"),
+                extra={"latent_err": (student_latent - teacher_latent).pow(2).mean(-1),
+                       "teacher_action": teacher.act_inference(obs), "student_fresh": fresh.float()})
+
+        def replay_after(obs, reward, dones):
+            if replay["skip"] > 0:
+                replay["skip"] -= 1
+                return
+            log = replay["log"]
+            log.after_step(reward, dones)
+            if log.full():
+                log.finish(teacher.evaluate(obs).reshape(-1), args_cli.replay_out)
+                env.close()
+                simulation_app.close()
+                sys.exit(0)
+
     it = start_iteration
     last_saved_iteration = start_iteration
     consecutive_skips = skipped_windows = nonfinite_rows = 0
@@ -430,8 +494,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             stop_step = capture_step + (transport.delay[1] if it + 1 == args_cli.iterations else 0)
             while env.unwrapped.common_step_counter < stop_step:
                 with torch.no_grad():
+                    if replay is not None:
+                        replay_command()
                     actions = attention.actions(obs, it) if attention else teacher.act_inference(obs)
-                obs, _, dones, _ = env.step(actions)
+                    if replay is not None:
+                        replay_before(obs, actions)
+                obs, step_reward, dones, _ = env.step(actions)
+                if replay is not None:
+                    replay_after(obs, step_reward, dones)
                 if dones.any():
                     done_rows = dones.reshape(-1).bool()
                     keep = (~done_rows).unsqueeze(-1).to(hidden.dtype)
@@ -506,7 +576,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                     window_updates += 1
 
             it += 1
-        if window_updates:
+        if window_updates and replay is None:
             (window_loss / window_updates).backward()
             norm = torch.nn.utils.clip_grad_norm_(student.parameters(), 1.0)
             if torch.isfinite(norm):
