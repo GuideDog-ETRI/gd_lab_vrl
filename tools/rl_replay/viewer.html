@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RL Rollout Replay</title>
+<style>
+:root{--bg:#fafaf9;--panel:#ffffff;--ink:#1c1917;--quiet:#57534e;--line:#d6d3d1;--pos:#15803d;--neg:#b91c1c;--accent:#2563eb;--warn:#b45309}
+@media (prefers-color-scheme: dark){:root{--bg:#141414;--panel:#1d1d1d;--ink:#eeeeec;--quiet:#a8a29e;--line:#3a3a3a;--pos:#4ade80;--neg:#f87171;--accent:#60a5fa;--warn:#fbbf24}}
+*{box-sizing:border-box}
+[hidden]{display:none !important}
+body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
+header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel)}
+header b{font-size:14px;margin-right:8px}
+button,select,input[type=file]{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:3px 8px}
+#slider{flex:1;min-width:160px}
+main{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:10px;padding:10px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px}
+.card h3{margin:0 0 6px;font-size:13px}
+canvas{width:100%;display:block}
+#view{height:420px;cursor:grab}
+#info{font-variant-numeric:tabular-nums}
+#info table{border-collapse:collapse;width:100%}
+#info td{padding:2px 6px;border-bottom:1px solid var(--line)}
+#info td:last-child{text-align:right}
+.why{margin-top:8px;color:var(--quiet)}
+.row{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.full{grid-column:1/-1}
+#drop{padding:40px;text-align:center;color:var(--quiet)}
+.sep{width:1px;height:22px;background:var(--line);margin:0 4px}
+header label{color:var(--quiet)}
+.layers{display:inline-flex;gap:8px;border:1px solid var(--line);border-radius:6px;padding:2px 8px}
+.layers label{display:inline-flex;align-items:center;gap:3px;color:var(--ink)}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px}
+#liveBadge{color:var(--neg);font-weight:600}
+.panel{margin:10px}
+.form{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px 14px;margin:8px 0}
+.form label{display:flex;flex-direction:column;gap:3px;color:var(--quiet)}
+.form input[type=number],.form input:not([type]),.form select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:3px 6px}
+#recLog{max-height:180px;overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px;font-size:11.5px;white-space:pre-wrap}
+#recList{border-collapse:collapse;width:100%;margin-top:8px}
+#recList td,#recList th{padding:4px 8px;border-bottom:1px solid var(--line);text-align:left}
+#recList tr:hover td{background:var(--bg);cursor:pointer}
+@media (max-width:900px){main,.row{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<header>
+  <b>RL Rollout Replay</b>
+  <button id="menuRecord">● 기록</button>
+  <button id="menuOpen">📂 불러오기</button>
+  <span class="sep"></span>
+  <button id="play" title="재생 (Space)">▶ 재생</button>
+  <button id="pause" title="일시정지 (Space)">⏸ 일시정지</button>
+  <button id="stop" title="정지: 처음으로">■ 정지</button>
+  <button id="back" title="한 스텝 뒤 (←)">◀ 1</button><button id="fwd" title="한 스텝 앞 (→)">1 ▶</button>
+  <label>속도 <select id="speed"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option></select></label>
+  <label>환경 <select id="env"></select></label>
+  <span class="layers" title="로봇 창에 겹쳐 그릴 지형 레이어">
+    <label><input type="checkbox" id="layTruth" checked><i class="sw" style="background:#5b8def"></i>정답 지형</label>
+    <label><input type="checkbox" id="layTeacher" checked><i class="sw" style="background:#f97316"></i>교사 입력</label>
+    <label><input type="checkbox" id="layStudent" checked><i class="sw" style="background:#16a34a"></i>학생 카메라</label>
+  </span>
+  <input type="range" id="slider" min="0" max="0" value="0">
+  <span id="clock">t=0.00 s</span>
+  <span id="liveBadge" hidden title="클릭: 최신 스텝 따라가기">● 실시간</span>
+</header>
+<section id="recordPanel" class="card panel" hidden>
+  <h3>기록 — 정책을 Isaac에서 돌려 매 스텝을 기록합니다 (server.py 필요, GPU 사용)</h3>
+  <div class="form">
+    <label>정책 종류(학습 task) <select id="recTask"></select></label>
+    <label>체크포인트 <select id="recCkpt"></select></label>
+    <label>환경 수 <input id="recEnvs" type="number" value="8" min="1" max="64"></label>
+    <label>기록 길이(초) <input id="recSeconds" type="number" value="4" min="1" max="20" step="0.5"></label>
+    <label>전진 명령 vx (비우면 학습 명령) <input id="recVx" type="number" step="0.1" placeholder="예: 0.8"></label>
+    <label><input id="recStoch" type="checkbox"> 행동 샘플 (학습처럼)</label>
+    <label>파일 이름 <input id="recName" placeholder="비우면 자동"></label>
+    <label><input id="recForce" type="checkbox"> GPU 사용 중이어도 기록</label>
+    <label><input id="recLive" type="checkbox" checked> 시뮬레이터에서 바로 받아 보기 (실시간)</label>
+    <label><input id="recStudent" type="checkbox" checked> 학생 카메라 시점도 기록 (벨리 카메라 4대 깊이)</label>
+  </div>
+  <button id="recStart">기록 시작</button> <span id="recState"></span>
+  <pre id="recLog"></pre>
+</section>
+<section id="openPanel" class="card panel" hidden>
+  <h3>불러오기 — 저장된 기록 (logs/rl_replay/), 진행 중인 실시간 스트림(*.live.ndjson), 또는 이 컴퓨터의 파일</h3>
+  <input type="file" id="file" accept=".json,.ndjson">
+  <table id="recList"></table>
+</section>
+<div id="drop" class="card" style="margin:10px">메뉴의 <b>● 기록</b>으로 새로 기록하거나, <b>📂 불러오기</b>로 기록 파일(.json)을 여세요. 파일을 여기에 끌어다 놓아도 됩니다.</div>
+<main id="app" hidden>
+  <div class="card"><h3 id="viewtitle">로봇 (드래그: 회전, 휠: 확대, 발 색: 접지)</h3><div id="v3d" hidden style="height:420px"></div><canvas id="view"></canvas></div>
+  <div class="card" id="info"></div>
+  <div class="row">
+    <div class="card"><h3>이번 스텝 보상 (항목별, 가중치 적용, 크기순)</h3><canvas id="now"></canvas></div>
+    <div class="card"><h3>미래 보상 G<sub>t</sub> = Σ γ<sup>i</sup> r<sub>t+i</sub> 의 항목별 몫</h3><canvas id="future"></canvas></div>
+  </div>
+  <div class="card full"><h3>타임라인: 가치 V(s), 실제 미래 보상 G<sub>t</sub>, advantage A<sub>t</sub>, 보상 r<sub>t</sub></h3><canvas id="timeline"></canvas></div>
+  <div class="card full"><h3>행동 (관절별 정책 평균 ± std, 실제 출력 ●, 학생 기록이면 교사 행동 ━)</h3><canvas id="actions"></canvas></div>
+</main>
+<script src="vendor/three.min.js"></script>
+<script src="vendor/STLLoader.js"></script>
+<script src="vendor/OrbitControls.js"></script>
+<script>
+"use strict";
+let D=null, E=null, t=0, playing=false, last=0, acc=0;
+let yaw=-0.7, pitch=0.4, dist=1.5;
+const $=id=>document.getElementById(id);
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+function load(text){
+  if(text.trimStart().startsWith('{"meta"')&&text.includes('\n{"t"')) return loadStream(text.split("\n").filter(Boolean).map(l=>JSON.parse(l)));
+  stopLive(); D=JSON.parse(text); show();
+}
+function show(keep){
+  const sel=$("env"), prev=sel.value; sel.innerHTML="";
+  D.envs.forEach((e,i)=>{const o=document.createElement("option");o.value=i;
+    const ret=e.reward.reduce((a,b)=>a+b,0);o.textContent=`env ${i} (Σr=${ret.toFixed(2)}${e.done.some(x=>x)?", 종료":""})`;sel.appendChild(o)});
+  if(keep&&prev!=="") sel.value=prev;
+  $("drop").hidden=true; $("app").hidden=false; $("liveBadge").hidden=!D.meta.live;
+  for(const [id,key] of [["layTeacher","terrain_obs"],["layStudent","cloud"]]){ const has=D.envs.some(e=>e[key]&&e[key].some(x=>x&&x.length)); $(id).disabled=!has; $(id).parentElement.title=has?"":"이 기록에는 없음" }
+  if(keep&&E){ E=D.envs[+sel.value]; $("slider").max=D.meta.steps-1; return }
+  (R3?Promise.resolve(true):init3D()).then(ok=>{if(!ok) console.log("URDF 3D unavailable (open through serve.sh); stick figure"); selectEnv(+$("env").value||0)})
+    .catch(err=>{console.warn("URDF 3D failed",err); R3=null; $("v3d").hidden=true; $("view").hidden=false; selectEnv(0)});
+}
+// ---------- live: follow a recorder that streams one JSON line per step ----------
+let live=null;
+function blankEnv(){ return {} }
+function appendStep(row){ row.envs.forEach((r,e)=>{ const E2=D.envs[e]||(D.envs[e]={}); for(const k in r){ (E2[k]||(E2[k]=[])).push(r[k]) } }) }
+function finishProvisional(){ // G, G^k, delta, A from the steps so far, bootstrapping with the last V (exact values come with the final file)
+  const g=D.meta.gamma, l=D.meta.lam;
+  D.envs.forEach(E2=>{ const n=E2.reward.length, K=D.meta.term_names.length; E2.return=new Array(n); E2.advantage=new Array(n); E2.delta=new Array(n); E2.term_returns=new Array(n);
+    let nv=E2.value[n-1], nr=nv, na=0, nk=new Array(K).fill(0);
+    for(let i=n-1;i>=0;i--){ const alive=E2.done[i]?0:1; E2.delta[i]=E2.reward[i]+g*nv*alive-E2.value[i]; E2.advantage[i]=E2.delta[i]+g*l*alive*na;
+      E2.return[i]=E2.reward[i]+g*alive*nr; E2.term_returns[i]=E2.terms[i].map((x,k)=>x+g*alive*nk[k]);
+      nv=E2.value[i]; nr=E2.return[i]; na=E2.advantage[i]; nk=E2.term_returns[i] } });
+}
+function loadStream(rows){ // a finished or partial .live.ndjson file opened from disk
+  stopLive(); D={meta:{...rows[0].meta},envs:[]}; rows.slice(1).filter(r=>r.envs).forEach(appendStep);
+  D.meta.steps=D.envs[0]?D.envs[0].reward.length:0; if(!D.meta.steps) return alert("스트림에 아직 스텝이 없습니다");
+  D.meta.live=false; D.meta.provisional=true; finishProvisional(); show();
+}
+function unfollow(){ if(live){ live.follow=false; $("liveBadge").textContent="● 실시간 (멈춤 — 클릭하면 따라가기)" } }
+$("liveBadge").onclick=()=>{ if(live){ live.follow=true; setPlaying(false); $("liveBadge").textContent="● 실시간"; t=D.meta.steps-1; draw() } };
+function stopLive(){ if(live){ clearTimeout(live.timer); live=null } $("liveBadge").hidden=true }
+function startLive(path){
+  stopLive(); live={path,next:0,timer:null,follow:true}; D=null; E=null;
+  $("openPanel").hidden=true; $("recordPanel").hidden=true; $("drop").hidden=false; $("drop").textContent="시뮬레이터 시작을 기다리는 중… (Isaac 기동에 1~2분)";
+  pollLive();
+}
+async function pollLive(){
+  if(!live) return; const L=live;
+  let j; try{ j=await (await fetch(`/api/live?path=${encodeURIComponent(L.path)}&from=${L.next}`)).json() }catch(e){ j={lines:[],next:L.next} }
+  if(L!==live) return;
+  let ended=null;
+  for(const row of j.lines||[]){ if(row.meta){ D={meta:{...row.meta,steps:0},envs:[]} } else if(row.envs&&D){ appendStep(row) } else if(row.end){ ended=row.out } }
+  if(j.next!==undefined) L.next=j.next;
+  if(D&&D.envs.length&&D.envs[0].reward){ const first=!E, atEnd=!E||t>=D.meta.steps-1; D.meta.steps=D.envs[0].reward.length; finishProvisional();
+    show(!first); if(L.follow&&!playing&&E){ t=D.meta.steps-1 } if(E) draw() }
+  if(ended){ stopLive(); const out=ended.includes("/logs/rl_replay/")?ended.slice(ended.indexOf("logs/rl_replay/")):ended; const keepT=t, env=$("env").value;
+    fetch("/"+out).then(r=>r.ok?r.text():Promise.reject()).then(txt=>{ D=JSON.parse(txt); show(true); $("env").value=env; E=D.envs[+env]; t=Math.min(keepT,D.meta.steps-1); draw();
+      $("recState").textContent="실시간 기록 완료 — 최종 파일(정확한 G, A)로 바꿨습니다: "+out }).catch(()=>{}); return }
+  L.timer=setTimeout(pollLive,250);
+}
+function selectEnv(i){E=D.envs[i];t=0;$("slider").max=D.meta.steps-1;$("slider").value=0;setPlaying(false)}
+$("file").onchange=e=>{const f=e.target.files[0]; if(f) f.text().then(t=>{$("openPanel").hidden=true; load(t)})};
+document.addEventListener("dragover",e=>e.preventDefault());
+document.addEventListener("drop",e=>{e.preventDefault();const f=e.dataTransfer.files[0]; if(f) f.text().then(load)});
+$("env").onchange=e=>{ if(live){ E=D.envs[+e.target.value]; draw() } else selectEnv(+e.target.value) };
+$("slider").oninput=e=>{unfollow();t=+e.target.value;draw()};
+$("back").onclick=()=>{unfollow();t=Math.max(0,t-1);draw()};
+$("fwd").onclick=()=>{unfollow();t=Math.min(D.meta.steps-1,t+1);draw()};
+function setPlaying(on){ if(!D)return; if(on&&t>=D.meta.steps-1)t=0; playing=on; $("play").disabled=on; $("pause").disabled=!on; last=performance.now(); acc=0; if(on)requestAnimationFrame(tick); draw() }
+$("play").onclick=()=>{unfollow();setPlaying(true)};
+$("pause").onclick=()=>setPlaying(false);
+$("stop").onclick=()=>{unfollow();setPlaying(false); t=0; draw()};
+document.addEventListener("keydown",e=>{if(!D||e.target.tagName==="INPUT")return;if(e.key===" "){setPlaying(!playing);e.preventDefault()}
+  if(e.key==="ArrowRight")$("fwd").click(); if(e.key==="ArrowLeft")$("back").click()});
+function tick(now){if(!playing)return;acc+=(now-last)/1000*(+$("speed").value);last=now;
+  const dt=D.meta.dt; while(acc>=dt){acc-=dt;t++; if(t>=D.meta.steps){t=D.meta.steps-1;if(live){draw();requestAnimationFrame(tick);return} setPlaying(false);return}}
+  draw(); requestAnimationFrame(tick)}
+
+// ---------- 3D view (own projection: no libraries, works offline) ----------
+const view=$("view"); let drag=null;
+view.onmousedown=e=>{drag=[e.clientX,e.clientY,yaw,pitch];view.style.cursor="grabbing"};
+window.onmouseup=()=>{drag=null;view.style.cursor="grab"};
+window.onmousemove=e=>{if(!drag)return;yaw=drag[2]-(e.clientX-drag[0])*0.01;pitch=Math.max(-0.2,Math.min(1.4,drag[3]+(e.clientY-drag[1])*0.01));draw()};
+view.onwheel=e=>{e.preventDefault();dist=Math.max(0.8,Math.min(8,dist*(e.deltaY>0?1.1:0.9)));draw()};
+
+function fit(c,h){const r=window.devicePixelRatio||1,w=c.clientWidth;c.width=w*r;c.height=h*r;c.style.height=h+"px";const g=c.getContext("2d");g.setTransform(r,0,0,r,0,0);return [g,w,h]}
+function project(p,center,w,h){
+  const x=p[0]-center[0],y=p[1]-center[1],z=p[2]-center[2];
+  const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+  const xr=cy*x+sy*y, yr=-sy*x+cy*y;            // rotate about z
+  const depth=xr*cp+z*sp+dist, up=-xr*sp+z*cp;  // camera looks along +x after rotation
+  const f=h*0.9/Math.max(0.2,depth);
+  return [w/2+yr*-f, h*0.55-up*f, depth];
+}
+function legChains(names){
+  const order=["hip","thigh","calf","foot"], legs={};
+  names.forEach((n,i)=>{const m=n.match(/^([A-Za-z]{2})_(\w+)/); if(!m)return; const k=order.findIndex(o=>m[2].toLowerCase().includes(o));
+    if(k<0)return; (legs[m[1]]=legs[m[1]]||[]).push([k,i])});
+  return Object.values(legs).map(l=>l.sort((a,b)=>a[0]-b[0]).map(x=>x[1]));
+}
+function drawView(){
+  const [g,w,h]=fit(view,420); g.clearRect(0,0,w,h);
+  const base=E.base_pos[t], center=[base[0],base[1],base[2]-0.25];
+  // terrain scan points coloured by height under the body
+  const scan=E.scan[t]||[];
+  const pts=scan.map(p=>[project(p,center,w,h),p[2]]).sort((a,b)=>b[0][2]-a[0][2]);
+  const zs=scan.map(p=>p[2]).filter(Number.isFinite), zmin=Math.min(...zs), zmax=Math.max(...zs,zmin+0.05);
+  for(const [q,z] of pts){ if(!Number.isFinite(z))continue; const k=(z-zmin)/(zmax-zmin);
+    g.fillStyle=`hsl(${210-170*k} 70% ${45+15*k}%)`; g.globalAlpha=0.75; g.fillRect(q[0]-2,q[1]-2,4,4)}
+  g.globalAlpha=1;
+  // path of the base so far
+  g.strokeStyle=css("--quiet"); g.lineWidth=1; g.beginPath();
+  for(let i=Math.max(0,t-300);i<=t;i++){const q=project(E.base_pos[i],center,w,h); i===Math.max(0,t-300)?g.moveTo(q[0],q[1]):g.lineTo(q[0],q[1])} g.stroke();
+  // robot: base to each leg chain
+  const B=E.bodies[t], chains=legChains(D.meta.body_names);
+  const segs=[]; chains.forEach(c=>{segs.push([0,c[0]]); for(let i=1;i<c.length;i++)segs.push([c[i-1],c[i]])});
+  const hips=chains.map(c=>c[0]);
+  for(let i=0;i<hips.length;i++)for(let j=i+1;j<hips.length;j++)segs.push([hips[i],hips[j],"trunk"]);
+  const drawn=segs.map(s=>{const a=project(B[s[0]],center,w,h),b=project(B[s[1]],center,w,h);return [a,b,s[2]]}).sort((x,y)=>(y[0][2]+y[1][2])-(x[0][2]+x[1][2]));
+  for(const [a,b,kind] of drawn){g.strokeStyle=kind?css("--quiet"):css("--ink");g.lineWidth=kind?1.5:4;g.lineCap="round";g.beginPath();g.moveTo(a[0],a[1]);g.lineTo(b[0],b[1]);g.stroke()}
+  const feet=D.meta.foot_names.map(n=>D.meta.body_names.indexOf(n));
+  feet.forEach((fi,k)=>{const q=project(B[fi],center,w,h);g.fillStyle=E.foot_contact[t][k]?css("--pos"):css("--neg");g.beginPath();g.arc(q[0],q[1],6,0,7);g.fill()});
+  g.fillStyle=css("--quiet"); g.font="12px system-ui";
+  g.fillText(`명령 vx=${E.command[t][0].toFixed(2)}  실제 vx=${E.base_lin_vel_b[t][0].toFixed(2)} m/s`,10,18);
+}
+
+// ---------- charts ----------
+function bars(canvas,items,title){ // items: [label,value]
+  const rowH=16,[g,w]=fit(canvas,Math.max(60,items.length*rowH+24)); const h=items.length*rowH;
+  const maxAbs=Math.max(1e-9,...items.map(x=>Math.abs(x[1])));
+  const lab=Math.min(190,w*0.38), mid=lab+(w-lab-60)/2, half=(w-lab-60)/2;
+  g.font="11.5px system-ui"; g.textBaseline="middle";
+  g.strokeStyle=css("--line"); g.beginPath(); g.moveTo(mid,0); g.lineTo(mid,h); g.stroke();
+  items.forEach(([name,v],i)=>{const y=i*rowH+rowH/2, len=v/maxAbs*half;
+    g.fillStyle=v>=0?css("--pos"):css("--neg"); g.fillRect(Math.min(mid,mid+len),y-5,Math.abs(len),10);
+    g.fillStyle=css("--ink"); g.textAlign="right"; g.fillText(name.length>28?name.slice(0,27)+"…":name,lab-6,y);
+    g.textAlign="left"; g.fillStyle=css("--quiet"); g.fillText(v.toFixed(4),w-56,y)});
+  if(title){g.fillStyle=css("--quiet");g.textAlign="left";g.fillText(title,4,h+14)}
+}
+function drawNow(){
+  const names=D.meta.term_names, v=E.terms[t];
+  const items=names.map((n,i)=>[n,v[i]]).filter(x=>Math.abs(x[1])>1e-6).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1]));
+  bars($("now"),items,`합계 r_t = ${E.reward[t].toFixed(4)}  (0인 항목 ${names.length-items.length}개 생략)`);
+}
+function drawFuture(){
+  const names=D.meta.term_names, v=E.term_returns[t];
+  const items=names.map((n,i)=>[n,v[i]]).filter(x=>Math.abs(x[1])>1e-5).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1])).slice(0,16);
+  bars($("future"),items,`G_t = ${E.return[t].toFixed(3)}  vs  V(s_t) = ${E.value[t].toFixed(3)}  (상위 16개 항목)${D.meta.live||D.meta.provisional?"  · 잠정: 아직 안 온 미래는 마지막 V로 대신":""}`);
+}
+function drawTimeline(){
+  const [g,w,h]=fit($("timeline"),190), n=D.meta.steps, pad=34;
+  const series=[["V(s)",E.value,css("--accent")],["G_t",E.return,css("--ink")],["A_t",E.advantage,css("--warn")],["r_t ×20",E.reward.map(x=>x*20),css("--pos")]];
+  const all=series.flatMap(s=>s[1]); const lo=Math.min(...all,0), hi=Math.max(...all,0.01);
+  const X=i=>pad+i/(n-1)*(w-pad-8), Y=v=>8+(hi-v)/(hi-lo)*(h-30);
+  g.strokeStyle=css("--line"); g.beginPath(); g.moveTo(pad,Y(0)); g.lineTo(w-8,Y(0)); g.stroke();
+  g.fillStyle=css("--quiet"); g.font="11px system-ui"; g.textAlign="right"; g.fillText(hi.toFixed(2),pad-4,12); g.fillText(lo.toFixed(2),pad-4,h-24);
+  E.done.forEach((d,i)=>{if(d){g.fillStyle=css("--neg");g.fillRect(X(i)-1,8,2,h-30)}});
+  series.forEach(([name,vals,col],k)=>{g.strokeStyle=col;g.lineWidth=1.5;g.beginPath();vals.forEach((v,i)=>i?g.lineTo(X(i),Y(v)):g.moveTo(X(i),Y(v)));g.stroke();
+    g.fillStyle=col;g.textAlign="left";g.fillText(name,pad+k*90,h-6)});
+  g.strokeStyle=css("--ink"); g.lineWidth=1; g.setLineDash([4,3]); g.beginPath(); g.moveTo(X(t),6); g.lineTo(X(t),h-22); g.stroke(); g.setLineDash([]);
+}
+function drawActions(){
+  const [g,w,h]=fit($("actions"),150), names=D.meta.joint_names, n=names.length;
+  const m=E.action_mean[t], s=E.action_std[t], a=E.action[t];
+  const lim=Math.max(1,...m.map((v,i)=>Math.abs(v)+s[i])), colW=(w-20)/n, Y=v=>h/2-28-v/lim*(h/2-36)+28;
+  g.strokeStyle=css("--line"); g.beginPath(); g.moveTo(10,Y(0)); g.lineTo(w-10,Y(0)); g.stroke();
+  g.font="10.5px system-ui"; g.textAlign="center";
+  names.forEach((nm,i)=>{const x=10+colW*(i+0.5);
+    g.fillStyle=css("--accent"); g.fillRect(x-colW*0.25,Math.min(Y(0),Y(m[i])),colW*0.5,Math.abs(Y(m[i])-Y(0)));
+    g.strokeStyle=css("--ink"); g.beginPath(); g.moveTo(x,Y(m[i]-s[i])); g.lineTo(x,Y(m[i]+s[i])); g.stroke();
+    g.fillStyle=css("--warn"); g.beginPath(); g.arc(x,Y(a[i]),3,0,7); g.fill();
+    if(E.teacher_action){ g.strokeStyle=css("--neg"); g.lineWidth=2; g.beginPath(); g.moveTo(x-colW*0.3,Y(E.teacher_action[t][i])); g.lineTo(x+colW*0.3,Y(E.teacher_action[t][i])); g.stroke(); g.lineWidth=1 }
+    g.fillStyle=css("--quiet"); g.fillText(nm.replace(/_joint$/,""),x,h-4)});
+}
+function drawInfo(){
+  const v=E.value[t],G=E.return[t],A=E.advantage[t],d=E.delta[t];
+  const verdict=A>0.02?`이 행동은 critic의 기대(V)보다 결과가 좋았습니다 (A=${A.toFixed(3)}). PPO는 이 상태에서 이 행동의 확률을 높입니다.`
+    :A<-0.02?`이 행동은 기대보다 결과가 나빴습니다 (A=${A.toFixed(3)}). PPO는 이 행동의 확률을 낮춥니다.`
+    :`기대와 결과가 거의 같습니다 (A≈0). 이 스텝은 정책을 크게 바꾸지 않습니다.`;
+  const top=D.meta.term_names.map((n,i)=>[n,E.term_returns[t][i]]).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1])).slice(0,3)
+    .map(x=>`${x[0]} (${x[1]>=0?"+":""}${x[1].toFixed(3)})`).join(", ");
+  $("info").innerHTML=`<h3>스텝 ${t} / ${D.meta.steps-1} · ${D.meta.task}</h3><table>
+    <tr><td>가치 V(s<sub>t</sub>) — critic이 예상한 미래 보상</td><td>${v.toFixed(3)}</td></tr>
+    <tr><td>실제 미래 보상 G<sub>t</sub> (γ=${D.meta.gamma})</td><td>${G.toFixed(3)}</td></tr>
+    <tr><td>advantage A<sub>t</sub> (GAE λ=${D.meta.lam})</td><td>${A.toFixed(3)}</td></tr>
+    <tr><td>TD 오차 δ<sub>t</sub> = r<sub>t</sub> + γV(s<sub>t+1</sub>) − V(s<sub>t</sub>)</td><td>${d.toFixed(4)}</td></tr>
+    <tr><td>이번 보상 r<sub>t</sub></td><td>${E.reward[t].toFixed(4)}</td></tr>
+    <tr><td>명령 (vx, vy, ωz)</td><td>${E.command[t].map(x=>x.toFixed(2)).join(", ")}</td></tr>
+    <tr><td>발 접지 (${D.meta.foot_names.map(n=>n.split("_")[0]).join(" ")})</td><td>${E.foot_contact[t].join(" ")}</td></tr>
+    <tr><td>행동 방식</td><td>${D.meta.driver==="student"?"학생이 운전 (교사 actor + 학생 latent)":D.meta.stochastic?"샘플 (학습과 같음)":"평균 (배포와 같음)"}</td></tr>
+    ${E.latent_err?`<tr><td>학생 latent 오차 (교사 latent 대비 MSE)</td><td>${E.latent_err[t].toFixed(4)}</td></tr>
+    <tr><td>학생 프레임 (0.3 s 이내)</td><td>${E.student_fresh[t]>0.5?"신선":"오래됨 → latent 0"}</td></tr>
+    <tr><td>교사였다면 다른 행동 (관절 평균 |차|)</td><td>${(E.teacher_action[t].reduce((a,x,i)=>a+Math.abs(x-E.action[t][i]),0)/E.action[t].length).toFixed(3)}</td></tr>`:""}</table>
+    <div class="why"><b>왜 이 행동인가:</b> ${verdict}<br>미래 보상을 가장 크게 움직이는 항목: ${top}.</div>`;
+  $("clock").textContent=`t=${(t*D.meta.dt).toFixed(2)} s`;
+}
+function draw(){ if(!E)return; $("slider").value=t; if(R3) update3D(); else drawView(); drawInfo(); drawNow(); drawFuture(); drawTimeline(); drawActions(); }
+// ---------- menus: record (through server.py) and open ----------
+const API=location.protocol.startsWith("http");
+function showPanel(id){ for(const p of ["recordPanel","openPanel"]) $(p).hidden = p!==id || !$(p).hidden; if(id==="openPanel"&&!$(id).hidden) listRecordings(); if(id==="recordPanel"&&!$(id).hidden) loadSources() }
+$("menuRecord").onclick=()=>showPanel("recordPanel");
+$("menuOpen").onclick=()=>showPanel("openPanel");
+async function loadSources(){
+  if(!API){$("recState").textContent="기록하려면 server.py로 열어야 합니다: python3 tools/rl_replay/server.py";return}
+  const s=await (await fetch("/api/sources")).json();
+  $("recTask").innerHTML=s.tasks.map(x=>`<option value="${x.task}">${x.label} — ${x.task}</option>`).join("");
+  $("recCkpt").innerHTML=s.checkpoints.map(c=>`<option>${c}</option>`).join("");
+  pollRecord();
+}
+$("recStart").onclick=async()=>{
+  const body={task:$("recTask").value,checkpoint:$("recCkpt").value,num_envs:+$("recEnvs").value,seconds:+$("recSeconds").value,
+    vx:$("recVx").value,stochastic:$("recStoch").checked,name:$("recName").value,force:$("recForce").checked,
+    live:$("recLive").checked,student_view:$("recStudent").checked};
+  const r=await fetch("/api/record",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}); const j=await r.json();
+  $("recState").textContent=j.error?("거부: "+j.error+(j.busy?" ("+j.busy.length+"개 학습 프로세스)":"")):"기록 중…"; if(!j.error){ pollRecord(); if(j.live) startLive(j.live) }
+};
+async function pollRecord(){
+  if(!API)return; const s=await (await fetch("/api/record")).json();
+  if(s.state==="idle") return;
+  $("recLog").textContent=(s.tail||[]).join("\n");
+  $("recState").textContent={running:`기록 중… ${s.elapsed||0}s`,done:`완료 (${s.elapsed}s): ${s.out}`,failed:`실패 (exit ${s.exit}) — 로그 확인`}[s.state]||s.state;
+  if(s.state==="running") setTimeout(pollRecord,2000);
+  else if(s.state==="done"&&s.out&&!s.live&&$("recState").dataset.loaded!==s.out){ $("recState").dataset.loaded=s.out; openPath(s.out) }
+  else if(s.state==="failed") stopLive();
+}
+async function listRecordings(){
+  if(!API){$("recList").innerHTML="<tr><td>저장된 목록은 server.py로 열었을 때 보입니다. 위에서 파일을 직접 고르세요.</td></tr>";return}
+  const list=await (await fetch("/api/recordings")).json();
+  $("recList").innerHTML="<tr><th>파일</th><th>정책(task)</th><th>환경 × 스텝</th><th>시각</th></tr>"+list.map(r=>
+    `<tr data-path="${r.path}" data-live="${r.live&&!r.finished?1:""}"><td>${r.live?(r.finished?"⏺ 스트림(완료) ":"<b style='color:var(--neg)'>● 실시간</b> "):""}${r.name}</td><td>${r.meta.task||""}</td><td>${r.meta.num_envs||"?"} × ${r.meta.steps||(r.live?"…":"?")}</td><td>${r.mtime}</td></tr>`).join("");
+  $("recList").querySelectorAll("tr[data-path]").forEach(tr=>tr.onclick=()=>tr.dataset.live?startLive(tr.dataset.path):openPath(tr.dataset.path));
+}
+function openPath(path){ stopLive(); fetch("/"+path).then(r=>r.text()).then(txt=>{ $("openPanel").hidden=true; $("recordPanel").hidden=true; load(txt) }) }
+
+window.onresize=()=>{if(R3){const w=$("v3d").clientWidth;R3.renderer.setSize(w,420);R3.camera.aspect=w/420;R3.camera.updateProjectionMatrix()} draw()};
+
+// ---------- RBQ10 from its URDF (link meshes, forward kinematics from the recorded joint angles) ----------
+let R3=null;
+const URDF_URL=new URL("../../assets/robots/rbq10/urdf/rbq10_simple.urdf", location.href);
+function setOrigin(obj,o){ if(!o)return; const xyz=(o.getAttribute("xyz")||"0 0 0").trim().split(/\s+/).map(Number), rpy=(o.getAttribute("rpy")||"0 0 0").trim().split(/\s+/).map(Number);
+  obj.position.set(...xyz); obj.quaternion.setFromEuler(new THREE.Euler(rpy[0],rpy[1],rpy[2],"ZYX")) }
+async function init3D(){
+  if(!window.THREE||location.protocol==="file:") return false;
+  const res=await fetch(URDF_URL); if(!res.ok) return false;
+  const xml=new DOMParser().parseFromString(await res.text(),"text/xml");
+  const loader=new THREE.STLLoader(), cache={}, links={}, joints={}, feet={};
+  const mat=new THREE.MeshStandardMaterial({color:0x8a8f98,metalness:0.2,roughness:0.6});
+  const trunkMat=new THREE.MeshStandardMaterial({color:0x2f3a4a,metalness:0.2,roughness:0.5});
+  const pending=[];
+  xml.querySelectorAll("robot > link").forEach(l=>{
+    const name=l.getAttribute("name"), g=new THREE.Group(); g.name=name; links[name]=g;
+    l.querySelectorAll(":scope > visual").forEach(v=>{
+      const holder=new THREE.Group(); setOrigin(holder,v.querySelector("origin")); g.add(holder);
+      const geo=v.querySelector("geometry"); const mesh=geo.querySelector("mesh"), box=geo.querySelector("box"), sph=geo.querySelector("sphere"), cyl=geo.querySelector("cylinder");
+      if(mesh){ const url=new URL(mesh.getAttribute("filename"), URDF_URL).href, sc=(mesh.getAttribute("scale")||"1 1 1").split(/\s+/).map(Number);
+        cache[url]=cache[url]||new Promise((ok,bad)=>loader.load(url,ok,undefined,bad));
+        pending.push(cache[url].then(gm=>{const m=new THREE.Mesh(gm,mat);m.scale.set(...sc);holder.add(m)})); }
+      else if(box){ const sz=box.getAttribute("size").split(/\s+/).map(Number); if(Math.max(...sz)>0.01) holder.add(new THREE.Mesh(new THREE.BoxGeometry(...sz),trunkMat)) }
+      else if(sph){ const m=new THREE.Mesh(new THREE.SphereGeometry(+sph.getAttribute("radius"),16,12),new THREE.MeshStandardMaterial({color:0x15803d})); holder.add(m); if(name.endsWith("_foot")) feet[name]=m }
+      else if(cyl){ const m=new THREE.Mesh(new THREE.CylinderGeometry(+cyl.getAttribute("radius"),+cyl.getAttribute("radius"),+cyl.getAttribute("length"),16),mat); m.rotation.x=Math.PI/2; holder.add(m) }
+    });
+  });
+  xml.querySelectorAll("robot > joint").forEach(j=>{
+    const parent=links[j.querySelector("parent").getAttribute("link")], child=links[j.querySelector("child").getAttribute("link")]; if(!parent||!child)return;
+    const fixed=new THREE.Group(); setOrigin(fixed,j.querySelector("origin")); const motion=new THREE.Group(); fixed.add(motion); motion.add(child); parent.add(fixed);
+    const type=j.getAttribute("type"); if(type==="revolute"||type==="continuous"){ const ax=(j.querySelector("axis")?.getAttribute("xyz")||"1 0 0").split(/\s+/).map(Number);
+      joints[j.getAttribute("name")]={motion,axis:new THREE.Vector3(...ax).normalize()} }
+  });
+  await Promise.all(pending);
+  const host=$("v3d"); host.hidden=false; $("view").hidden=true;
+  const w=host.clientWidth, renderer=new THREE.WebGLRenderer({antialias:true}); renderer.setPixelRatio(window.devicePixelRatio||1); renderer.setSize(w,420); host.appendChild(renderer.domElement);
+  const scene=new THREE.Scene(); scene.background=new THREE.Color(css("--panel"));
+  scene.add(new THREE.HemisphereLight(0xffffff,0x444444,0.9)); const sun=new THREE.DirectionalLight(0xffffff,0.8); sun.position.set(2,-3,5); scene.add(sun);
+  const camera=new THREE.PerspectiveCamera(45,w/420,0.02,50); camera.up.set(0,0,1); camera.position.set(-1.2,-1.4,0.9);
+  const controls=new THREE.OrbitControls(camera,renderer.domElement); controls.enableDamping=false;
+  // The root is the link that is no joint's child but has children (trunk in rbq10_simple.urdf).
+  const children=new Set([...xml.querySelectorAll("robot > joint > child")].map(c=>c.getAttribute("link")));
+  const parents=new Set([...xml.querySelectorAll("robot > joint > parent")].map(c=>c.getAttribute("link")));
+  const rootName=Object.keys(links).find(n=>!children.has(n)&&parents.has(n)); const root=links[rootName]; scene.add(root);
+  // terrain layers, overlaid and switchable: ground truth (blue, height-shaded), the teacher's own input (orange,
+  // only the cells it was given), the student's camera depth as world points (green)
+  const scan=new THREE.InstancedMesh(new THREE.BoxGeometry(0.045,0.045,0.006),new THREE.MeshStandardMaterial({transparent:true,opacity:0.55}),187);
+  scan.instanceColor=new THREE.InstancedBufferAttribute(new Float32Array(187*3),3); scene.add(scan);
+  const teach=new THREE.InstancedMesh(new THREE.BoxGeometry(0.022,0.022,0.022),new THREE.MeshStandardMaterial({color:0xf97316}),187); scene.add(teach);
+  const cloud=new THREE.Points(new THREE.BufferGeometry(),new THREE.PointsMaterial({color:0x16a34a,size:0.018})); scene.add(cloud);
+  const path=new THREE.Line(new THREE.BufferGeometry(),new THREE.LineBasicMaterial({color:0x888888})); scene.add(path);
+  R3={renderer,scene,camera,controls,root,links,joints,feet,scan,teach,cloud,path,last:null};
+  controls.addEventListener("change",()=>renderer.render(scene,camera));
+  $("viewtitle").textContent="RBQ10 (URDF 메시, 기록한 관절 각도로 순기구학) · 드래그: 회전, 휠: 확대, 발 색: 접지";
+  return true;
+}
+function teacherCells(){ // the policy's terrain input back in world coordinates: z = scanner_z - 0.5 - h/5, valid cells only
+  const pts=E.scan[t]||[], obs=(E.terrain_obs&&E.terrain_obs[t])||[], n=pts.length;
+  if(obs.length!==2*n) return [];
+  const sz=E.scan_z?E.scan_z[t]:E.base_pos[t][2];
+  return pts.map((p,i)=>obs[n+i]>0.5?[p[0],p[1],sz-0.5-obs[i]/5]:null).filter(Boolean);
+}
+for(const id of ["layTruth","layTeacher","layStudent"]) $(id).onchange=()=>draw();
+function update3D(){
+  const {root,joints,links,feet,scan,camera,controls,renderer,scene,path}=R3;
+  const p=E.base_pos[t], q=E.base_quat[t];  // Isaac wxyz
+  root.position.set(p[0],p[1],p[2]); root.quaternion.set(q[1],q[2],q[3],q[0]);
+  D.meta.joint_names.forEach((n,i)=>{const j=joints[n]; if(j) j.motion.quaternion.setFromAxisAngle(j.axis,E.joint_pos[t][i])});
+  root.updateMatrixWorld(true);
+  // foot spheres coloured by contact; FK check against the simulator's foot positions
+  let err=0; const v=new THREE.Vector3();
+  D.meta.foot_names.forEach((n,k)=>{ if(feet[n]) feet[n].material.color.set(E.foot_contact[t][k]?css("--pos"):css("--neg"));
+    const bi=D.meta.body_names.indexOf(n); if(links[n]&&bi>=0){links[n].getWorldPosition(v); const b=E.bodies[t][bi]; err=Math.max(err,Math.hypot(v.x-b[0],v.y-b[1],v.z-b[2]))} });
+  const m=new THREE.Matrix4(), c=new THREE.Color();
+  const pts=(E.scan[t]||[]).filter(x=>Number.isFinite(x[2])), zs=pts.map(x=>x[2]), zmin=Math.min(...zs,0), zmax=Math.max(...zs,zmin+0.05);
+  scan.visible=$("layTruth").checked; scan.count=pts.length;
+  pts.forEach((x,i)=>{ m.makeTranslation(x[0],x[1],x[2]); scan.setMatrixAt(i,m); c.setHSL((225-25*(x[2]-zmin)/(zmax-zmin))/360,0.75,0.35+0.3*(x[2]-zmin)/(zmax-zmin)); scan.setColorAt(i,c) });
+  scan.instanceMatrix.needsUpdate=true; if(scan.instanceColor) scan.instanceColor.needsUpdate=true;
+  const tc=teacherCells(); R3.teach.visible=$("layTeacher").checked; R3.teach.count=tc.length;
+  tc.forEach((x,i)=>{ m.makeTranslation(x[0],x[1],x[2]+0.011); R3.teach.setMatrixAt(i,m) }); R3.teach.instanceMatrix.needsUpdate=true;
+  const cl=(E.cloud&&E.cloud[t])||[]; R3.cloud.visible=$("layStudent").checked&&cl.length>0;
+  R3.cloud.geometry.setAttribute("position",new THREE.Float32BufferAttribute(cl,3)); R3.cloud.geometry.computeBoundingSphere();
+  path.geometry.setFromPoints(E.base_pos.slice(Math.max(0,t-300),t+1).map(b=>new THREE.Vector3(b[0],b[1],b[2]-0.45)));
+  // camera follows the base
+  const target=new THREE.Vector3(p[0],p[1],p[2]-0.1); if(R3.last){camera.position.add(target.clone().sub(R3.last))} controls.target.copy(target); R3.last=target; controls.update();
+  renderer.render(scene,camera);
+  const obsN=(E.terrain_obs&&E.terrain_obs[t]||[]).length/2;
+  $("viewtitle").textContent=`RBQ10 (URDF 메시) · 명령 vx=${E.command[t][0].toFixed(2)}, 실제 vx=${E.base_lin_vel_b[t][0].toFixed(2)} m/s · 교사가 받은 칸 ${tc.length}/${obsN||pts.length} · 학생 점 ${cl.length/3} · FK 오차 ${(err*1000).toFixed(0)} mm`;
+}
+const q=new URLSearchParams(location.search); const src=q.get("data")||(location.hash.startsWith("#url=")?decodeURIComponent(location.hash.slice(5)):null);
+if(q.get("live")) startLive(q.get("live")); else if(src) fetch(src).then(r=>r.text()).then(load);
+</script>
+</body>
+</html>
