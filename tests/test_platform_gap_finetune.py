@@ -500,7 +500,7 @@ def test_trainer_validates_before_the_simulator_and_uses_the_shared_task_sets():
 
 
 def test_launcher_pins_the_safe_settings():
-    text = (ROOT / "scripts/run_bivt_gap_finetune.sh").read_text()
+    text = (ROOT / "experiments/bivt/run_bivt_gap_finetune.sh").read_text()
     assert "--force_ppo_lr 1e-4" in text and "agent.algorithm.schedule=fixed" in text
     assert "--distributed" not in text.replace("Never distributed", "").replace("--distributed (", "")
     assert "GAP_BASELINE_GATE:?" in text and "--rollout_only_steps" in text
@@ -731,7 +731,7 @@ def test_the_evaluator_cannot_create_or_satisfy_the_gate():
 
 
 def test_launcher_uses_local_container_defaults_and_hashes_the_whole_implementation():
-    text = (ROOT / "scripts/run_bivt_gap_finetune.sh").read_text()
+    text = (ROOT / "experiments/bivt/run_bivt_gap_finetune.sh").read_text()
     assert "${GD_LAB_SIF:-/home/user/workspace/gd_lab_isaaclab.sif}" in text
     assert "${GD_LAB_PYTHON:-/home/user/workspace/venv_apptainer/bin/python}" in text
     assert ":-/data/users" not in text  # the other server's paths are only documented as overrides
@@ -777,7 +777,7 @@ def test_gap_training_accepts_distributed_and_an_explicit_waiver(tmp_path):
 
 
 def test_ddp_launcher_pins_arm4_new_cameras_and_spares_gpu3():
-    text = (Path(__file__).parents[1] / "scripts/run_bivt_gap_finetune_ddp.sh").read_text()
+    text = (Path(__file__).parents[1] / "experiments/bivt/run_bivt_gap_finetune_ddp.sh").read_text()
     for needle in ("TRAIN_ARM=4", "--distributed", "--total_envs", "torch.distributed.run", "GPU 3 belongs to VLLM",
                    "GAP_TOTAL_ENVS:-4096", "GAP_TARGET_ITERATIONS:-30000", "--force_ppo_lr 1e-4"):
         assert needle in text
