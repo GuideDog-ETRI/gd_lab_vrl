@@ -83,6 +83,8 @@ parser.add_argument("--gap_loss_weight", type=float, default=1.0,
                     help="Loss weight of near-gap samples (a gap inside the privileged body scan); 1 = off.")
 parser.add_argument("--gap_terrain_columns", type=int, default=0,
                     help="Platform-gap terrain columns next to one per other family (0 = task default).")
+# Start the student Top-5 only after enough captures: a board seeded early stays on top while later,
+# better students are scored against it (same failure as the teacher board stuck at 883 on 2026-10-07).
 parser.add_argument("--top5_start_iteration", type=int, default=2000)
 parser.add_argument("--top5_keep", type=int, default=5)
 parser.add_argument("--top5_smoothing_windows", type=int, default=8)

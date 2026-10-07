@@ -66,6 +66,8 @@ parser.add_argument("--perception_run_name", type=str, default=None, help="Perce
 parser.add_argument("--student_arch", choices=("gast_spatiotemporal_v1",), default="gast_spatiotemporal_v1")
 parser.add_argument("--teacher_checkpoint", help="Explicit frozen checkpoint; overrides run lookup.")
 parser.add_argument("--student_resume", help="Restore student and optimizer; iterations is total target. Environment/history reset.")
+# Start the student Top-5 only after enough captures: a board seeded early stays on top while later,
+# better students are scored against it (same failure as the teacher board stuck at 883 on 2026-10-07).
 parser.add_argument("--top5_start_iteration", type=int, default=5000)
 parser.add_argument("--live_config", default=None,
                     help="JSON settings file polled during distillation (default: <run_dir>/student_live.json).")

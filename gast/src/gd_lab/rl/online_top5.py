@@ -17,6 +17,9 @@ STAIR_FAMILY_PREFIX = "pyramid_stairs"
 CLEAN_KEY = "gap_clean_success"
 DEFAULT_TOP5_CRITERIA = {
     "top5_min_spacing": 1,
+    # Rank only after the curriculum ramps (disturbance force, observation noise) have finished and training has
+    # run a while. An entry scored on the easier early curriculum stays Top-1, and the regression gates then reject
+    # every later candidate (GAST v2.1 run of 2026-10-07: Top-1 stuck at update 883).
     "top5_start_iteration": 5000,
     "min_platform_gap_mean_level": 8.0,
     "min_terrain_mean_level": 9.0,
