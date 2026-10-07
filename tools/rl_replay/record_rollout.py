@@ -9,7 +9,11 @@ that say why PPO pushes the policy toward the action it took.
 
   PYTHONPATH=src python tools/rl_replay/record_rollout.py --headless \
       --task Gd-GastGapCleanV21-Rbq10-Dreamwaq-v0 --checkpoint <model.pt> --num_envs 8 --seconds 4 \
-      --out logs/rl_replay/gast2000.json [--vx 0.8] [--stochastic]
+      --out logs/rl_replay/gast2000.json [--vx 0.8] [--stochastic] [--student_view] [--live <file.ndjson>]
+
+--student_view renders the four belly cameras and stores what they see as world points (the student's view),
+next to the ground-truth scan and the policy's own terrain input. --live also streams every step as one JSON
+line while the simulator runs, so the viewer can follow it live (G_t and A_t there are provisional).
 
 The JSON is self-contained (meta + per-env arrays, rounded to 4 decimals).
 """
@@ -28,8 +32,14 @@ parser.add_argument("--vx", type=float, default=None, help="fix the forward comm
 parser.add_argument("--stochastic", action="store_true", help="sample actions (training behaviour) instead of the mean")
 parser.add_argument("--seed", type=int, default=42)
 parser.add_argument("--out", required=True)
+parser.add_argument("--student_view", action="store_true", help="render the belly cameras and record their depth as points")
+parser.add_argument("--cloud_envs", type=int, default=2, help="envs that keep camera points (they are large)")
+parser.add_argument("--cloud_stride", type=int, default=4, help="keep every n-th depth pixel per axis")
+parser.add_argument("--live", default=None, help="also stream each step as an NDJSON line to this file")
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
+if args_cli.student_view or "Raycast" in args_cli.task or "Vision" in args_cli.task:
+    args_cli.enable_cameras = True  # BIVT-Ray's camera-visible terrain needs the cameras too
 sys.argv = [sys.argv[0]] + hydra_args
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
@@ -76,6 +86,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     env_cfg.seed = args_cli.seed
     if args_cli.device is not None:
         env_cfg.sim.device = args_cli.device
+    cameras = args_cli.enable_cameras
+    if cameras:
+        from gd_lab.core.camera_contract import DEFAULT_CAMERA_PROFILE
+        from gd_lab.tasks.vrl_cameras import configure_vrl_cameras
+        if not hasattr(env_cfg, "camera_profile"):
+            env_cfg.camera_profile = DEFAULT_CAMERA_PROFILE
+        configure_vrl_cameras(env_cfg)
     env = gym.make(args_cli.task, cfg=env_cfg)
     ensure_prev_prev_action_tracking(env.unwrapped)
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
@@ -96,6 +113,23 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     dt = base.step_dt
     gamma = float(agent_cfg.algorithm.gamma)
     lam = float(agent_cfg.algorithm.lam)
+    student_view = None
+    if cameras and args_cli.student_view:
+        from gd_lab.core.camera_contract import load_camera_contract
+        from gd_lab.core.camera_geometry import depth_pixels_world
+        from gd_lab.mdp.camera_observations import canonical_camera_snapshot
+        contract = load_camera_contract(env_cfg.camera_profile)
+        k = min(args_cli.cloud_envs, base.num_envs)
+
+        def student_view():
+            """World points of the four depth images (what the student sees), one flat [x,y,z,...] list per env."""
+            _, depths, positions, rotations, intrinsics = canonical_camera_snapshot(base.scene, contract)
+            pts = depth_pixels_world(depths[:k], positions[:k], rotations[:k], intrinsics[:k])
+            s = args_cli.cloud_stride
+            pts, dep = pts[:, :, ::s, ::s].reshape(k, -1, 3), depths[:k, :, ::s, ::s].reshape(k, -1)
+            lo, hi = contract.depth_clip
+            ok = torch.isfinite(dep) & (dep > lo) & (dep < hi * 0.999) & torch.isfinite(pts).all(-1)
+            return [torch.round(pts[e][ok[e]] * 1000).div(1000).flatten().cpu().tolist() for e in range(k)]
 
     def set_command():
         if args_cli.vx is None:
@@ -103,6 +137,15 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         cmd = base.command_manager.get_term("base_velocity")
         cmd.vel_command_b[:, 0] = args_cli.vx
         cmd.vel_command_b[:, 1:] = 0.0
+
+    def env_step_payload(e, i):
+        """One env's data at step i, for the live stream (same keys as the final file)."""
+        row = {key: _round(rec[key][i][e]) for key in rec if key not in ("done", "foot_contact")}
+        row["done"] = int(rec["done"][i][e])
+        row["foot_contact"] = rec["foot_contact"][i][e].int().tolist()
+        if clouds:
+            row["cloud"] = clouds[i][e] if e < len(clouds[i]) else []
+        return row
 
     obs = env.get_observations()
     with torch.inference_mode():
@@ -114,7 +157,18 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     n = base.num_envs
     rec = {k: [] for k in ("base_pos", "base_quat", "base_lin_vel_b", "command", "bodies", "joint_pos", "joint_vel",
                            "action_mean", "action_std", "action", "value", "terms", "reward", "done", "foot_contact",
-                           "scan", "latent")}
+                           "scan", "scan_z", "latent", "terrain_obs")}
+    clouds = []
+    live = None
+    if args_cli.live:
+        Path(args_cli.live).parent.mkdir(parents=True, exist_ok=True)
+        live = open(args_cli.live, "w")
+        live.write(json.dumps({"meta": {"task": args_cli.task, "checkpoint": os.path.abspath(args_cli.checkpoint),
+            "dt": dt, "gamma": gamma, "lam": lam, "steps_planned": steps, "num_envs": n, "stochastic": args_cli.stochastic,
+            "vx": args_cli.vx, "term_names": term_names, "body_names": list(robot.body_names),
+            "joint_names": list(robot.joint_names), "foot_names": [robot.body_names[i] for i in foot_ids], "live": True}},
+            separators=(",", ":")) + "\n")
+        live.flush()
     with torch.inference_mode():
         for _ in range(steps):
             set_command()
@@ -136,7 +190,19 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             rec["action"].append(action.clone())
             rec["value"].append(value.clone())
             rec["latent"].append(latent.clone())
+            # What the policy itself was given: its 'terrain' group (11x17 height *5 + validity), e.g. the
+            # camera-visible cells for BIVT-Ray or the noisy/blacked-out full grid for GAST.
+            if "terrain" in obs.keys():
+                terrain_in = obs["terrain"]
+            elif "gast_history" in obs.keys():  # GAST teacher: the newest of its 8 terrain frames (same encoding)
+                terrain_in = obs["gast_history"].reshape(n, 8, -1)[:, -1, :374]
+            else:
+                terrain_in = torch.zeros(n, 0, device=mean.device)
+            rec["terrain_obs"].append(terrain_in.clone())
             rec["scan"].append(scanner.data.ray_hits_w.clone() if scanner is not None else torch.zeros(n, 0, 3, device=mean.device))
+            rec["scan_z"].append(scanner.data.pos_w[:, 2].clone() if scanner is not None else torch.zeros(n, device=mean.device))
+            if student_view is not None:
+                clouds.append(student_view())
             obs, reward, done, _ = env.step(action)
             # RewardManager keeps each weighted term as a rate; the per-step contribution is rate * dt.
             rec["terms"].append(rewards._step_reward.clone() * dt)
@@ -147,6 +213,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                 rec["foot_contact"].append(forces > 1.0)
             else:
                 rec["foot_contact"].append(torch.zeros(n, len(foot_ids), dtype=torch.bool, device=mean.device))
+            if live is not None:
+                i = len(rec["reward"]) - 1
+                live.write(json.dumps({"t": i, "envs": [env_step_payload(e, i) for e in range(n)]}, separators=(",", ":")) + "\n")
+                live.flush()
         bootstrap = policy.evaluate(obs).squeeze(-1)
 
     stacked = {k: torch.stack(v, 1) for k, v in rec.items()}  # [n, T, ...]
@@ -173,6 +243,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                  "body_names": list(robot.body_names), "joint_names": list(robot.joint_names),
                  "foot_names": [robot.body_names[i] for i in foot_ids],
                  "notes": {"terms": "weighted reward per step (rate*dt), summing to 'reward'",
+                           "scan": "height-scanner hits (privileged ground truth, 11x17)",
+                           "terrain_obs": "the policy's terrain input: 187 heights (scan_z - z - 0.5, clipped +-1, x5) + 187 validity",
+                           "cloud": "student view: belly-camera depth pixels as world points, flat [x,y,z,...]",
                            "term_returns": "discounted return-to-go of each term; their sum is 'return' "
                                            "(the bootstrap value V(s_T) is in 'return' only)",
                            "advantage": "GAE(gamma, lam) with the critic value", "delta": "TD error"}},
@@ -186,9 +259,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         env_out["term_returns"] = _round(term_returns[e])
         env_out["advantage"] = _round(adv[e])
         env_out["delta"] = _round(delta[e])
+        if clouds and e < len(clouds[0]):
+            env_out["cloud"] = [c[e] for c in clouds]
         out["envs"].append(env_out)
     Path(args_cli.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args_cli.out).write_text(json.dumps(out, separators=(",", ":")))
+    if live is not None:
+        live.write(json.dumps({"end": True, "out": args_cli.out}) + "\n")
+        live.close()
     print(f"[INFO] wrote {args_cli.out}: {n} envs x {steps} steps, {len(term_names)} reward terms", flush=True)
     env.close()
 

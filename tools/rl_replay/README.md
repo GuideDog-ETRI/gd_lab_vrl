@@ -22,3 +22,18 @@
 - "왜 이 행동인가": A_t > 0이면 기대보다 결과가 좋아 PPO가 그 행동의 확률을 올리고, A_t < 0이면 내린다.
 
 `make_demo.py`는 시뮬레이터 없이 뷰어를 시험하는 합성 기록을 만든다.
+
+## Terrain layers and live view
+
+The robot window overlays three terrain layers, each switched on/off in the header:
+
+- **정답 지형** (blue): the 11x17 height-scanner hits, i.e. the privileged ground truth (critic).
+- **교사 입력** (orange): the cells the teacher policy was actually given (`obs["terrain"]`, or the newest
+  `gast_history` frame for GAST), put back at the height it received. BIVT-Ray shows only camera-visible cells.
+- **학생 카메라** (green): the four belly depth cameras' pixels as world points (`--student_view`), i.e. what a
+  student can see. Kept for the first `--cloud_envs` envs only (size).
+
+**Live:** with "시뮬레이터에서 바로 받아 보기" ticked, the recorder also writes `<name>.live.ndjson`, one line per
+step, and the viewer follows it while Isaac runs (G_t/A_t provisional, bootstrapped with the last V). When the
+run ends the viewer swaps in the final `.json`. A stream started from the command line (`--live <file>` under
+`logs/rl_replay/`) shows up in 📂 불러오기 as "● 실시간", or open `viewer.html?live=logs/rl_replay/<name>.live.ndjson`.
