@@ -96,7 +96,7 @@ header label{color:var(--quiet)}
     <div class="card"><h3>미래 보상 G<sub>t</sub> = Σ γ<sup>i</sup> r<sub>t+i</sub> 의 항목별 몫</h3><canvas id="future"></canvas></div>
   </div>
   <div class="card full"><h3>타임라인: 가치 V(s), 실제 미래 보상 G<sub>t</sub>, advantage A<sub>t</sub>, 보상 r<sub>t</sub></h3><canvas id="timeline"></canvas></div>
-  <div class="card full"><h3>행동 (관절별 정책 평균 ± std, 실제 출력)</h3><canvas id="actions"></canvas></div>
+  <div class="card full"><h3>행동 (관절별 정책 평균 ± std, 실제 출력 ●, 학생 기록이면 교사 행동 ━)</h3><canvas id="actions"></canvas></div>
 </main>
 <script src="vendor/three.min.js"></script>
 <script src="vendor/STLLoader.js"></script>
@@ -273,6 +273,7 @@ function drawActions(){
     g.fillStyle=css("--accent"); g.fillRect(x-colW*0.25,Math.min(Y(0),Y(m[i])),colW*0.5,Math.abs(Y(m[i])-Y(0)));
     g.strokeStyle=css("--ink"); g.beginPath(); g.moveTo(x,Y(m[i]-s[i])); g.lineTo(x,Y(m[i]+s[i])); g.stroke();
     g.fillStyle=css("--warn"); g.beginPath(); g.arc(x,Y(a[i]),3,0,7); g.fill();
+    if(E.teacher_action){ g.strokeStyle=css("--neg"); g.lineWidth=2; g.beginPath(); g.moveTo(x-colW*0.3,Y(E.teacher_action[t][i])); g.lineTo(x+colW*0.3,Y(E.teacher_action[t][i])); g.stroke(); g.lineWidth=1 }
     g.fillStyle=css("--quiet"); g.fillText(nm.replace(/_joint$/,""),x,h-4)});
 }
 function drawInfo(){
@@ -290,7 +291,10 @@ function drawInfo(){
     <tr><td>이번 보상 r<sub>t</sub></td><td>${E.reward[t].toFixed(4)}</td></tr>
     <tr><td>명령 (vx, vy, ωz)</td><td>${E.command[t].map(x=>x.toFixed(2)).join(", ")}</td></tr>
     <tr><td>발 접지 (${D.meta.foot_names.map(n=>n.split("_")[0]).join(" ")})</td><td>${E.foot_contact[t].join(" ")}</td></tr>
-    <tr><td>행동 방식</td><td>${D.meta.stochastic?"샘플 (학습과 같음)":"평균 (배포와 같음)"}</td></tr></table>
+    <tr><td>행동 방식</td><td>${D.meta.driver==="student"?"학생이 운전 (교사 actor + 학생 latent)":D.meta.stochastic?"샘플 (학습과 같음)":"평균 (배포와 같음)"}</td></tr>
+    ${E.latent_err?`<tr><td>학생 latent 오차 (교사 latent 대비 MSE)</td><td>${E.latent_err[t].toFixed(4)}</td></tr>
+    <tr><td>학생 프레임 (0.3 s 이내)</td><td>${E.student_fresh[t]>0.5?"신선":"오래됨 → latent 0"}</td></tr>
+    <tr><td>교사였다면 다른 행동 (관절 평균 |차|)</td><td>${(E.teacher_action[t].reduce((a,x,i)=>a+Math.abs(x-E.action[t][i]),0)/E.action[t].length).toFixed(3)}</td></tr>`:""}</table>
     <div class="why"><b>왜 이 행동인가:</b> ${verdict}<br>미래 보상을 가장 크게 움직이는 항목: ${top}.</div>`;
   $("clock").textContent=`t=${(t*D.meta.dt).toFixed(2)} s`;
 }
