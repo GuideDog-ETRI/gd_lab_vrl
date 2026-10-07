@@ -112,6 +112,7 @@ parser.add_argument("--replay_warmup_seconds", type=float, default=1.5, help="wa
 parser.add_argument("--replay_vx", type=float, default=None, help="fix the forward command (m/s)")
 parser.add_argument("--replay_live", default=None, help="also stream each step (NDJSON) for the live viewer")
 parser.add_argument("--replay_cloud_envs", type=int, default=2)
+parser.add_argument("--replay_terrain_history", action="store_true", help="opt in to full GAST history in replay")
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()

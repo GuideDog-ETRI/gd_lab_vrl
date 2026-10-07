@@ -23,9 +23,11 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-if (ROOT / "gast/src/gd_lab/gast").is_dir():
-    sys.path.insert(0, str(ROOT / "gast/src"))
-from runtime import fix_velocity, reserve_recording, validate_window, environment_metadata
+from runtime import fix_velocity, reserve_recording, validate_window, environment_metadata, task_source
+bootstrap_parser = argparse.ArgumentParser(add_help=False)
+bootstrap_parser.add_argument("--task", required=True)
+bootstrap_args, _ = bootstrap_parser.parse_known_args()
+sys.path.insert(0, str(task_source(ROOT, bootstrap_args.task)))
 from gd_lab.core.experiments import training_arm_overrides
 
 from isaaclab.app import AppLauncher
@@ -43,6 +45,7 @@ parser.add_argument("--out", required=True)
 parser.add_argument("--student_view", action="store_true", help="render the belly cameras and record their depth as points")
 parser.add_argument("--cloud_envs", type=int, default=2, help="envs that keep camera points (they are large)")
 parser.add_argument("--cloud_stride", type=int, default=4, help="keep every n-th depth pixel per axis")
+parser.add_argument("--terrain_history", action="store_true", help="opt in to full 8-frame GAST history (large)")
 parser.add_argument("--live", default=None, help="also stream each step as an NDJSON line to this file")
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
@@ -54,7 +57,7 @@ try:
     validate_window(args_cli.num_envs, args_cli.seconds, args_cli.warmup_seconds, args_cli.vx)
     if args_cli.cloud_stride < 1 or not 0 <= args_cli.cloud_envs <= args_cli.num_envs:
         raise ValueError("invalid cloud_envs/cloud_stride")
-    arm_overrides = training_arm_overrides(os.environ["TRAIN_ARM"], play=True)
+    arm_overrides = training_arm_overrides(os.environ["TRAIN_ARM"], play=False)
     replay_lock = reserve_recording(args_cli.out, args_cli.live)
 except (ValueError, OSError) as exc:
     parser.error(str(exc))
@@ -133,7 +136,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                      cloud_envs=args_cli.cloud_envs, cloud_stride=args_cli.cloud_stride,
                      extra_meta={"driver": "teacher", **environment_metadata(base)},
                      terrain_source="gast_history" if args_cli.task.startswith("Gd-Gast") else "terrain",
-                     capture_current_camera=args_cli.student_view)
+                     capture_current_camera=args_cli.student_view, terrain_history=args_cli.terrain_history)
     with torch.inference_mode():
         while not log.full():
             mean = policy.act_inference(obs)

@@ -52,7 +52,7 @@ def policy_terrain_input(obs, n, device, source):
 class RolloutLog:
     def __init__(self, base, *, task, checkpoint, gamma, lam, steps, stochastic=False, vx=None,
                  live=None, student_view=False, camera_profile=None, cloud_envs=2, cloud_stride=4, extra_meta=None,
-                 terrain_source="terrain", capture_current_camera=False):
+                 terrain_source="terrain", capture_current_camera=False, terrain_history=False):
         self.base, self.steps = base, steps
         self.robot = base.scene["robot"]
         self.rewards = base.reward_manager
@@ -65,6 +65,7 @@ class RolloutLog:
         self.dt, self.n = base.step_dt, base.num_envs
         self.rec = {}
         self.terrain_source = terrain_source
+        self.terrain_history = terrain_history
         self._terrain_scan = self._terrain_z = self._terrain_stamp = None
         self._terminal_contacts = {}
         self._original_reset = getattr(base, "_reset_idx", None)
@@ -87,6 +88,7 @@ class RolloutLog:
                      "body_names": list(self.robot.body_names), "joint_names": list(self.robot.joint_names),
                      "foot_names": [self.robot.body_names[i] for i in self.foot_ids],
                      "terrain_source": terrain_source, "terrain_coordinates": "capture_aligned",
+                     "terrain_history_enabled": terrain_history,
                      "contact_timing": "foot_contact=before_step; after=pre-reset hook for terminal rows, null if unavailable",
                      "cloud_timing": "captured snapshot, not transport-delivered student input",
                      **(extra_meta or {})}
@@ -155,7 +157,7 @@ class RolloutLog:
             self._add("terrain_scan_z", torch.where(valid, self._terrain_z, float("nan")))
             self._add("terrain_capture_step", self._terrain_stamp)
         self._add("foot_contact", self._foot_contact(dev))
-        if self.terrain_source == "gast_history":
+        if self.terrain_source == "gast_history" and self.terrain_history:
             self._add("terrain_history", obs["gast_history"].reshape(n, 8, 375))
         for key, val in (extra or {}).items():
             self._add(key, val)

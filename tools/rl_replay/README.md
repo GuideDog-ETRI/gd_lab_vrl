@@ -147,10 +147,10 @@ G^k_t = r^k_t + \gamma\,(1-d_t)\,G^k_{t+1}, \qquad G^k_T = 0
 
 ## 7. 수정 및 검증 상태 (2026-10-08)
 - 격리 worktree에서만 구현. 실행 중 기본 checkout/merge_gd_lab에는 적용하지 않았다.
-- Arm override(play=True), BIVT 등록, main GAST PYTHONPATH, 명령 term 고정(관측 중복 계산 없음).
+- Arm override(play=False: 학습 task의 pulse=0 유지), BIVT 등록, task별 PYTHONPATH, 명령 term 고정(관측 중복 계산 없음).
 - TRAIN_ARM을 반드시 명시. 실제 dt/decimation/actuator gains는 meta에 기록.
 - NaN/Inf는 null, allow_nan=False. JSON은 같은 파일시스템에서 atomic no-clobber 게시.
-- CLI/server 공유 advisory lock. 서버는 GPU compute PID/메모리 사용 확인 실패 시 거부한다.
+- CLI/server 공유 advisory lock. 서버는 지정 GPU compute PID가 있거나 조회 실패 시 거부한다.
   force는 busy 우회하지 않는다. 체크포인트는 이 저장소 내부 .pt만 허용.
 - /api/live의 offset/next는 byte offset, 완성 줄 경계만 허용하며 최대 32줄씩 반환한다.
 - localhost Host/Origin 검증, 엄격한 타입/범위/출력 이름 검증. 메타데이터는 textContent로 표시.
@@ -161,13 +161,22 @@ G^k_t = r^k_t + \gamma\,(1-d_t)\,G^k_{t+1}, \qquad G^k_T = 0
 - terminal과 time-out 모두 bootstrap 차단. rsl_rl timeout reward 보정은 재현하지 않는다.
 - 항목별 G에는 bootstrap 몫 없음. live의 마지막 V(s_t)는 아직 없는 V(s_next)의 잠정 근사.
 - GAST history의 과거 프레임은 xy ego-warped이나 높이 기준 z의 과거 이동 보정까지 검증된 것이 아니다.
-  뷰어는 최신 프레임만 overlay하고 실제 history는 별도 배열로 보존한다.
+  뷰어는 최신 프레임만 overlay한다. 전체 history 배열 저장은 기본 끔이다.
+  교사 CLI --terrain_history, 학생 CLI --replay_terrain_history 또는 서버 JSON terrain_history=true로만 켠다.
 - Ray 입력 좌표는 실제 observation term last_step과 일치할 때만 캐시한다. 기록 시작 이전 capture는
   다음 capture까지 null로 표시한다. 모르는 좌표를 현재 scanner에 붙이지 않는다.
 - 카메라 점구름은 캡처 snapshot이며 student transport delivery 프레임 자체가 아니다.
   교사 student_view는 정책 tick마다 렌더하도록 설정한다. 실제 렌더/pose 정렬과 reset hook는 Isaac 검증 대기.
 - 높이 입력 clip ±1m를 역변환하므로 범위 밖 실제 높이는 복원 불가.
-- 학생 replay는 학습용 증강을 제거했으므로 과거 replay 결과와 직접 동일 조건 비교하면 안 된다.
+- 학생 replay는 학습용 증강뿐 아니라 camera noise와 gap ghost도 끈다.
+  metadata camera_noise=false, gap_ghost=false이며 과거 replay와 동일 조건 비교하면 안 된다.
+- 고정 vx는 heading 유지를 끄고 vy/각속도를 0으로 한다. task의 heading 유지 조건과 다르다.
+- 수정 전 기록은 capture_aligned 좌표가 없어 교사 지형 레이어를 표시하지 않는다.
+- file:// 열기는 URDF fetch 제한 때문에 2D로 fallback할 수 있다.
+- 서버는 localhost Host/Origin을 검사하지만 사용자 인증은 없다. 신뢰하는 로컬 사용자만 사용한다.
+- compute PID 기준 판정은 compositor/화면 표시 메모리만으로 기록을 막지 않는다.
+  그래픽 전용 작업과 사용 가능한 VRAM까지 보장하지는 않는다. 실제 실행 전 작업·메모리를 확인해야 한다.
+  유휴 GPU baseline은 이번 실험 중에 측정하지 않았고 512 MiB 고정 임계값은 제거했다.
 - advisory lock는 갱신된 recorder끼리만 공유한다. 기존 training/sim 외부 작업은 이 잠금을 사용하지 않는다.
   GPU 검사는 순간 snapshot이며 이후 외부 작업이 시작되는 경쟁을 원천 차단하지 않는다. CLI도 실행 전에 GPU를 직접 확인해야 한다.
 - server/GUI를 실행하는 것과 Isaac recording을 실행하는 것은 별개다. 현재 실험이 끝나기 전에는 recording 금지.

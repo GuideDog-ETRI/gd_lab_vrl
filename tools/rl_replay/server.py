@@ -8,8 +8,8 @@ API (JSON, 127.0.0.1 only):
   GET  /api/sources                 tasks and teacher checkpoints that can be recorded
   POST /api/record                  {task, checkpoint, num_envs, seconds, vx, stochastic, name, force, live, student_view}
   GET  /api/record                  state of the current/last recording job (log tail, output, exit code)
-  GET  /api/live?path=..&from=N     lines N.. of a live stream (*.live.ndjson) that a recorder is writing
-One recording at a time. It refuses while a training/distillation process holds the GPU unless force=true.
+  GET  /api/live?path=..&offset=N   complete lines from byte offset N of a live stream
+One recording at a time. Compute GPU processes block recording; no force bypass.
 """
 import argparse
 import urllib.parse
@@ -20,7 +20,7 @@ import subprocess
 import threading
 import time
 import math
-from runtime import validate_window
+from runtime import validate_window, task_source
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -34,7 +34,6 @@ TASKS = [  # policy family -> the task it was trained on
     ("BIVT-Ray Clean v2.1", "Gd-VrlGapFinetuneCleanV21Raycast-Rbq10-Dreamwaq-v0"),
     ("BIVT-Ray Clean", "Gd-VrlGapFinetuneCleanRaycast-Rbq10-Dreamwaq-v0"),
 ]
-BUSY = re.compile(r"train_student_live\.py|train_student\.py|distill_student\.py|train_teacher\.py|train_bivt\.py")
 job = {"state": "idle"}
 lock = threading.Lock()
 
@@ -102,14 +101,14 @@ def sources():
 def gpu_busy():
     try:
         gpu = os.environ.get("RL_REPLAY_GPU", "0")
-        result = subprocess.run(["nvidia-smi", "-i", gpu, "--query-gpu=memory.used",
-                                 "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=5)
         processes = subprocess.run(["nvidia-smi", "-i", gpu, "--query-compute-apps=pid",
                                     "--format=csv,noheader"], capture_output=True, text=True, timeout=5)
-        if result.returncode or processes.returncode:
+        if processes.returncode:
             return ["GPU status unavailable (fail closed)"]
-        used = int(result.stdout.strip())
-        return [f"GPU {gpu}: {used} MiB; PIDs {processes.stdout.strip()}"] if used > 512 or processes.stdout.strip() else []
+        pids = [line.strip() for line in processes.stdout.splitlines() if line.strip()]
+        if any(not pid.isdecimal() for pid in pids):
+            return ["GPU compute-process status unavailable (fail closed)"]
+        return [f"GPU {gpu}: compute PID {pid}" for pid in pids]
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return ["GPU status unavailable (fail closed)"]
 
@@ -117,7 +116,7 @@ def gpu_busy():
 def validate_request(req):
     if not isinstance(req, dict):
         raise ValueError("JSON object required")
-    for key in ("force", "live", "student_view", "stochastic"):
+    for key in ("force", "live", "student_view", "stochastic", "terrain_history"):
         if key in req and type(req[key]) is not bool:
             raise ValueError(f"{key} must be boolean")
     vx = req.get("vx")
@@ -169,12 +168,14 @@ def start(req):
             cmd.append("--stochastic")
         if req.get("student_view"):
             cmd.append("--student_view")
+        if req.get("terrain_history"):
+            cmd.append("--terrain_history")
         live = None
         if req.get("live", True):
             live = out.with_name(out.stem + ".live.ndjson")
             cmd += ["--live", str(live)]
         log = RECORDINGS / (out.stem + ".log")
-        source = REPO / "gast/src" if (REPO / "gast/src/gd_lab/gast").is_dir() else REPO / "src"
+        source = task_source(REPO, task)
         env = dict(os.environ, PYTHONPATH=str(source), OMNI_KIT_ACCEPT_EULA="YES", PYTHONUNBUFFERED="1",
                    CUDA_VISIBLE_DEVICES=os.environ.get("RL_REPLAY_GPU", "0"))
         try:

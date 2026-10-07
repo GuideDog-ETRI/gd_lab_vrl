@@ -289,9 +289,18 @@ function drawInfo(){
     ["기록",D.meta.task],["V(s)",fmt(v)],["G (창 끝 critic bootstrap)",fmt(G)],
     ["GAE",fmt(A)],["TD 오차",fmt(d,4)],["보상",fmt(E.reward[t],4)],
     ["명령",E.command[t].map(x=>fmt(x,2)).join(", ")],["발 접지 (before step)",E.foot_contact[t].join(" ")],
-    ["운전자",D.meta.driver||"teacher"],
+    ["운전자",D.meta.driver==="student"?"학생":D.meta.stochastic?"교사 샘플":"교사 평균"],
     ["해석","이 기록 구간의 교사 critic 기준 GAE 부호: "+verdict+". 실제 PPO 업데이트가 아님. 정규화/clipping/time-out 보정 미재현."],
     ["지형 좌표",D.meta.terrain_coordinates||"legacy: capture alignment unknown"]];
+  if(E.latent_err) rows.push(["학생 latent MSE",fmt(E.latent_err[t],6)]);
+  if(E.student_fresh) rows.push(["학생 프레임 신선도",fmt(E.student_fresh[t],2)]);
+  if(E.teacher_action){
+    const diffs=E.teacher_action[t].map((v,i)=>finiteNumber(v)&&finiteNumber(E.action[t][i])?Math.abs(v-E.action[t][i]):null);
+    rows.push(["교사 행동 평균 |차|",fmt(diffs.every(finiteNumber)?diffs.reduce((a,b)=>a+b,0)/diffs.length:null,6)]);
+  }
+  const ranked=(D.meta.term_names||[]).map((name,i)=>({name,value:E.term_returns?.[t]?.[i]}))
+    .filter(x=>finiteNumber(x.value)).sort((a,b)=>Math.abs(b.value)-Math.abs(a.value)).slice(0,3);
+  rows.push(["미래 보상 상위 3항목",ranked.map(x=>x.name+": "+fmt(x.value,4)).join(" / ")||"미확인"]);
   $("info").replaceChildren();
   const heading=document.createElement("h3");heading.textContent="스텝 "+t+" / "+(D.meta.steps-1);$("info").append(heading);
   const table=document.createElement("table");for(const pair of rows){const tr=document.createElement("tr");
@@ -321,7 +330,7 @@ $("recStart").onclick=async()=>{
     vx:$("recVx").value,stochastic:$("recStoch").checked,name:$("recName").value,force:$("recForce").checked,
     live:$("recLive").checked,student_view:$("recStudent").checked};
   const r=await fetch("/api/record",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}); const j=await r.json();
-  $("recState").textContent=j.error?("거부: "+j.error+(j.busy?" ("+j.busy.length+"개 학습 프로세스)":"")):"기록 중…"; if(!j.error){ pollRecord(); if(j.live) startLive(j.live) }
+  $("recState").textContent=j.error?("거부: "+j.error+(j.busy?" ("+j.busy.join("; ")+")":"")):"기록 중…"; if(!j.error){ pollRecord(); if(j.live) startLive(j.live) }
 };
 async function pollRecord(){
   if(!API)return; const s=await (await fetch("/api/record")).json();
@@ -335,14 +344,20 @@ async function pollRecord(){
 async function listRecordings(){
   if(!API){$("recList").innerHTML="<tr><td>저장된 목록은 server.py로 열었을 때 보입니다. 위에서 파일을 직접 고르세요.</td></tr>";return}
   const list=await (await fetch("/api/recordings")).json();
+  renderRecordings(list);
+}
+function renderRecordings(list){
   $("recList").replaceChildren();
+  const header=document.createElement("tr");
+  for(const label of ["이름","상태","task","env × steps","수정 시각"]){const th=document.createElement("th");th.textContent=label;header.append(th)}
+  $("recList").append(header);
   for(const r of list){const tr=document.createElement("tr");
-    for(const value of [r.name,r.meta.task||"",String(r.meta.num_envs||"?")+" × "+String(r.meta.steps||"…"),r.mtime]){
+    for(const value of [r.name,r.live?(r.finished?"스트림(완료)":"● 실시간"):"완료",r.meta.task||"",String(r.meta.num_envs||"?")+" × "+String(r.meta.steps||"…"),r.mtime]){
       const td=document.createElement("td");td.textContent=value;tr.append(td)}
     tr.onclick=()=>r.live&&!r.finished?startLive(r.path):openPath(r.path);$("recList").append(tr)}
 
 }
-function openPath(path){ const gen=beginLoad(); fetch("/"+path).then(r=>r.ok?r.text():Promise.reject(new Error("load failed"))).then(txt=>{ if(gen!==generation)return; $("openPanel").hidden=true; $("recordPanel").hidden=true; load(txt) }) }
+function openPath(path){ const gen=beginLoad(); fetch("/"+path).then(r=>r.ok?r.text():Promise.reject(new Error("load failed"))).then(txt=>{ if(gen!==generation)return; $("openPanel").hidden=true; $("recordPanel").hidden=true; load(txt) }).catch(err=>{if(gen===generation)$("recState").textContent="기록 로드 실패: "+err.message}) }
 
 window.onresize=()=>{if(R3){const w=$("v3d").clientWidth;R3.renderer.setSize(w,420);R3.camera.aspect=w/420;R3.camera.updateProjectionMatrix()} draw()};
 

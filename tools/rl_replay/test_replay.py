@@ -7,14 +7,56 @@ from types import SimpleNamespace as NS
 import unittest
 import importlib.util
 import sys
+import subprocess
 from unittest.mock import patch
 import torch
 from rollout_log import RolloutLog, _round, json_text, policy_terrain_input
-from runtime import fix_velocity, validate_window, reserve_recording
+from runtime import fix_velocity, validate_window, reserve_recording, task_source
 import server
 
 
 class ReplayTests(unittest.TestCase):
+    def test_task_registry_cpu(self):
+        # GAST tasks.py imports Isaac configuration classes. Execute only its real
+        # top-level registration calls, not those classes; BIVT imports normally.
+        root=Path(__file__).resolve().parents[2]
+        script = """
+import sys, ast, importlib.util
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import gd_lab
+from gd_lab.core import registry
+import gymnasium
+task=sys.argv[2]
+assert Path(gd_lab.__file__).resolve().is_relative_to(Path(sys.argv[1]))
+if task.startswith("Gd-Gast"):
+    path=Path(importlib.util.find_spec("gd_lab.gast").origin).parent/"tasks.py"
+    tree=ast.parse(path.read_text())
+    calls=[n for n in tree.body if isinstance(n,ast.Expr) and isinstance(n.value,ast.Call)
+           and isinstance(n.value.func,ast.Attribute) and isinstance(n.value.func.value,ast.Name)
+           and n.value.func.value.id=="registry" and n.value.func.attr=="register_task"]
+    assert calls
+    exec(compile(ast.Module(body=calls,type_ignores=[]),str(path),"exec"),{"registry":registry})
+else:
+    import gd_lab.teachers.bivt
+assert task in gymnasium.registry, task
+assert "isaaclab.app" not in sys.modules
+"""
+        for _,task in server.TASKS:
+            with self.subTest(task=task):
+                result=subprocess.run([sys.executable,"-I","-B","-c",script,str(task_source(root,task)),task],
+                                      capture_output=True,text=True,timeout=30)
+                self.assertEqual(result.returncode,0,result.stderr)
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(task_source(d,server.TASKS[0][1]),Path(d)/"src")  # merged layout
+
+    def test_gpu_compute_policy(self):
+        # A desktop compositor's allocated memory alone must not block recording.
+        for stdout,code,busy in (("",0,False),("123\n",0,True),("N/A",0,True),("",1,True)):
+            with patch.object(server.subprocess,"run",return_value=NS(stdout=stdout,returncode=code)) as call:
+                self.assertEqual(bool(server.gpu_busy()),busy)
+                self.assertIn("--query-compute-apps=pid",call.call_args.args[0])
+
     def test_finite_json(self):
         self.assertEqual(json.loads(json_text(_round(torch.tensor([float("inf"), float("nan"), 2])))), [None, None, 2])
 
@@ -194,6 +236,12 @@ class ReplayTests(unittest.TestCase):
             log.before_step(obs,**args)
             self.assertEqual(log.rec["terrain_scan_z"][1].item(),1)
             self.assertEqual(log.rec["terrain_capture_step"][1].item(),0)
+            obs["gast_history"]=torch.ones(1,3000)
+            for enabled in (False,True):
+                history=RolloutLog(base,task="test",checkpoint=ckpt,gamma=.99,lam=.95,steps=1,
+                                  terrain_source="gast_history",terrain_history=enabled)
+                history.before_step(obs,**args)
+                self.assertEqual("terrain_history" in history.rec,enabled)
 
 
 if __name__=="__main__": unittest.main()
