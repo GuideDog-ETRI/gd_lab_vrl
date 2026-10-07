@@ -19,7 +19,7 @@ GAP_TASK_IDS = tuple(
 )
 # v2 (2026-10-06): Clean + gap/stair terms, resumed from a Clean-arm checkpoint pinned by an EXPLICIT sha256
 # (the Clean run's Top-1 is not known in advance), never from 17206 and never with a gate-C record.
-V2_ARMS = ("CleanV2",)
+V2_ARMS = ("CleanV2", "CleanV21")
 V2_TASK_IDS = tuple(
     make_task_id(task=f"VrlGapFinetune{arm}Raycast", robot="Rbq10", method="Dreamwaq") for arm in V2_ARMS
 )

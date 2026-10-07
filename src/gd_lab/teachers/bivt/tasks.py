@@ -17,6 +17,7 @@ from gd_lab.mdp.platform_gap_finetune import (
     platform_gap_diagnostics,
 )
 from gd_lab.mdp.gap_stair_v2 import add_v2_terms
+from gd_lab.mdp.gap_stair_v21 import add_v21_terms
 from gd_lab.mdp.terrains.gap_metadata_generator import GapMetadataTerrainGenerator
 from gd_lab.tasks.blind_rough import BlindRoughSceneCfg
 from gd_lab.teachers.cvtt.tasks import VrlTeacherEnvCfg
@@ -123,3 +124,14 @@ class GapFinetuneCleanV2RaycastEnvCfg(GapFinetuneCleanRaycastEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         add_v2_terms(self)
+
+
+@configclass
+class GapFinetuneCleanV21RaycastEnvCfg(GapFinetuneCleanRaycastEnvCfg):
+    """Main 30k-update training (v2.1): v2 + gap/stair speeds up to 1.2 m/s (usual 0.8-1.0), straight stair runs,
+    gap hind-hop / overspeed / stair-stall costs, halved gap margin (``gd_lab.mdp.gap_stair_v21.add_v21_terms``,
+    shared with the GAST v2.1 teachers). Observations unchanged: a Clean or v2 checkpoint resumes as is."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        add_v21_terms(self)
