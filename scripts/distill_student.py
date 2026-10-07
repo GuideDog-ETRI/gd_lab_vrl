@@ -76,6 +76,9 @@ parser.add_argument(
     "comparison against an older noiseless run.",
 )
 # --- v2 distillation (2026-10-07): common to GAST/RVLD/GAVD -------------------------------------------
+parser.add_argument("--v21_env", action="store_true", default=False,
+                    help="Distill a v2.1 teacher in its own env: --v2_env plus the v2.1 commands (up to 1.2 m/s, "
+                         "full range from the start) and v2.1 stair disturbance.")
 parser.add_argument("--v2_env", action="store_true", default=False,
                     help="Distill a v2 teacher in its own env: 26 cm gaps and the stair hip-handle disturbance "
                          "(full force from the first step).")
@@ -134,6 +137,8 @@ from torch.utils.tensorboard import SummaryWriter
 import gd_lab  # noqa: F401  (registers the tasks)
 if args_cli.task == 'Gd-VrlRayStudent-Rbq10-Dreamwaq-Vision-v0':
     import gd_lab.teachers.bivt.student_task  # noqa: F401
+if args_cli.task == 'Gd-GastTeacherGastStudent-Rbq10-Dreamwaq-Vision-v0':
+    import gd_lab.gast.gast_teacher_student_task  # noqa: F401  (frozen GAST teacher, any camera student)
 from gd_lab.core.camera_contract import camera_contract_for_policy
 from gd_lab.core.paths import LOG_ROOT
 from gd_lab.managers.action_history import ensure_prev_prev_action_tracking
@@ -211,7 +216,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     with open(checkpoint_path, "rb") as teacher_file:
         teacher_sha256 = hashlib.sha256(teacher_file.read()).hexdigest()
 
-    if args_cli.v2_env:
+    if args_cli.v21_env:
+        from gd_lab.mdp.gap_stair_v21 import add_student_v21_env
+        os.environ["GD_LAB_V2_FORCE_RAMP_STEPS"] = "0"  # the teacher already handles full-strength pushes
+        os.environ.setdefault("GD_LAB_V21_SPEED_RAMP_STEPS", "0")  # and the full 0.2-1.2 m/s range
+        add_student_v21_env(env_cfg)
+        print("[INFO] v2.1 distillation env: 26 cm gaps, stair disturbance at full force, v2.1 commands", flush=True)
+    elif args_cli.v2_env:
         os.environ["GD_LAB_V2_FORCE_RAMP_STEPS"] = "0"  # the teacher already handles full-strength pushes
         add_student_v2_env(env_cfg)
         print("[INFO] v2 distillation env: 26 cm gaps + stair hip-handle disturbance at full force", flush=True)
@@ -237,6 +248,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     teacher.eval()
     for p in teacher.parameters():
         p.requires_grad_(False)
+    teacher_kind = "bivt_ray"
+    from gd_lab.gast.teacher import GastActorCritic
+    if isinstance(teacher, GastActorCritic):
+        # GAST teacher: latent and actions from its clean full-grid 8-step memory (gast_teacher_student_task).
+        if "gast_history" not in env.unwrapped.observation_manager.active_terms:
+            raise RuntimeError("A GAST teacher needs the GastTeacherGastStudent task (gast_history group)")
+        from gd_lab.gast.gast_teacher_student_task import GastTeacherView
+        teacher = GastTeacherView(teacher)
+        teacher_kind = "gast_clean_full_grid_memory"
+        print("[INFO] GAST teacher: latent and actions from the clean full-grid 8-step memory", flush=True)
     device = env.unwrapped.device
 
     dt = env.unwrapped.step_dt
@@ -317,9 +338,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             "teacher_behavior_target": "same_capture_step_teacher_action",
             "teacher_checkpoint": checkpoint_path,
             "teacher_sha256": teacher_sha256,
+            "teacher_kind": teacher_kind,
             "camera_transport": transport_config.manifest(dt),
             "camera_transport_seed": agent_cfg.seed,
-            "v2_distillation": {"v2_env": args_cli.v2_env, "gap_loss_weight": args_cli.gap_loss_weight,
+            "v2_distillation": {"v2_env": args_cli.v2_env, "v21_env": args_cli.v21_env,
+                                "gap_loss_weight": args_cli.gap_loss_weight,
                                 "gap_terrain_columns": args_cli.gap_terrain_columns},
         }
         if top5_selection is not None:
