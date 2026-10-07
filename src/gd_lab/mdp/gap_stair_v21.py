@@ -21,7 +21,7 @@ Stairs
   it); recovery window after the force 2 s (v2: 1 s).
 Events
 - Termination: -2 per non-timeout termination (was -2 * dt = -0.02). Disturbance fall: extra -3 (total -5).
-Observations unchanged. gast/src keeps a byte-identical copy (tests pin it).
+Observations unchanged. BIVT-Ray and GAST teachers import this one module.
 """
 
 from __future__ import annotations

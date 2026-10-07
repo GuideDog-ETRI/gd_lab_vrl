@@ -4,7 +4,7 @@
 # The package needs teacher/model_*.pt, params/{agent,env}.yaml and SHA256SUMS.txt (checked here).
 # Distills in the teacher's own v2.1 env (26 cm gaps, stair disturbance at full force, commands to 1.2 m/s).
 set -euo pipefail
-root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../gast" && pwd)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 package="$(realpath "${1:?teacher package dir, e.g. checkpoints/teachers/gast/gast_v21_2000_20261007}")"
 captures="${2:-20000}"; envs="${3:-512}"
 teacher="$(ls "$package"/teacher/model_*.pt | head -1)"
@@ -12,7 +12,7 @@ teacher="$(ls "$package"/teacher/model_*.pt | head -1)"
 grep -qx 'camera_profile: vendor_new' "$package/params/env.yaml" || { echo 'Teacher package is not vendor_new' >&2; exit 1; }
 name="$(basename "$package")"
 export GD_LAB_V21_SPEED_RAMP_STEPS=0   # the teacher already walks the full 0.2-1.2 m/s range
-exec bash "$root/scripts/run_student_live.sh" student \
+exec bash "$root/scripts/gast/run_student_live.sh" student \
   --task Gd-GastTeacherGastStudent-Rbq10-Dreamwaq-Vision-v0 --v21_env \
   --teacher_checkpoint "$teacher" --num_envs "$envs" --bptt_steps 16 --iterations "$captures" --lr .0003 \
   --save_interval "${GAST_SAVE_INTERVAL:-500}" --top5_start_iteration "${GAST_TOP5_START:-2000}" \

@@ -1,7 +1,7 @@
 """Build resume checkpoints that the camera-contract checks MUST refuse (CPU only, no Isaac).
 
     PYTHONPATH=src           python tools/camera_negative_smoke/make_fixtures.py main <teacher.pt> <out_dir>
-    PYTHONPATH=gast/src      python tools/camera_negative_smoke/make_fixtures.py gast <teacher.pt> <out_dir>
+    PYTHONPATH=src           python tools/camera_negative_smoke/make_fixtures.py gast <teacher.pt> <out_dir>
 
 Every fixture passes the checks that run BEFORE the camera check (teacher SHA256, student
 architecture, supervision-contract version), so a refusal can only come from the camera contract.
@@ -45,7 +45,7 @@ def _main_fixtures(teacher_sha256):
 
 
 def _gast_fixtures(teacher_sha256):
-    """GAST resumes of gast/scripts/train_student.py (and train_student_live.py)."""
+    """GAST resumes of scripts/gast/train_student.py (and train_student_live.py)."""
     from gd_lab.gast.student import GastStudent
 
     model = GastStudent("vendor_legacy")

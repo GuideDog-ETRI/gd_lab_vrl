@@ -17,6 +17,7 @@ STAIR_FAMILY_PREFIX = "pyramid_stairs"
 CLEAN_KEY = "gap_clean_success"
 DEFAULT_TOP5_CRITERIA = {
     "top5_min_spacing": 100,
+    "top5_start_iteration": 0,
     "min_platform_gap_mean_level": 8.0,
     "min_terrain_mean_level": 9.0,
     "max_base_contact_rate": 0.09,
@@ -54,9 +55,9 @@ class Top5CriteriaReloader:
         for key, value in result.items():
             if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
                 raise ValueError(f"{key} must be a finite number")
-            if key == "top5_min_spacing":
-                if int(value) != value or value < 1:
-                    raise ValueError("top5_min_spacing must be a positive integer")
+            if key in ("top5_min_spacing", "top5_start_iteration"):
+                if int(value) != value or value < (1 if key == "top5_min_spacing" else 0):
+                    raise ValueError(f"Invalid integer criterion: {key}")
                 result[key] = int(value)
             elif key.startswith("min_"):
                 if value < 0:
@@ -189,7 +190,7 @@ def select_top5(entries: list[dict], candidate: dict, spacing: int = 100) -> lis
 def rank_and_save_top5(
     rank: int, episodes: list[dict], directory: Path, iteration: int, spacing: int, save_model,
     min_platform_gap_mean_level: float = DEFAULT_MIN_PLATFORM_GAP_MEAN_LEVEL,
-    criteria: dict | None = None,
+    criteria: dict | None = None, diagnostics: dict | None = None,
 ) -> dict:
     """Rank a gathered rollout and write its checkpoint on rank zero only."""
     status = {"selected": False, "saved": False, "error": None}
@@ -197,12 +198,17 @@ def rank_and_save_top5(
         return status
     try:
         criteria = dict(DEFAULT_TOP5_CRITERIA if criteria is None else criteria)
+        if iteration < criteria.get("top5_start_iteration", 0):
+            status["reason"] = "before_start_iteration"
+            return status
         candidate = score_episodes(episodes)
         if candidate is None:
             return status
         directory = Path(directory)
         entries = json.loads((directory / "leaderboard.json").read_text())["entries"] if directory.exists() else []
         candidate["iteration"] = iteration
+        candidate["diagnostics"] = diagnostics or {}
+        status["candidate"] = candidate
         min_platform_gap_mean_level = criteria["min_platform_gap_mean_level"]
         candidate["eligibility"] = {"minimum_platform_gap_mean_level": min_platform_gap_mean_level,
                                     "platform_gap_mean_level_pass": meets_minimum_gap_difficulty(

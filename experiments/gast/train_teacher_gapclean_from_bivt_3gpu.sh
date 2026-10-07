@@ -15,11 +15,11 @@
 set -euo pipefail
 # Resolve everything given relative to the caller's directory BEFORE changing into the GAST tree.
 script="$(realpath "${BASH_SOURCE[0]}")"
-root="$(cd "$(dirname "$script")/../../gast" && pwd)"
+root="$(cd "$(dirname "$script")/../.." && pwd)"
 mode="${1:?usage: train_teacher_gapclean_from_bivt_3gpu.sh smoke|train [bivt_teacher.pt] [overrides]}"
 case "$mode" in
   smoke) envs=98; horizon=16; updates=3; verify=1
-         teacher="${2:-$root/../checkpoints/teachers/bivt/ray_gap_clean_vendor_new_top1_21068_20261005/teacher/21068_top1.pt}" ;;
+         teacher="${2:-$root/checkpoints/teachers/bivt/ray_gap_clean_vendor_new_top1_21068_20261005/teacher/21068_top1.pt}" ;;
   train) envs=4096; horizon=100; updates=30000; verify=100
          teacher="${2:?train needs the BIVT-Ray teacher path (final Top-1 of the finished BIVT-Ray run)}"
          : "${GAST_BIVT_TEACHER_SHA256:?train needs GAST_BIVT_TEACHER_SHA256=<sha256 of the teacher>}" ;;
@@ -40,7 +40,7 @@ export GAST_RUN_ID="${GAST_RUN_ID:-$(date +%Y-%m-%d_%H-%M-%S)_gast_gapclean_from
 export GAST_VERIFY_SYNC_EVERY="$verify"
 # v2 force ramp (only GastGapCleanV2 uses it): smoke = full force at once.
 if [ "$mode" = smoke ]; then export GD_LAB_V2_FORCE_RAMP_STEPS=0; elif [ -n "${GAST_V2_FORCE_RAMP_STEPS:-}" ]; then export GD_LAB_V2_FORCE_RAMP_STEPS="$GAST_V2_FORCE_RAMP_STEPS"; fi
-export GD_LAB_TOP5_CRITERIA_FILE="$root/configs/online_top5_gapclean.json"
+export GD_LAB_TOP5_CRITERIA_FILE="$root/configs/gast/online_top5_gapclean.json"
 launch="$root/logs/launches/$GAST_RUN_ID"
 mkdir -p "$root/logs/usd_tmp" "$launch"
 git -C "$root" rev-parse HEAD > "$launch/commit.txt"
@@ -54,7 +54,7 @@ printf 'GAST gap-clean warm start run=%s mode=%s gpus=%s total_envs=%s updates=%
 exec apptainer exec --nv --writable-tmpfs --bind "$root/logs/usd_tmp:/tmp/IsaacLab" \
  "${GD_LAB_SIF:-/data/users/bsseo/gd_lab_isaaclab.sif}" \
  "${GD_LAB_PYTHON:-/data/users/bsseo/venv/bin/python}" -m torch.distributed.run --standalone --nnodes=1 \
- --nproc_per_node="$nproc" scripts/train_teacher.py --headless --distributed --total_envs "$envs" --seed 42 \
+ --nproc_per_node="$nproc" scripts/gast/train_teacher.py --headless --distributed --total_envs "$envs" --seed 42 \
  --task "${GAST_TASK:-Gd-GastGapClean-Rbq10-Dreamwaq-v0}" --warm_start_bivt "$teacher" "${sha_args[@]}" --policy_lr 1e-4 --terrain_lr 1e-3 \
  --logger tensorboard --experiment_name gast/arm4 --max_iterations "$updates" \
  agent.num_steps_per_env="$horizon" agent.algorithm.num_mini_batches=4 agent.algorithm.num_learning_epochs=5 \

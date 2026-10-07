@@ -25,7 +25,7 @@ in_container() { timeout 1200 apptainer exec --nv --writable-tmpfs "$image" "$py
 
 (cd "$root" && PYTHONPATH="$root/src" in_container tools/camera_negative_smoke/make_fixtures.py main "$teacher" "$out/fixtures") \
   || { echo "FAIL fixtures (main)" >&2; exit 101; }
-(cd "$root/gast" && PYTHONPATH="$root/gast/src" in_container ../tools/camera_negative_smoke/make_fixtures.py gast "$teacher" "$out/fixtures") \
+(cd "$root" && PYTHONPATH="$root/src" in_container tools/camera_negative_smoke/make_fixtures.py gast "$teacher" "$out/fixtures") \
   || { echo "FAIL fixtures (gast)" >&2; exit 101; }
 for f in rvld gavd gast; do for c in missing mismatch match; do
   test -s "$out/fixtures/${f}_${c}.pt" || { echo "FAIL fixture ${f}_${c}.pt missing" >&2; exit 101; }
@@ -66,7 +66,7 @@ for arch in rvld:cnn_gru gavd:grid_attention_v1; do
   expect "distill_${n}_match"    pass   "$RESUMED"        distill "${n}_match"    "$a"
 done
 
-gast() { (cd "$root/gast" && PYTHONPATH="$root/gast/src" in_container "scripts/$1" --task Gd-BivtGastStudent-Rbq10-Dreamwaq-Vision-v0 \
+gast() { (cd "$root" && PYTHONPATH="$root/src" in_container "scripts/gast/$1" --task Gd-BivtGastStudent-Rbq10-Dreamwaq-Vision-v0 \
             "${common[@]}" --student_resume "$out/fixtures/gast_$2.pt" --perception_run_name "camsmoke_${1%.py}_$2" \
             env.camera_profile=vendor_legacy); }
 for script in train_student.py train_student_live.py; do
