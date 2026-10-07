@@ -117,7 +117,8 @@ def downhill_force(uphill: torch.Tensor, magnitude: torch.Tensor, below_horizont
     return force * magnitude[:, None]
 
 
-def front_lift_cost(front_contact: torch.Tensor, nose_up_rate: torch.Tensor, rate_threshold: float = 1.0) -> torch.Tensor:
+def front_lift_cost(front_contact: torch.Tensor, nose_up_rate: torch.Tensor,
+                    rate_threshold: float = 1.0) -> torch.Tensor:
     """[N] in [0, 1]: both front feet airborne (trot never does this), plus nose-up pitch rate above
     ``rate_threshold`` rad/s (excess, capped)."""
     both_air = (~front_contact).all(-1).float()
@@ -148,3 +149,35 @@ def speed_ceiling(step: int, ramp_steps: int) -> float:
     if ramp_steps <= 0:
         return hi
     return lo + (hi - lo) * min(1.0, step / ramp_steps)
+
+
+# --- v2.1 final (Codex/Claude cross-review 2026-10-07) ---------------------------------------------------------
+def sample_v21_speed_in_ceiling(n: int, ceiling: float, device=None, generator=None) -> torch.Tensor:
+    """V21_SPEED_MIX draws; any draw above the current ceiling is redrawn uniformly in [0.2, ceiling] instead of
+    being clamped (clamping put ~83% of the early draws exactly on 0.6 m/s)."""
+    v = sample_v21_speed(n, 10.0, device, generator)
+    over = v > ceiling
+    low = V21_SPEED_MIX[0][1]
+    fresh = low + (max(ceiling, low) - low) * torch.rand(n, device=device, generator=generator)
+    return torch.where(over, fresh, v)
+
+
+def hysteresis_contact(force: torch.Tensor, previous: torch.Tensor, on: float = 15.0, off: float = 5.0) -> torch.Tensor:
+    """Contact state with hysteresis: becomes True above ``on`` N, False below ``off`` N, else keeps ``previous``."""
+    keep = torch.where(force < off, torch.zeros_like(previous), previous)
+    return torch.where(force > on, torch.ones_like(previous), keep)
+
+
+def overlift_cost(foot_bottom_z: torch.Tensor, upper_deck_z: torch.Tensor, near: torch.Tensor,
+                  allowance: float = 0.20, saturation: float = 0.15) -> torch.Tensor:
+    """[N] max over feet of clamp((h - allowance) / saturation, 0, 1), h = foot-sphere bottom above the higher
+    adjacent deck, only for feet ``near`` [N, F] a gap slot."""
+    h = foot_bottom_z - upper_deck_z
+    cost = ((h - allowance) / saturation).clamp(0, 1) * near
+    return cost.amax(-1)
+
+
+def slot_side(x: torch.Tensor, lo: torch.Tensor, hi: torch.Tensor, margin: float) -> torch.Tensor:
+    """-1 / +1 when a foot centre is clear of the slot (lo - margin, hi + margin) on the low / high side, 0 over it."""
+    high = torch.where(x >= hi + margin, torch.ones_like(x), torch.zeros_like(x))
+    return torch.where(x <= lo - margin, -torch.ones_like(x), high)
