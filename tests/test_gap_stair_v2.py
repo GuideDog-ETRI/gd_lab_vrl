@@ -190,7 +190,8 @@ def test_v2_config_adds_terms_in_order_and_no_observations():
 
 def test_gast_teacher_uses_the_identical_v2_objective():
     """BIVT-Ray CleanV2 and the GAST CleanV2 teacher must be trained on the same terms (byte-identical copies)."""
-    for name in ("gap_stair_v2.py", "gap_stair_v2_math.py", "platform_gap_attempts.py", "platform_gap_finetune.py"):
+    for name in ("gap_stair_v2.py", "gap_stair_v2_math.py", "gap_stair_v21.py", "platform_gap_attempts.py",
+                 "platform_gap_finetune.py"):
         assert (ROOT / "src/gd_lab/mdp" / name).read_bytes() == (ROOT / "gast/src/gd_lab/mdp" / name).read_bytes(), name
     gast_tasks = (ROOT / "gast/src/gd_lab/gast/tasks.py").read_text()
     tree = ast.parse(gast_tasks)
@@ -222,3 +223,23 @@ def test_main_training_adds_short_hard_yanks_within_the_critic_clip():
     # only the extreme corner (400 N on the lightest robot, 38.7 kg) saturates at the clip (2.07), still "maximal".
     assert 400.0 * 0.2 / 46.684 < 2.0
     assert 400.0 * 0.2 / (40.684 - 2.0) < 2.1
+
+
+def test_v21_speed_mix_centres_on_0p8_to_1p0_and_never_exceeds_the_ceiling():
+    from gd_lab.mdp.gap_stair_v2_math import V21_SPEED_MIX, sample_v21_speed, speed_ceiling
+
+    assert abs(sum(p for p, _, _ in V21_SPEED_MIX) - 1.0) < 1e-9
+    g = torch.Generator().manual_seed(0)
+    v = sample_v21_speed(20000, 1.2, generator=g)
+    usual = ((v >= 0.8) & (v <= 1.0)).float().mean()
+    assert 0.55 < usual < 0.65 and v.max() <= 1.2 and v.min() >= 0.2
+    assert sample_v21_speed(1000, 0.6, generator=g).max() <= 0.6
+    assert speed_ceiling(0, 300_000) == 0.6 and speed_ceiling(300_000, 300_000) == 1.2 and speed_ceiling(5, 0) == 1.2
+
+
+def test_v21_task_and_gast_teachers_use_the_shared_builder():
+    tasks = (ROOT / "src/gd_lab/teachers/bivt/tasks.py").read_text()
+    assert "class GapFinetuneCleanV21RaycastEnvCfg(GapFinetuneCleanRaycastEnvCfg)" in tasks and "add_v21_terms(self)" in tasks
+    assert "CleanV21" in gap_guard.V2_ARMS and "Gd-VrlGapFinetuneCleanV21Raycast-Rbq10-Dreamwaq-v0" in gap_guard.V2_SOURCE_TASKS
+    gast = (ROOT / "gast/src/gd_lab/gast/tasks.py").read_text()
+    assert "task='GastGapCleanV21'" in gast and "task='GastScratchV21'" in gast
