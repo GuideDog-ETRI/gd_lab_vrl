@@ -367,8 +367,7 @@ def gap_stair_v2_diagnostics(env, env_ids):
 
 
 # One definition for every teacher that uses v2 (BIVT-Ray CleanV2 and the GAST CleanV2 teacher), so the
-# two teachers are trained on the same objective. gast/src keeps a byte-identical copy of this file
-# (tests/test_gap_stair_v2.py pins it).
+# two teachers are trained on the same objective (both import this module).
 V2_WEIGHTS = {
     "gap_foothold_margin": -0.5,  # per fully violating touchdown
     "stair_foothold_margin": -0.2,

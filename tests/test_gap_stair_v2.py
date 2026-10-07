@@ -189,11 +189,8 @@ def test_v2_config_adds_terms_in_order_and_no_observations():
 
 
 def test_gast_teacher_uses_the_identical_v2_objective():
-    """BIVT-Ray CleanV2 and the GAST CleanV2 teacher must be trained on the same terms (byte-identical copies)."""
-    for name in ("gap_stair_v2.py", "gap_stair_v2_math.py", "gap_stair_v21.py", "platform_gap_attempts.py",
-                 "platform_gap_finetune.py"):
-        assert (ROOT / "src/gd_lab/mdp" / name).read_bytes() == (ROOT / "gast/src/gd_lab/mdp" / name).read_bytes(), name
-    gast_tasks = (ROOT / "gast/src/gd_lab/gast/tasks.py").read_text()
+    """BIVT-Ray CleanV2 and the GAST CleanV2 teacher are trained on the same terms (one shared gd_lab.mdp)."""
+    gast_tasks = (ROOT / "src/gd_lab/gast/tasks.py").read_text()
     tree = ast.parse(gast_tasks)
     cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == "GastGapCleanV2TeacherCfg")
     assert [b.id for b in cls.bases] == ["GastGapCleanTeacherCfg"] and "add_v2_terms(self)" in ast.unparse(cls)
@@ -241,7 +238,7 @@ def test_v21_task_and_gast_teachers_use_the_shared_builder():
     tasks = (ROOT / "src/gd_lab/teachers/bivt/tasks.py").read_text()
     assert "class GapFinetuneCleanV21RaycastEnvCfg(GapFinetuneCleanRaycastEnvCfg)" in tasks and "add_v21_terms(self)" in tasks
     assert "CleanV21" in gap_guard.V2_ARMS and "Gd-VrlGapFinetuneCleanV21Raycast-Rbq10-Dreamwaq-v0" in gap_guard.V2_SOURCE_TASKS
-    gast = (ROOT / "gast/src/gd_lab/gast/tasks.py").read_text()
+    gast = (ROOT / "src/gd_lab/gast/tasks.py").read_text()
     assert "task='GastGapCleanV21'" in gast and "task='GastScratchV21'" in gast
 
 

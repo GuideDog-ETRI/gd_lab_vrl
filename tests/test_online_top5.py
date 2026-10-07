@@ -133,7 +133,8 @@ def test_only_rank_zero_reads_and_writes_top5(tmp_path: Path):
     directory.rmdir()
     success = rank_and_save_top5(0, [episode(family="platform_gap", level=9),
                                      episode(family="pyramid_stairs", level=9)], directory, 100, 100, save, 0)
-    assert success == {"selected": True, "saved": True, "error": None}
+    assert {k: success[k] for k in ("selected", "saved", "error")} == {"selected": True, "saved": True, "error": None}
+    assert success["candidate"]["iteration"] == 100  # also written to top5_decisions.jsonl by the runner
     assert len(saves) == 1
 
 

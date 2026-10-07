@@ -34,7 +34,7 @@ def test_unit_weights_reproduce_the_plain_losses():
 
 def test_top5_copy_matches_the_gast_board():
     root = (ROOT / "src/gd_lab/students/top5.py").read_text().splitlines()[1:]
-    gast = (ROOT / "gast/src/gd_lab/gast/student_top5.py").read_text().splitlines()[1:]
+    gast = (ROOT / "src/gd_lab/gast/student_top5.py").read_text().splitlines()[1:]
     assert root == gast
 
 
@@ -44,7 +44,7 @@ def test_distill_student_wires_near_gap_and_both_boards():
     assert "packet.payload[:10]" in source and "packet.payload[10]" in source and "packet.payload[9]" not in source
     assert 'StudentTop5(os.path.join(log_dir, "top5")' in source and '"top5_gap"' in source
     assert "add_student_v2_env(env_cfg)" in source and 'GD_LAB_V2_FORCE_RAMP_STEPS"] = "0"' in source
-    gast = (ROOT / "gast/scripts/train_student_live.py").read_text()
+    gast = (ROOT / "scripts/gast/train_student_live.py").read_text()
     assert "add_student_v2_env(env_cfg)" in gast and "set_gap_terrain_columns" in gast
 
 

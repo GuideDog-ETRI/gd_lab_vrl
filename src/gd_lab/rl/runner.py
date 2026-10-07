@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib
+import json
 import os
+import signal
 from pathlib import Path
 
 import torch
@@ -70,6 +72,10 @@ class DreamwaqRunner(OnPolicyRunner):
         self._top5_family_columns = {name: list(columns) for name, columns in family_columns.items()}
         self._top5_spacing = spacing
         self._top5_min_platform_gap_mean_level = min_platform_gap_mean_level
+        count = torch.tensor(self.env.num_envs, device=self.device)
+        if self.is_distributed:
+            dist.all_reduce(count)
+        self._global_env_count = int(count.item())
 
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False):
         if not hasattr(self, "_top5_records"):
@@ -84,8 +90,18 @@ class DreamwaqRunner(OnPolicyRunner):
 
         original_update = self.alg.update
         next_iteration = self.current_learning_iteration
+        # Two ways to stop with a save: a stop file (GD_LAB_STOP_FILE, read by rank 0) or SIGUSR1 to any rank.
+        signal_stop = False
+        self.stopped_early = False
         class SavedStop(Exception):
             pass
+
+        def request_stop(signum, frame):
+            nonlocal signal_stop
+            signal_stop = True
+        previous_handlers = {s: signal.getsignal(s) for s in (signal.SIGUSR1,)}
+        for s in previous_handlers:
+            signal.signal(s, request_stop)
 
         def update_and_rank():
             nonlocal next_iteration
@@ -102,6 +118,17 @@ class DreamwaqRunner(OnPolicyRunner):
             else:
                 rank = 0
                 episodes = local
+            # GAST teacher terrain diagnostics (blackout, valid cells, noise strength), rank-summed.
+            terrain_term = getattr(self.env.unwrapped, '_gast_terrain_term', None)
+            if terrain_term is not None and hasattr(terrain_term, 'diagnostic_counts'):
+                counts = terrain_term.diagnostic_counts.clone()
+                terrain_term.diagnostic_counts.zero_()
+                if self.is_distributed:
+                    dist.all_reduce(counts)
+                result.update(gast_blackout_fraction=(counts[0]/counts[1].clamp_min(1)).item(),
+                              gast_valid_cell_fraction=(counts[2]/counts[3].clamp_min(1)).item(),
+                              gast_noise_strength=(counts[4]/counts[1].clamp_min(1)).item())
+            self._latest_diagnostics = {k: float(v) for k, v in result.items()}
             status = {"selected": False, "saved": False, "error": None}
             if rank == 0 and not self.disable_logs and self.log_dir is not None:
                 criteria, criteria_message = self._top5_criteria_reloader.refresh()
@@ -111,7 +138,10 @@ class DreamwaqRunner(OnPolicyRunner):
                 status = rank_and_save_top5(
                     rank, episodes, Path(self.log_dir) / "best_top5", next_iteration,
                     criteria["top5_min_spacing"], self.save, criteria=criteria,
+                    diagnostics=self._latest_diagnostics,
                 )
+                with open(Path(self.log_dir) / 'top5_decisions.jsonl', 'a') as stream:
+                    stream.write(json.dumps({'iteration': next_iteration, **status}, default=str) + '\n')
             if self.is_distributed:
                 message = [status]
                 dist.broadcast_object_list(message, src=0)
@@ -124,7 +154,13 @@ class DreamwaqRunner(OnPolicyRunner):
                 message = [requested]
                 dist.broadcast_object_list(message, src=0)
                 requested = message[0]
+                flag = torch.tensor(int(signal_stop), device=self.device)
+                dist.all_reduce(flag, op=dist.ReduceOp.MAX)
+                requested = requested or bool(flag.item())
+            else:
+                requested = requested or signal_stop
             if requested:
+                self.stopped_early = True
                 if rank == 0:
                     self.save(os.path.join(self.log_dir, f'model_{next_iteration}.pt'))
                     print(f'[SAVED_STOP] iteration={next_iteration}', flush=True)
@@ -141,6 +177,8 @@ class DreamwaqRunner(OnPolicyRunner):
             return
         finally:
             self.alg.update = original_update
+            for s, handler in previous_handlers.items():
+                signal.signal(s, handler)
 
     def save(self, path: str, infos: dict | None = None) -> None:
         infos = dict(infos or {})
@@ -150,6 +188,11 @@ class DreamwaqRunner(OnPolicyRunner):
             extra['observation_context'] = self.observation_context
         if hasattr(self, 'gap_finetune_manifest'):
             extra['gap_finetune'] = self.gap_finetune_manifest
+        extra["training_diagnostics"] = getattr(self, '_latest_diagnostics', {})
+        extra["total_envs"] = getattr(self, '_global_env_count', self.env.num_envs)
+        extra["total_timesteps"] = (self.current_learning_iteration + 1) * extra["total_envs"] * self.num_steps_per_env
+        if getattr(self, "gast_warm_start", None):
+            extra["gast_warm_start"] = self.gast_warm_start
         policy = self.alg.policy
         if isinstance(policy, DreamwaqActorCritic):
             extra["cenet_optimizer_state_dict"] = policy.cenet.optimizer.state_dict()
@@ -186,8 +229,11 @@ class DreamwaqRunner(OnPolicyRunner):
         extra = (infos or {}).get("gd_lab", {})
         if "learning_rate" in extra:
             self.alg.learning_rate = extra["learning_rate"]
-            for group in self.alg.optimizer.param_groups:
-                group["lr"] = self.alg.learning_rate
+            # A grouped optimizer (GAST warm start: backbone vs terrain encoder) keeps the per-group
+            # rates its saved state restored; only a single-rate optimizer is reset to the saved rate.
+            if not any("gd_lab_group" in group for group in self.alg.optimizer.param_groups):
+                for group in self.alg.optimizer.param_groups:
+                    group["lr"] = self.alg.learning_rate
         family_columns = getattr(self, "_top5_family_columns", None)
         if family_columns:
             means = extra.get("terrain_level_means_by_family") or {}
@@ -223,3 +269,16 @@ class DreamwaqRunner(OnPolicyRunner):
     def export_inference_state(self) -> dict[str, torch.Tensor]:
         self.eval_mode()
         return self.alg.policy.state_dict()
+
+    def log(self, locs: dict, width: int = 80, pad: int = 35):
+        # Upstream assumes identical rank sizes. Correct the cumulative count
+        # when e.g. 4096 environments are split 1366/1365/1365.
+        total_envs = getattr(self, '_global_env_count', self.env.num_envs * self.gpu_world_size)
+        actual = self.num_steps_per_env * total_envs
+        assumed = self.num_steps_per_env * self.env.num_envs * self.gpu_world_size
+        self.tot_timesteps = (locs['it'] + 1) * actual - assumed
+        super().log(locs, width, pad)
+        elapsed = locs['collection_time'] + locs['learn_time']
+        print(f'[TRAIN_PROGRESS] iteration={locs["it"]} total_envs={total_envs} '
+              f'timesteps={self.tot_timesteps} seconds={elapsed:.3f} '
+              f'remaining_seconds_estimate={elapsed * (locs["tot_iter"]-locs["it"]-1):.0f}', flush=True)

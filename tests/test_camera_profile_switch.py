@@ -328,7 +328,7 @@ def test_negative_smoke_runner_expects_each_refusal_message():
     for message in ("checkpoint has no camera contract", "camera contract differs from the one required",
                     "Student/optimizer resumed at"):
         assert message in source  # the runner greps for strings the code really prints
-    for script in ("gast/scripts/train_student.py", "gast/scripts/train_student_live.py"):
+    for script in ("scripts/gast/train_student.py", "scripts/gast/train_student_live.py"):
         gast = (ROOT / script).read_text()
         assert "Resume camera calibration/timing contract differs from this run" in gast
         assert "[INFO] Student/optimizer resumed at {start_iteration};" in gast
