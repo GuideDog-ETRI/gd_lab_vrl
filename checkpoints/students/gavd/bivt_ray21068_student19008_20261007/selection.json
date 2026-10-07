@@ -1,0 +1,313 @@
+{
+  "criterion": "minimum_proxy_score",
+  "formula": "mean(perception/mse) + 0.5 * mean(perception/hazard_mse) + mean(perception/action_mse) + 0.5 * mean(perception/spatial_loss)",
+  "window": "checkpoint iteration - 1000 < TensorBoard step <= checkpoint iteration",
+  "minimum_checkpoint_iteration": 6000,
+  "selected_iteration": 19008,
+  "selected_proxy_score": 0.19830153014747398,
+  "candidate_count": 15,
+  "source_event_file": "events.out.tfevents.1791273714.OnVLM.348370.0",
+  "ranking": [
+    {
+      "iteration": 19008,
+      "checkpoint": "perception_19008.pt",
+      "window_exclusive_start": 18008,
+      "window_inclusive_end": 19008,
+      "mean": {
+        "perception/mse": 0.04275999389707096,
+        "perception/hazard_mse": 0.029351285023112145,
+        "perception/action_mse": 0.02043441768794779,
+        "perception/spatial_loss": 0.24086295210179828
+      },
+      "sample_count": {
+        "perception/mse": 63,
+        "perception/hazard_mse": 63,
+        "perception/action_mse": 63,
+        "perception/spatial_loss": 63
+      },
+      "proxy_score": 0.19830153014747398,
+      "rank": 1
+    },
+    {
+      "iteration": 20000,
+      "checkpoint": "perception_20000.pt",
+      "window_exclusive_start": 19000,
+      "window_inclusive_end": 20000,
+      "mean": {
+        "perception/mse": 0.04346961652239164,
+        "perception/hazard_mse": 0.029347864615302238,
+        "perception/action_mse": 0.020811524892610216,
+        "perception/spatial_loss": 0.23949883736315228
+      },
+      "sample_count": {
+        "perception/mse": 63,
+        "perception/hazard_mse": 63,
+        "perception/action_mse": 63,
+        "perception/spatial_loss": 63
+      },
+      "proxy_score": 0.1987044924042291,
+      "rank": 2
+    },
+    {
+      "iteration": 17008,
+      "checkpoint": "perception_17008.pt",
+      "window_exclusive_start": 16008,
+      "window_inclusive_end": 17008,
+      "mean": {
+        "perception/mse": 0.04291041751229574,
+        "perception/hazard_mse": 0.02979112836340117,
+        "perception/action_mse": 0.020681801503376354,
+        "perception/spatial_loss": 0.24679888288180032
+      },
+      "sample_count": {
+        "perception/mse": 63,
+        "perception/hazard_mse": 63,
+        "perception/action_mse": 63,
+        "perception/spatial_loss": 63
+      },
+      "proxy_score": 0.20188722463827286,
+      "rank": 3
+    },
+    {
+      "iteration": 15008,
+      "checkpoint": "perception_15008.pt",
+      "window_exclusive_start": 14008,
+      "window_inclusive_end": 15008,
+      "mean": {
+        "perception/mse": 0.042515603677620965,
+        "perception/hazard_mse": 0.029167243796918128,
+        "perception/action_mse": 0.020527455926177992,
+        "perception/spatial_loss": 0.24888187481297386
+      },
+      "sample_count": {
+        "perception/mse": 63,
+        "perception/hazard_mse": 63,
+        "perception/action_mse": 63,
+        "perception/spatial_loss": 63
+      },
+      "proxy_score": 0.20206761890874494,
+      "rank": 4
+    },
+    {
+      "iteration": 18000,
+      "checkpoint": "perception_18000.pt",
+      "window_exclusive_start": 17000,
+      "window_inclusive_end": 18000,
+      "mean": {
+        "perception/mse": 0.04396140066877244,
+        "perception/hazard_mse": 0.03033694453419201,
+        "perception/action_mse": 0.020717332760492962,
+        "perception/spatial_loss": 0.24602074329815213
+      },
+      "sample_count": {
+        "perception/mse": 63,
+        "perception/hazard_mse": 63,
+        "perception/action_mse": 63,
+        "perception/spatial_loss": 63
+      },
+      "proxy_score": 0.20285757734543747,
+      "rank": 5
+    },
+    {
+      "iteration": 16000,
+      "checkpoint": "perception_16000.pt",
+      "window_exclusive_start": 15000,
+      "window_inclusive_end": 16000,
+      "mean": {
+        "perception/mse": 0.043523695911206896,
+        "perception/hazard_mse": 0.031032111466167463,
+        "perception/action_mse": 0.020506881147859587,
+        "perception/spatial_loss": 0.24790231528736295
+      },
+      "sample_count": {
+        "perception/mse": 63,
+        "perception/hazard_mse": 63,
+        "perception/action_mse": 63,
+        "perception/spatial_loss": 63
+      },
+      "proxy_score": 0.2034977904358317,
+      "rank": 6
+    },
+    {
+      "iteration": 14000,
+      "checkpoint": "perception_14000.pt",
+      "window_exclusive_start": 13000,
+      "window_inclusive_end": 14000,
+      "mean": {
+        "perception/mse": 0.04401688945908395,
+        "perception/hazard_mse": 0.03029752407400381,
+        "perception/action_mse": 0.020681810432246754,
+        "perception/spatial_loss": 0.2490316570278198
+      },
+      "sample_count": {
+        "perception/mse": 63,
+        "perception/hazard_mse": 63,
+        "perception/action_mse": 63,
+        "perception/spatial_loss": 63
+      },
+      "proxy_score": 0.2043632904422425,
+      "rank": 7
+    },
+    {
+      "iteration": 13008,
+      "checkpoint": "perception_13008.pt",
+      "window_exclusive_start": 12008,
+      "window_inclusive_end": 13008,
+      "mean": {
+        "perception/mse": 0.044342732736988674,
+        "perception/hazard_mse": 0.03148131323830476,
+        "perception/action_mse": 0.02103689856945522,
+        "perception/spatial_loss": 0.24713172231401717
+      },
+      "sample_count": {
+        "perception/mse": 63,
+        "perception/hazard_mse": 63,
+        "perception/action_mse": 63,
+        "perception/spatial_loss": 63
+      },
+      "proxy_score": 0.20468614908260485,
+      "rank": 8
+    },
+    {
+      "iteration": 9008,
+      "checkpoint": "perception_9008.pt",
+      "window_exclusive_start": 8008,
+      "window_inclusive_end": 9008,
+      "mean": {
+        "perception/mse": 0.0438120813064632,
+        "perception/hazard_mse": 0.029372822641143725,
+        "perception/action_mse": 0.02086464682268718,
+        "perception/spatial_loss": 0.2507226663449454
+      },
+      "sample_count": {
+        "perception/mse": 63,
+        "perception/hazard_mse": 63,
+        "perception/action_mse": 63,
+        "perception/spatial_loss": 63
+      },
+      "proxy_score": 0.20472447262219495,
+      "rank": 9
+    },
+    {
+      "iteration": 12000,
+      "checkpoint": "perception_12000.pt",
+      "window_exclusive_start": 11000,
+      "window_inclusive_end": 12000,
+      "mean": {
+        "perception/mse": 0.04404756645598109,
+        "perception/hazard_mse": 0.030410009096302683,
+        "perception/action_mse": 0.02112753591721966,
+        "perception/spatial_loss": 0.24924102662101624
+      },
+      "sample_count": {
+        "perception/mse": 63,
+        "perception/hazard_mse": 63,
+        "perception/action_mse": 63,
+        "perception/spatial_loss": 63
+      },
+      "proxy_score": 0.20500062023186022,
+      "rank": 10
+    },
+    {
+      "iteration": 11008,
+      "checkpoint": "perception_11008.pt",
+      "window_exclusive_start": 10008,
+      "window_inclusive_end": 11008,
+      "mean": {
+        "perception/mse": 0.044189972714299246,
+        "perception/hazard_mse": 0.030355531426649245,
+        "perception/action_mse": 0.02092547058349564,
+        "perception/spatial_loss": 0.25010814222078476
+      },
+      "sample_count": {
+        "perception/mse": 63,
+        "perception/hazard_mse": 63,
+        "perception/action_mse": 63,
+        "perception/spatial_loss": 63
+      },
+      "proxy_score": 0.20534728012151188,
+      "rank": 11
+    },
+    {
+      "iteration": 8000,
+      "checkpoint": "perception_8000.pt",
+      "window_exclusive_start": 7000,
+      "window_inclusive_end": 8000,
+      "mean": {
+        "perception/mse": 0.04562832001182768,
+        "perception/hazard_mse": 0.031089830877525464,
+        "perception/action_mse": 0.02125725986820365,
+        "perception/spatial_loss": 0.24702671643287416
+      },
+      "sample_count": {
+        "perception/mse": 63,
+        "perception/hazard_mse": 63,
+        "perception/action_mse": 63,
+        "perception/spatial_loss": 63
+      },
+      "proxy_score": 0.20594385353523115,
+      "rank": 12
+    },
+    {
+      "iteration": 6000,
+      "checkpoint": "perception_6000.pt",
+      "window_exclusive_start": 5000,
+      "window_inclusive_end": 6000,
+      "mean": {
+        "perception/mse": 0.04373347768116565,
+        "perception/hazard_mse": 0.03173777897147432,
+        "perception/action_mse": 0.020977212943964534,
+        "perception/spatial_loss": 0.2509607644308181
+      },
+      "sample_count": {
+        "perception/mse": 63,
+        "perception/hazard_mse": 63,
+        "perception/action_mse": 63,
+        "perception/spatial_loss": 63
+      },
+      "proxy_score": 0.2060599623262764,
+      "rank": 13
+    },
+    {
+      "iteration": 7008,
+      "checkpoint": "perception_7008.pt",
+      "window_exclusive_start": 6008,
+      "window_inclusive_end": 7008,
+      "mean": {
+        "perception/mse": 0.045754852630789315,
+        "perception/hazard_mse": 0.03183265787268442,
+        "perception/action_mse": 0.02150867809911096,
+        "perception/spatial_loss": 0.24984398365966856
+      },
+      "sample_count": {
+        "perception/mse": 63,
+        "perception/hazard_mse": 63,
+        "perception/action_mse": 63,
+        "perception/spatial_loss": 63
+      },
+      "proxy_score": 0.20810185149607677,
+      "rank": 14
+    },
+    {
+      "iteration": 10000,
+      "checkpoint": "perception_10000.pt",
+      "window_exclusive_start": 9000,
+      "window_inclusive_end": 10000,
+      "mean": {
+        "perception/mse": 0.046047091306675045,
+        "perception/hazard_mse": 0.03293931017082835,
+        "perception/action_mse": 0.021487364929819865,
+        "perception/spatial_loss": 0.25048433386144187
+      },
+      "sample_count": {
+        "perception/mse": 63,
+        "perception/hazard_mse": 63,
+        "perception/action_mse": 63,
+        "perception/spatial_loss": 63
+      },
+      "proxy_score": 0.20924627825263004,
+      "rank": 15
+    }
+  ],
+  "disclaimer": "Training proxy only; no held-out terrain, deployment, gap, stair, MuJoCo, or hardware policy-performance validation."
+}
