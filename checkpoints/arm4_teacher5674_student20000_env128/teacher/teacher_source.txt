@@ -1,1 +1,0 @@
-source_run=2026-09-28_07-43-15_arm4_3gpu_top5_terrain9_term6_resume4800\ncheckpoint=best_top5/5674_top1.pt\niteration=5674\nscore=0.8731115810557682\n

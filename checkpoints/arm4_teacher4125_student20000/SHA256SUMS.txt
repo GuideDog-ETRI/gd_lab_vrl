@@ -1,6 +1,0 @@
-416653ff218ae5eca95d162bc605c44b3c4e9423dfc02952548af1713c73fba4  ./student/perception_20000.pt
-5859c81e22d9b11d72ebf07ea96915a2cada927cab74c25d19dc02e5e6b08ed9  ./teacher/leaderboard_at_freeze.json
-dbcce73bd5976a9f1db07b48a61d65bae3f6097a5067b90d4880fa0fd4efd248  ./teacher/model_4125_top2.pt
-0483fb3b2b26a75fe2f2fe44055633bdcc5b739b60126952fe67d9592d0fc6a3  ./teacher/params/agent.yaml
-d2c726cf22326151c385619dd1c08a3e0dac8e7beb3b655e320cd78fb61e8d8b  ./teacher/params/env.yaml
-74c830624b30f53c84b8f538e9e74df5ba17fce95d14fccfaa109dbad868a46a  ./teacher/teacher_source.txt
