@@ -198,6 +198,8 @@ class StairHandleDisturbance(ManagerTermBase):
         self.lift_steps = torch.zeros(n, device=dev)
         self.handle = torch.tensor(p.get("handle_pos", (-0.33, 0.0, 0.12)), device=dev)
         self.mass = torch.ones(n, device=dev)
+        self.latch_until = torch.zeros(n, device=dev)  # v2.1: eligibility kept after a forward run was detected
+        self.latch_up = torch.zeros(n, dtype=torch.bool, device=dev)
         print(f"[INFO] stair handle disturbance: force ramp steps="
               f"{os.environ.get('GD_LAB_V2_FORCE_RAMP_STEPS', p.get('ramp_steps', 150_000))}", flush=True)
 
@@ -211,6 +213,8 @@ class StairHandleDisturbance(ManagerTermBase):
             t[ids] = 0
         self.window_end[ids] = -1.0
         self.force_w[ids] = 0
+        self.latch_until[ids] = 0
+        self.latch_up[ids] = False
 
     def _scale(self, env, ramp_steps):
         """Force ramp over this process's env steps. ``common_step_counter`` restarts at 0 on every launch, so a
@@ -224,7 +228,8 @@ class StairHandleDisturbance(ManagerTermBase):
                  ascend_force=(0.0, 200.0), ascend_duration=(0.3, 1.0), ascend_angle_deg=(20.0, 45.0),
                  ascend_jerk_prob: float = 0.0, ascend_jerk_force=(300.0, 400.0), ascend_jerk_duration=(0.1, 0.3),
                  descend_force=(0.0, 150.0), descend_duration=(0.1, 0.5), descend_angle_deg=(-10.0, 30.0),
-                 handle_pos=(-0.33, 0.0, 0.12), body_name: str = "trunk", fall_tilt_cos: float = 0.5):
+                 handle_pos=(-0.33, 0.0, 0.12), body_name: str = "trunk", fall_tilt_cos: float = 0.5,
+                 latch_s: float = 0.0):
         robot, sensor = self.robot, env.scene[sensor_cfg.name]
         dt, dev, n = env.step_dt, env.device, env.num_envs
         self.time += dt
@@ -239,6 +244,13 @@ class StairHandleDisturbance(ManagerTermBase):
         heading = torch.stack((heading_w.cos(), heading_w.sin()), -1)
         command_vx = env.command_manager.get_command("base_velocity")[:, 0]
         ascending, descending = stair_push_modes(uphill, heading, robot.data.root_lin_vel_w[:, :2], command_vx)
+        if latch_s > 0:  # slowing down after a detected forward run up/down must not dodge the disturbance
+            detected = band & (ascending | descending)
+            self.latch_until = torch.where(detected, self.time + latch_s, self.latch_until)
+            self.latch_up = torch.where(detected, ascending, self.latch_up)
+            latched = band & (self.time < self.latch_until) & (command_vx > 0.15)
+            ascending = ascending | (latched & self.latch_up & ~descending)
+            descending = descending | (latched & ~self.latch_up & ~ascending)
 
         self.eligible_up += (band & ascending).float()
         self.eligible_down += (band & descending).float()

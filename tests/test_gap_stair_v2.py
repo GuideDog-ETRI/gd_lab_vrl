@@ -190,7 +190,8 @@ def test_v2_config_adds_terms_in_order_and_no_observations():
 
 def test_gast_teacher_uses_the_identical_v2_objective():
     """BIVT-Ray CleanV2 and the GAST CleanV2 teacher must be trained on the same terms (byte-identical copies)."""
-    for name in ("gap_stair_v2.py", "gap_stair_v2_math.py", "platform_gap_attempts.py", "platform_gap_finetune.py"):
+    for name in ("gap_stair_v2.py", "gap_stair_v2_math.py", "gap_stair_v21.py", "platform_gap_attempts.py",
+                 "platform_gap_finetune.py"):
         assert (ROOT / "src/gd_lab/mdp" / name).read_bytes() == (ROOT / "gast/src/gd_lab/mdp" / name).read_bytes(), name
     gast_tasks = (ROOT / "gast/src/gd_lab/gast/tasks.py").read_text()
     tree = ast.parse(gast_tasks)
@@ -222,3 +223,73 @@ def test_main_training_adds_short_hard_yanks_within_the_critic_clip():
     # only the extreme corner (400 N on the lightest robot, 38.7 kg) saturates at the clip (2.07), still "maximal".
     assert 400.0 * 0.2 / 46.684 < 2.0
     assert 400.0 * 0.2 / (40.684 - 2.0) < 2.1
+
+
+def test_v21_speed_mix_centres_on_0p8_to_1p0_and_never_exceeds_the_ceiling():
+    from gd_lab.mdp.gap_stair_v2_math import V21_SPEED_MIX, sample_v21_speed, speed_ceiling
+
+    assert abs(sum(p for p, _, _ in V21_SPEED_MIX) - 1.0) < 1e-9
+    g = torch.Generator().manual_seed(0)
+    v = sample_v21_speed(20000, 1.2, generator=g)
+    usual = ((v >= 0.8) & (v <= 1.0)).float().mean()
+    assert 0.55 < usual < 0.65 and v.max() <= 1.2 and v.min() >= 0.2
+    assert sample_v21_speed(1000, 0.6, generator=g).max() <= 0.6
+    assert speed_ceiling(0, 300_000) == 0.6 and speed_ceiling(300_000, 300_000) == 1.2 and speed_ceiling(5, 0) == 1.2
+
+
+def test_v21_task_and_gast_teachers_use_the_shared_builder():
+    tasks = (ROOT / "src/gd_lab/teachers/bivt/tasks.py").read_text()
+    assert "class GapFinetuneCleanV21RaycastEnvCfg(GapFinetuneCleanRaycastEnvCfg)" in tasks and "add_v21_terms(self)" in tasks
+    assert "CleanV21" in gap_guard.V2_ARMS and "Gd-VrlGapFinetuneCleanV21Raycast-Rbq10-Dreamwaq-v0" in gap_guard.V2_SOURCE_TASKS
+    gast = (ROOT / "gast/src/gd_lab/gast/tasks.py").read_text()
+    assert "task='GastGapCleanV21'" in gast and "task='GastScratchV21'" in gast
+
+
+def test_v21_final_speed_resample_has_no_pile_up_at_the_ceiling():
+    from gd_lab.mdp.gap_stair_v2_math import sample_v21_speed_in_ceiling
+
+    g = torch.Generator().manual_seed(1)
+    early = sample_v21_speed_in_ceiling(20000, 0.6, generator=g)
+    assert early.max() <= 0.6 and early.min() >= 0.2
+    assert (early >= 0.599).float().mean() < 0.01  # clamping put ~83% exactly on 0.6
+    full = sample_v21_speed_in_ceiling(20000, 1.2, generator=g)
+    assert 0.55 < ((full >= 0.8) & (full <= 1.0)).float().mean() < 0.65
+
+
+def test_hysteresis_overlift_and_slot_side():
+    from gd_lab.mdp.gap_stair_v2_math import hysteresis_contact, overlift_cost, slot_side
+
+    prev = torch.tensor([0.0, 1.0, 1.0, 0.0])
+    state = hysteresis_contact(torch.tensor([20.0, 10.0, 3.0, 10.0]), prev)
+    assert state.tolist() == [1.0, 1.0, 0.0, 0.0]
+    cost = overlift_cost(torch.tensor([[0.45, 0.25]]), torch.tensor([[0.10, 0.10]]), torch.tensor([[True, True]]))
+    assert torch.isclose(cost, torch.tensor([1.0]))  # 0.35 above the deck saturates (0.20 + 0.15)
+    assert overlift_cost(torch.tensor([[0.29]]), torch.tensor([[0.10]]), torch.tensor([[True]])).item() == 0.0
+    side = slot_side(torch.tensor([0.9, 1.0, 1.3]), torch.tensor(1.0), torch.tensor(1.2), 0.025)
+    assert side.tolist() == [-1.0, 0.0, 1.0]
+
+
+def test_strict_clean_counts_an_edge_touch_within_the_foot_radius():
+    tracker = GapAttemptTracker(1, "cpu", strict_contact=True)
+    slots = torch.tensor([[[-1.2, -1.0], [1.0, 1.1]]])
+    args = dict(foot_z=torch.full((1, 4), 0.03), slots=slots, lower_deck_z=torch.tensor([[-0.5, -0.5]]),
+                forward=torch.tensor([True]), family=torch.tensor([True]))
+    none_ev, none_c = torch.zeros(1, 2, dtype=torch.bool), torch.zeros(1, 4, dtype=torch.bool)
+    tracker.update(torch.tensor([[0.9, 0.8, 0.5, 0.4]]), crossing_event=none_ev, contact=none_c, **args)
+    # centre 1 cm before the slot edge: the 3 cm sphere overhangs it -> a touch now counts (v2 checked the centre)
+    tracker.update(torch.tensor([[0.99, 0.8, 0.5, 0.4]]), crossing_event=none_ev,
+                   contact=torch.tensor([[True, False, False, False]]), **args)
+    result = tracker.update(torch.tensor([[1.5, 1.4, 1.3, 1.2]]), crossing_event=torch.tensor([[False, True]]),
+                            contact=none_c, **args)
+    assert not bool(result.clean_event)
+
+
+def test_v21_final_weights_and_event_units():
+    module = ast.parse((ROOT / "src/gd_lab/mdp/gap_stair_v21.py").read_text())
+    weights = next(n for n in module.body if isinstance(n, ast.Assign) and getattr(n.targets[0], "id", "") == "V21_WEIGHTS")
+    w = ast.literal_eval(weights.value)
+    assert w["termination_penalty"] == -2.0 and w["stair_push_fall"] == -3.0  # total -5 on a disturbance fall
+    assert w["platform_gap_clean"] + 4 * w["gap_foot_clean"] == 1.5  # clean split keeps the v2 total
+    assert w["gap_overlift"] == -0.25 and w["gap_hind_hop"] == -1.0
+    source = ast.unparse(module)
+    assert "terminated.float() / env.step_dt" in source and "is_standing_env[gap] = False" in source
