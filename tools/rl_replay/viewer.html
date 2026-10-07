@@ -8,6 +8,7 @@
 :root{--bg:#fafaf9;--panel:#ffffff;--ink:#1c1917;--quiet:#57534e;--line:#d6d3d1;--pos:#15803d;--neg:#b91c1c;--accent:#2563eb;--warn:#b45309}
 @media (prefers-color-scheme: dark){:root{--bg:#141414;--panel:#1d1d1d;--ink:#eeeeec;--quiet:#a8a29e;--line:#3a3a3a;--pos:#4ade80;--neg:#f87171;--accent:#60a5fa;--warn:#fbbf24}}
 *{box-sizing:border-box}
+[hidden]{display:none !important}
 body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif}
 header{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--panel)}
 header b{font-size:14px;margin-right:8px}
@@ -26,23 +27,69 @@ canvas{width:100%;display:block}
 .row{grid-column:1/-1;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
 .full{grid-column:1/-1}
 #drop{padding:40px;text-align:center;color:var(--quiet)}
+.sep{width:1px;height:22px;background:var(--line);margin:0 4px}
+header label{color:var(--quiet)}
+.layers{display:inline-flex;gap:8px;border:1px solid var(--line);border-radius:6px;padding:2px 8px}
+.layers label{display:inline-flex;align-items:center;gap:3px;color:var(--ink)}
+.sw{display:inline-block;width:10px;height:10px;border-radius:2px}
+#liveBadge{color:var(--neg);font-weight:600}
+.panel{margin:10px}
+.form{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:8px 14px;margin:8px 0}
+.form label{display:flex;flex-direction:column;gap:3px;color:var(--quiet)}
+.form input[type=number],.form input:not([type]),.form select{font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:3px 6px}
+#recLog{max-height:180px;overflow:auto;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:6px;font-size:11.5px;white-space:pre-wrap}
+#recList{border-collapse:collapse;width:100%;margin-top:8px}
+#recList td,#recList th{padding:4px 8px;border-bottom:1px solid var(--line);text-align:left}
+#recList tr:hover td{background:var(--bg);cursor:pointer}
 @media (max-width:900px){main,.row{grid-template-columns:1fr}}
 </style>
 </head>
 <body>
 <header>
   <b>RL Rollout Replay</b>
-  <input type="file" id="file" accept=".json">
-  <select id="env"></select>
-  <button id="play">▶</button>
-  <button id="back">◀ 1</button><button id="fwd">1 ▶</button>
-  <select id="speed"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option></select>
+  <button id="menuRecord">● 기록</button>
+  <button id="menuOpen">📂 불러오기</button>
+  <span class="sep"></span>
+  <button id="play" title="재생 (Space)">▶ 재생</button>
+  <button id="pause" title="일시정지 (Space)">⏸ 일시정지</button>
+  <button id="stop" title="정지: 처음으로">■ 정지</button>
+  <button id="back" title="한 스텝 뒤 (←)">◀ 1</button><button id="fwd" title="한 스텝 앞 (→)">1 ▶</button>
+  <label>속도 <select id="speed"><option>0.25</option><option>0.5</option><option selected>1</option><option>2</option></select></label>
+  <label>환경 <select id="env"></select></label>
+  <span class="layers" title="로봇 창에 겹쳐 그릴 지형 레이어">
+    <label><input type="checkbox" id="layTruth" checked><i class="sw" style="background:#5b8def"></i>정답 지형</label>
+    <label><input type="checkbox" id="layTeacher" checked><i class="sw" style="background:#f97316"></i>교사 입력</label>
+    <label><input type="checkbox" id="layStudent" checked><i class="sw" style="background:#16a34a"></i>학생 카메라</label>
+  </span>
   <input type="range" id="slider" min="0" max="0" value="0">
   <span id="clock">t=0.00 s</span>
+  <span id="liveBadge" hidden title="클릭: 최신 스텝 따라가기">● 실시간</span>
 </header>
-<div id="drop" class="card" style="margin:10px">기록 파일(record_rollout.py가 만든 .json)을 열거나 여기에 끌어다 놓으세요.</div>
+<section id="recordPanel" class="card panel" hidden>
+  <h3>기록 — 정책을 Isaac에서 돌려 매 스텝을 기록합니다 (server.py 필요, GPU 사용)</h3>
+  <div class="form">
+    <label>정책 종류(학습 task) <select id="recTask"></select></label>
+    <label>체크포인트 <select id="recCkpt"></select></label>
+    <label>환경 수 <input id="recEnvs" type="number" value="8" min="1" max="64"></label>
+    <label>기록 길이(초) <input id="recSeconds" type="number" value="4" min="1" max="20" step="0.5"></label>
+    <label>전진 명령 vx (비우면 학습 명령) <input id="recVx" type="number" step="0.1" placeholder="예: 0.8"></label>
+    <label><input id="recStoch" type="checkbox"> 행동 샘플 (학습처럼)</label>
+    <label>파일 이름 <input id="recName" placeholder="비우면 자동"></label>
+    <label><input id="recForce" type="checkbox"> GPU 사용 중이어도 기록</label>
+    <label><input id="recLive" type="checkbox" checked> 시뮬레이터에서 바로 받아 보기 (실시간)</label>
+    <label><input id="recStudent" type="checkbox" checked> 학생 카메라 시점도 기록 (벨리 카메라 4대 깊이)</label>
+  </div>
+  <button id="recStart">기록 시작</button> <span id="recState"></span>
+  <pre id="recLog"></pre>
+</section>
+<section id="openPanel" class="card panel" hidden>
+  <h3>불러오기 — 저장된 기록 (logs/rl_replay/), 진행 중인 실시간 스트림(*.live.ndjson), 또는 이 컴퓨터의 파일</h3>
+  <input type="file" id="file" accept=".json,.ndjson">
+  <table id="recList"></table>
+</section>
+<div id="drop" class="card" style="margin:10px">메뉴의 <b>● 기록</b>으로 새로 기록하거나, <b>📂 불러오기</b>로 기록 파일(.json)을 여세요. 파일을 여기에 끌어다 놓아도 됩니다.</div>
 <main id="app" hidden>
-  <div class="card"><h3>로봇 (드래그: 회전, 휠: 확대, 발 색: 접지)</h3><canvas id="view"></canvas></div>
+  <div class="card"><h3 id="viewtitle">로봇 (드래그: 회전, 휠: 확대, 발 색: 접지)</h3><div id="v3d" hidden style="height:420px"></div><canvas id="view"></canvas></div>
   <div class="card" id="info"></div>
   <div class="row">
     <div class="card"><h3>이번 스텝 보상 (항목별, 가중치 적용, 크기순)</h3><canvas id="now"></canvas></div>
@@ -51,6 +98,9 @@ canvas{width:100%;display:block}
   <div class="card full"><h3>타임라인: 가치 V(s), 실제 미래 보상 G<sub>t</sub>, advantage A<sub>t</sub>, 보상 r<sub>t</sub></h3><canvas id="timeline"></canvas></div>
   <div class="card full"><h3>행동 (관절별 정책 평균 ± std, 실제 출력)</h3><canvas id="actions"></canvas></div>
 </main>
+<script src="vendor/three.min.js"></script>
+<script src="vendor/STLLoader.js"></script>
+<script src="vendor/OrbitControls.js"></script>
 <script>
 "use strict";
 let D=null, E=null, t=0, playing=false, last=0, acc=0;
@@ -59,26 +109,75 @@ const $=id=>document.getElementById(id);
 const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 function load(text){
-  D=JSON.parse(text);
-  const sel=$("env"); sel.innerHTML="";
+  if(text.trimStart().startsWith('{"meta"')&&text.includes('\n{"t"')) return loadStream(text.split("\n").filter(Boolean).map(l=>JSON.parse(l)));
+  stopLive(); D=JSON.parse(text); show();
+}
+function show(keep){
+  const sel=$("env"), prev=sel.value; sel.innerHTML="";
   D.envs.forEach((e,i)=>{const o=document.createElement("option");o.value=i;
     const ret=e.reward.reduce((a,b)=>a+b,0);o.textContent=`env ${i} (Σr=${ret.toFixed(2)}${e.done.some(x=>x)?", 종료":""})`;sel.appendChild(o)});
-  $("drop").hidden=true; $("app").hidden=false;
-  selectEnv(0);
+  if(keep&&prev!=="") sel.value=prev;
+  $("drop").hidden=true; $("app").hidden=false; $("liveBadge").hidden=!D.meta.live;
+  for(const [id,key] of [["layTeacher","terrain_obs"],["layStudent","cloud"]]){ const has=D.envs.some(e=>e[key]&&e[key].some(x=>x&&x.length)); $(id).disabled=!has; $(id).parentElement.title=has?"":"이 기록에는 없음" }
+  if(keep&&E){ E=D.envs[+sel.value]; $("slider").max=D.meta.steps-1; return }
+  (R3?Promise.resolve(true):init3D()).then(ok=>{if(!ok) console.log("URDF 3D unavailable (open through serve.sh); stick figure"); selectEnv(+$("env").value||0)})
+    .catch(err=>{console.warn("URDF 3D failed",err); R3=null; $("v3d").hidden=true; $("view").hidden=false; selectEnv(0)});
 }
-function selectEnv(i){E=D.envs[i];t=0;$("slider").max=D.meta.steps-1;$("slider").value=0;draw()}
-$("file").onchange=e=>{const f=e.target.files[0]; if(f) f.text().then(load)};
+// ---------- live: follow a recorder that streams one JSON line per step ----------
+let live=null;
+function blankEnv(){ return {} }
+function appendStep(row){ row.envs.forEach((r,e)=>{ const E2=D.envs[e]||(D.envs[e]={}); for(const k in r){ (E2[k]||(E2[k]=[])).push(r[k]) } }) }
+function finishProvisional(){ // G, G^k, delta, A from the steps so far, bootstrapping with the last V (exact values come with the final file)
+  const g=D.meta.gamma, l=D.meta.lam;
+  D.envs.forEach(E2=>{ const n=E2.reward.length, K=D.meta.term_names.length; E2.return=new Array(n); E2.advantage=new Array(n); E2.delta=new Array(n); E2.term_returns=new Array(n);
+    let nv=E2.value[n-1], nr=nv, na=0, nk=new Array(K).fill(0);
+    for(let i=n-1;i>=0;i--){ const alive=E2.done[i]?0:1; E2.delta[i]=E2.reward[i]+g*nv*alive-E2.value[i]; E2.advantage[i]=E2.delta[i]+g*l*alive*na;
+      E2.return[i]=E2.reward[i]+g*alive*nr; E2.term_returns[i]=E2.terms[i].map((x,k)=>x+g*alive*nk[k]);
+      nv=E2.value[i]; nr=E2.return[i]; na=E2.advantage[i]; nk=E2.term_returns[i] } });
+}
+function loadStream(rows){ // a finished or partial .live.ndjson file opened from disk
+  stopLive(); D={meta:{...rows[0].meta},envs:[]}; rows.slice(1).filter(r=>r.envs).forEach(appendStep);
+  D.meta.steps=D.envs[0]?D.envs[0].reward.length:0; if(!D.meta.steps) return alert("스트림에 아직 스텝이 없습니다");
+  D.meta.live=false; D.meta.provisional=true; finishProvisional(); show();
+}
+function unfollow(){ if(live){ live.follow=false; $("liveBadge").textContent="● 실시간 (멈춤 — 클릭하면 따라가기)" } }
+$("liveBadge").onclick=()=>{ if(live){ live.follow=true; setPlaying(false); $("liveBadge").textContent="● 실시간"; t=D.meta.steps-1; draw() } };
+function stopLive(){ if(live){ clearTimeout(live.timer); live=null } $("liveBadge").hidden=true }
+function startLive(path){
+  stopLive(); live={path,next:0,timer:null,follow:true}; D=null; E=null;
+  $("openPanel").hidden=true; $("recordPanel").hidden=true; $("drop").hidden=false; $("drop").textContent="시뮬레이터 시작을 기다리는 중… (Isaac 기동에 1~2분)";
+  pollLive();
+}
+async function pollLive(){
+  if(!live) return; const L=live;
+  let j; try{ j=await (await fetch(`/api/live?path=${encodeURIComponent(L.path)}&from=${L.next}`)).json() }catch(e){ j={lines:[],next:L.next} }
+  if(L!==live) return;
+  let ended=null;
+  for(const row of j.lines||[]){ if(row.meta){ D={meta:{...row.meta,steps:0},envs:[]} } else if(row.envs&&D){ appendStep(row) } else if(row.end){ ended=row.out } }
+  if(j.next!==undefined) L.next=j.next;
+  if(D&&D.envs.length&&D.envs[0].reward){ const first=!E, atEnd=!E||t>=D.meta.steps-1; D.meta.steps=D.envs[0].reward.length; finishProvisional();
+    show(!first); if(L.follow&&!playing&&E){ t=D.meta.steps-1 } if(E) draw() }
+  if(ended){ stopLive(); const out=ended.includes("/logs/rl_replay/")?ended.slice(ended.indexOf("logs/rl_replay/")):ended; const keepT=t, env=$("env").value;
+    fetch("/"+out).then(r=>r.ok?r.text():Promise.reject()).then(txt=>{ D=JSON.parse(txt); show(true); $("env").value=env; E=D.envs[+env]; t=Math.min(keepT,D.meta.steps-1); draw();
+      $("recState").textContent="실시간 기록 완료 — 최종 파일(정확한 G, A)로 바꿨습니다: "+out }).catch(()=>{}); return }
+  L.timer=setTimeout(pollLive,250);
+}
+function selectEnv(i){E=D.envs[i];t=0;$("slider").max=D.meta.steps-1;$("slider").value=0;setPlaying(false)}
+$("file").onchange=e=>{const f=e.target.files[0]; if(f) f.text().then(t=>{$("openPanel").hidden=true; load(t)})};
 document.addEventListener("dragover",e=>e.preventDefault());
 document.addEventListener("drop",e=>{e.preventDefault();const f=e.dataTransfer.files[0]; if(f) f.text().then(load)});
-$("env").onchange=e=>selectEnv(+e.target.value);
-$("slider").oninput=e=>{t=+e.target.value;draw()};
-$("back").onclick=()=>{t=Math.max(0,t-1);draw()};
-$("fwd").onclick=()=>{t=Math.min(D.meta.steps-1,t+1);draw()};
-$("play").onclick=()=>{playing=!playing;$("play").textContent=playing?"⏸":"▶";last=performance.now();if(playing)requestAnimationFrame(tick)};
-document.addEventListener("keydown",e=>{if(!D)return;if(e.key===" "){$("play").click();e.preventDefault()}
+$("env").onchange=e=>{ if(live){ E=D.envs[+e.target.value]; draw() } else selectEnv(+e.target.value) };
+$("slider").oninput=e=>{unfollow();t=+e.target.value;draw()};
+$("back").onclick=()=>{unfollow();t=Math.max(0,t-1);draw()};
+$("fwd").onclick=()=>{unfollow();t=Math.min(D.meta.steps-1,t+1);draw()};
+function setPlaying(on){ if(!D)return; if(on&&t>=D.meta.steps-1)t=0; playing=on; $("play").disabled=on; $("pause").disabled=!on; last=performance.now(); acc=0; if(on)requestAnimationFrame(tick); draw() }
+$("play").onclick=()=>{unfollow();setPlaying(true)};
+$("pause").onclick=()=>setPlaying(false);
+$("stop").onclick=()=>{unfollow();setPlaying(false); t=0; draw()};
+document.addEventListener("keydown",e=>{if(!D||e.target.tagName==="INPUT")return;if(e.key===" "){setPlaying(!playing);e.preventDefault()}
   if(e.key==="ArrowRight")$("fwd").click(); if(e.key==="ArrowLeft")$("back").click()});
 function tick(now){if(!playing)return;acc+=(now-last)/1000*(+$("speed").value);last=now;
-  const dt=D.meta.dt; while(acc>=dt){acc-=dt;t++; if(t>=D.meta.steps){t=D.meta.steps-1;playing=false;$("play").textContent="▶";break}}
+  const dt=D.meta.dt; while(acc>=dt){acc-=dt;t++; if(t>=D.meta.steps){t=D.meta.steps-1;if(live){draw();requestAnimationFrame(tick);return} setPlaying(false);return}}
   draw(); requestAnimationFrame(tick)}
 
 // ---------- 3D view (own projection: no libraries, works offline) ----------
@@ -150,7 +249,7 @@ function drawNow(){
 function drawFuture(){
   const names=D.meta.term_names, v=E.term_returns[t];
   const items=names.map((n,i)=>[n,v[i]]).filter(x=>Math.abs(x[1])>1e-5).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1])).slice(0,16);
-  bars($("future"),items,`G_t = ${E.return[t].toFixed(3)}  vs  V(s_t) = ${E.value[t].toFixed(3)}  (상위 16개 항목)`);
+  bars($("future"),items,`G_t = ${E.return[t].toFixed(3)}  vs  V(s_t) = ${E.value[t].toFixed(3)}  (상위 16개 항목)${D.meta.live||D.meta.provisional?"  · 잠정: 아직 안 온 미래는 마지막 V로 대신":""}`);
 }
 function drawTimeline(){
   const [g,w,h]=fit($("timeline"),190), n=D.meta.steps, pad=34;
@@ -195,9 +294,136 @@ function drawInfo(){
     <div class="why"><b>왜 이 행동인가:</b> ${verdict}<br>미래 보상을 가장 크게 움직이는 항목: ${top}.</div>`;
   $("clock").textContent=`t=${(t*D.meta.dt).toFixed(2)} s`;
 }
-function draw(){ if(!E)return; $("slider").value=t; drawView(); drawInfo(); drawNow(); drawFuture(); drawTimeline(); drawActions(); }
-window.onresize=draw;
-if(location.hash.startsWith("#url=")) fetch(decodeURIComponent(location.hash.slice(5))).then(r=>r.text()).then(load);
+function draw(){ if(!E)return; $("slider").value=t; if(R3) update3D(); else drawView(); drawInfo(); drawNow(); drawFuture(); drawTimeline(); drawActions(); }
+// ---------- menus: record (through server.py) and open ----------
+const API=location.protocol.startsWith("http");
+function showPanel(id){ for(const p of ["recordPanel","openPanel"]) $(p).hidden = p!==id || !$(p).hidden; if(id==="openPanel"&&!$(id).hidden) listRecordings(); if(id==="recordPanel"&&!$(id).hidden) loadSources() }
+$("menuRecord").onclick=()=>showPanel("recordPanel");
+$("menuOpen").onclick=()=>showPanel("openPanel");
+async function loadSources(){
+  if(!API){$("recState").textContent="기록하려면 server.py로 열어야 합니다: python3 tools/rl_replay/server.py";return}
+  const s=await (await fetch("/api/sources")).json();
+  $("recTask").innerHTML=s.tasks.map(x=>`<option value="${x.task}">${x.label} — ${x.task}</option>`).join("");
+  $("recCkpt").innerHTML=s.checkpoints.map(c=>`<option>${c}</option>`).join("");
+  pollRecord();
+}
+$("recStart").onclick=async()=>{
+  const body={task:$("recTask").value,checkpoint:$("recCkpt").value,num_envs:+$("recEnvs").value,seconds:+$("recSeconds").value,
+    vx:$("recVx").value,stochastic:$("recStoch").checked,name:$("recName").value,force:$("recForce").checked,
+    live:$("recLive").checked,student_view:$("recStudent").checked};
+  const r=await fetch("/api/record",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}); const j=await r.json();
+  $("recState").textContent=j.error?("거부: "+j.error+(j.busy?" ("+j.busy.length+"개 학습 프로세스)":"")):"기록 중…"; if(!j.error){ pollRecord(); if(j.live) startLive(j.live) }
+};
+async function pollRecord(){
+  if(!API)return; const s=await (await fetch("/api/record")).json();
+  if(s.state==="idle") return;
+  $("recLog").textContent=(s.tail||[]).join("\n");
+  $("recState").textContent={running:`기록 중… ${s.elapsed||0}s`,done:`완료 (${s.elapsed}s): ${s.out}`,failed:`실패 (exit ${s.exit}) — 로그 확인`}[s.state]||s.state;
+  if(s.state==="running") setTimeout(pollRecord,2000);
+  else if(s.state==="done"&&s.out&&!s.live&&$("recState").dataset.loaded!==s.out){ $("recState").dataset.loaded=s.out; openPath(s.out) }
+  else if(s.state==="failed") stopLive();
+}
+async function listRecordings(){
+  if(!API){$("recList").innerHTML="<tr><td>저장된 목록은 server.py로 열었을 때 보입니다. 위에서 파일을 직접 고르세요.</td></tr>";return}
+  const list=await (await fetch("/api/recordings")).json();
+  $("recList").innerHTML="<tr><th>파일</th><th>정책(task)</th><th>환경 × 스텝</th><th>시각</th></tr>"+list.map(r=>
+    `<tr data-path="${r.path}" data-live="${r.live&&!r.finished?1:""}"><td>${r.live?(r.finished?"⏺ 스트림(완료) ":"<b style='color:var(--neg)'>● 실시간</b> "):""}${r.name}</td><td>${r.meta.task||""}</td><td>${r.meta.num_envs||"?"} × ${r.meta.steps||(r.live?"…":"?")}</td><td>${r.mtime}</td></tr>`).join("");
+  $("recList").querySelectorAll("tr[data-path]").forEach(tr=>tr.onclick=()=>tr.dataset.live?startLive(tr.dataset.path):openPath(tr.dataset.path));
+}
+function openPath(path){ stopLive(); fetch("/"+path).then(r=>r.text()).then(txt=>{ $("openPanel").hidden=true; $("recordPanel").hidden=true; load(txt) }) }
+
+window.onresize=()=>{if(R3){const w=$("v3d").clientWidth;R3.renderer.setSize(w,420);R3.camera.aspect=w/420;R3.camera.updateProjectionMatrix()} draw()};
+
+// ---------- RBQ10 from its URDF (link meshes, forward kinematics from the recorded joint angles) ----------
+let R3=null;
+const URDF_URL=new URL("../../assets/robots/rbq10/urdf/rbq10_simple.urdf", location.href);
+function setOrigin(obj,o){ if(!o)return; const xyz=(o.getAttribute("xyz")||"0 0 0").trim().split(/\s+/).map(Number), rpy=(o.getAttribute("rpy")||"0 0 0").trim().split(/\s+/).map(Number);
+  obj.position.set(...xyz); obj.quaternion.setFromEuler(new THREE.Euler(rpy[0],rpy[1],rpy[2],"ZYX")) }
+async function init3D(){
+  if(!window.THREE||location.protocol==="file:") return false;
+  const res=await fetch(URDF_URL); if(!res.ok) return false;
+  const xml=new DOMParser().parseFromString(await res.text(),"text/xml");
+  const loader=new THREE.STLLoader(), cache={}, links={}, joints={}, feet={};
+  const mat=new THREE.MeshStandardMaterial({color:0x8a8f98,metalness:0.2,roughness:0.6});
+  const trunkMat=new THREE.MeshStandardMaterial({color:0x2f3a4a,metalness:0.2,roughness:0.5});
+  const pending=[];
+  xml.querySelectorAll("robot > link").forEach(l=>{
+    const name=l.getAttribute("name"), g=new THREE.Group(); g.name=name; links[name]=g;
+    l.querySelectorAll(":scope > visual").forEach(v=>{
+      const holder=new THREE.Group(); setOrigin(holder,v.querySelector("origin")); g.add(holder);
+      const geo=v.querySelector("geometry"); const mesh=geo.querySelector("mesh"), box=geo.querySelector("box"), sph=geo.querySelector("sphere"), cyl=geo.querySelector("cylinder");
+      if(mesh){ const url=new URL(mesh.getAttribute("filename"), URDF_URL).href, sc=(mesh.getAttribute("scale")||"1 1 1").split(/\s+/).map(Number);
+        cache[url]=cache[url]||new Promise((ok,bad)=>loader.load(url,ok,undefined,bad));
+        pending.push(cache[url].then(gm=>{const m=new THREE.Mesh(gm,mat);m.scale.set(...sc);holder.add(m)})); }
+      else if(box){ const sz=box.getAttribute("size").split(/\s+/).map(Number); if(Math.max(...sz)>0.01) holder.add(new THREE.Mesh(new THREE.BoxGeometry(...sz),trunkMat)) }
+      else if(sph){ const m=new THREE.Mesh(new THREE.SphereGeometry(+sph.getAttribute("radius"),16,12),new THREE.MeshStandardMaterial({color:0x15803d})); holder.add(m); if(name.endsWith("_foot")) feet[name]=m }
+      else if(cyl){ const m=new THREE.Mesh(new THREE.CylinderGeometry(+cyl.getAttribute("radius"),+cyl.getAttribute("radius"),+cyl.getAttribute("length"),16),mat); m.rotation.x=Math.PI/2; holder.add(m) }
+    });
+  });
+  xml.querySelectorAll("robot > joint").forEach(j=>{
+    const parent=links[j.querySelector("parent").getAttribute("link")], child=links[j.querySelector("child").getAttribute("link")]; if(!parent||!child)return;
+    const fixed=new THREE.Group(); setOrigin(fixed,j.querySelector("origin")); const motion=new THREE.Group(); fixed.add(motion); motion.add(child); parent.add(fixed);
+    const type=j.getAttribute("type"); if(type==="revolute"||type==="continuous"){ const ax=(j.querySelector("axis")?.getAttribute("xyz")||"1 0 0").split(/\s+/).map(Number);
+      joints[j.getAttribute("name")]={motion,axis:new THREE.Vector3(...ax).normalize()} }
+  });
+  await Promise.all(pending);
+  const host=$("v3d"); host.hidden=false; $("view").hidden=true;
+  const w=host.clientWidth, renderer=new THREE.WebGLRenderer({antialias:true}); renderer.setPixelRatio(window.devicePixelRatio||1); renderer.setSize(w,420); host.appendChild(renderer.domElement);
+  const scene=new THREE.Scene(); scene.background=new THREE.Color(css("--panel"));
+  scene.add(new THREE.HemisphereLight(0xffffff,0x444444,0.9)); const sun=new THREE.DirectionalLight(0xffffff,0.8); sun.position.set(2,-3,5); scene.add(sun);
+  const camera=new THREE.PerspectiveCamera(45,w/420,0.02,50); camera.up.set(0,0,1); camera.position.set(-1.2,-1.4,0.9);
+  const controls=new THREE.OrbitControls(camera,renderer.domElement); controls.enableDamping=false;
+  // The root is the link that is no joint's child but has children (trunk in rbq10_simple.urdf).
+  const children=new Set([...xml.querySelectorAll("robot > joint > child")].map(c=>c.getAttribute("link")));
+  const parents=new Set([...xml.querySelectorAll("robot > joint > parent")].map(c=>c.getAttribute("link")));
+  const rootName=Object.keys(links).find(n=>!children.has(n)&&parents.has(n)); const root=links[rootName]; scene.add(root);
+  // terrain layers, overlaid and switchable: ground truth (blue, height-shaded), the teacher's own input (orange,
+  // only the cells it was given), the student's camera depth as world points (green)
+  const scan=new THREE.InstancedMesh(new THREE.BoxGeometry(0.045,0.045,0.006),new THREE.MeshStandardMaterial({transparent:true,opacity:0.55}),187);
+  scan.instanceColor=new THREE.InstancedBufferAttribute(new Float32Array(187*3),3); scene.add(scan);
+  const teach=new THREE.InstancedMesh(new THREE.BoxGeometry(0.022,0.022,0.022),new THREE.MeshStandardMaterial({color:0xf97316}),187); scene.add(teach);
+  const cloud=new THREE.Points(new THREE.BufferGeometry(),new THREE.PointsMaterial({color:0x16a34a,size:0.018})); scene.add(cloud);
+  const path=new THREE.Line(new THREE.BufferGeometry(),new THREE.LineBasicMaterial({color:0x888888})); scene.add(path);
+  R3={renderer,scene,camera,controls,root,links,joints,feet,scan,teach,cloud,path,last:null};
+  controls.addEventListener("change",()=>renderer.render(scene,camera));
+  $("viewtitle").textContent="RBQ10 (URDF 메시, 기록한 관절 각도로 순기구학) · 드래그: 회전, 휠: 확대, 발 색: 접지";
+  return true;
+}
+function teacherCells(){ // the policy's terrain input back in world coordinates: z = scanner_z - 0.5 - h/5, valid cells only
+  const pts=E.scan[t]||[], obs=(E.terrain_obs&&E.terrain_obs[t])||[], n=pts.length;
+  if(obs.length!==2*n) return [];
+  const sz=E.scan_z?E.scan_z[t]:E.base_pos[t][2];
+  return pts.map((p,i)=>obs[n+i]>0.5?[p[0],p[1],sz-0.5-obs[i]/5]:null).filter(Boolean);
+}
+for(const id of ["layTruth","layTeacher","layStudent"]) $(id).onchange=()=>draw();
+function update3D(){
+  const {root,joints,links,feet,scan,camera,controls,renderer,scene,path}=R3;
+  const p=E.base_pos[t], q=E.base_quat[t];  // Isaac wxyz
+  root.position.set(p[0],p[1],p[2]); root.quaternion.set(q[1],q[2],q[3],q[0]);
+  D.meta.joint_names.forEach((n,i)=>{const j=joints[n]; if(j) j.motion.quaternion.setFromAxisAngle(j.axis,E.joint_pos[t][i])});
+  root.updateMatrixWorld(true);
+  // foot spheres coloured by contact; FK check against the simulator's foot positions
+  let err=0; const v=new THREE.Vector3();
+  D.meta.foot_names.forEach((n,k)=>{ if(feet[n]) feet[n].material.color.set(E.foot_contact[t][k]?css("--pos"):css("--neg"));
+    const bi=D.meta.body_names.indexOf(n); if(links[n]&&bi>=0){links[n].getWorldPosition(v); const b=E.bodies[t][bi]; err=Math.max(err,Math.hypot(v.x-b[0],v.y-b[1],v.z-b[2]))} });
+  const m=new THREE.Matrix4(), c=new THREE.Color();
+  const pts=(E.scan[t]||[]).filter(x=>Number.isFinite(x[2])), zs=pts.map(x=>x[2]), zmin=Math.min(...zs,0), zmax=Math.max(...zs,zmin+0.05);
+  scan.visible=$("layTruth").checked; scan.count=pts.length;
+  pts.forEach((x,i)=>{ m.makeTranslation(x[0],x[1],x[2]); scan.setMatrixAt(i,m); c.setHSL((225-25*(x[2]-zmin)/(zmax-zmin))/360,0.75,0.35+0.3*(x[2]-zmin)/(zmax-zmin)); scan.setColorAt(i,c) });
+  scan.instanceMatrix.needsUpdate=true; if(scan.instanceColor) scan.instanceColor.needsUpdate=true;
+  const tc=teacherCells(); R3.teach.visible=$("layTeacher").checked; R3.teach.count=tc.length;
+  tc.forEach((x,i)=>{ m.makeTranslation(x[0],x[1],x[2]+0.011); R3.teach.setMatrixAt(i,m) }); R3.teach.instanceMatrix.needsUpdate=true;
+  const cl=(E.cloud&&E.cloud[t])||[]; R3.cloud.visible=$("layStudent").checked&&cl.length>0;
+  R3.cloud.geometry.setAttribute("position",new THREE.Float32BufferAttribute(cl,3)); R3.cloud.geometry.computeBoundingSphere();
+  path.geometry.setFromPoints(E.base_pos.slice(Math.max(0,t-300),t+1).map(b=>new THREE.Vector3(b[0],b[1],b[2]-0.45)));
+  // camera follows the base
+  const target=new THREE.Vector3(p[0],p[1],p[2]-0.1); if(R3.last){camera.position.add(target.clone().sub(R3.last))} controls.target.copy(target); R3.last=target; controls.update();
+  renderer.render(scene,camera);
+  const obsN=(E.terrain_obs&&E.terrain_obs[t]||[]).length/2;
+  $("viewtitle").textContent=`RBQ10 (URDF 메시) · 명령 vx=${E.command[t][0].toFixed(2)}, 실제 vx=${E.base_lin_vel_b[t][0].toFixed(2)} m/s · 교사가 받은 칸 ${tc.length}/${obsN||pts.length} · 학생 점 ${cl.length/3} · FK 오차 ${(err*1000).toFixed(0)} mm`;
+}
+const q=new URLSearchParams(location.search); const src=q.get("data")||(location.hash.startsWith("#url=")?decodeURIComponent(location.hash.slice(5)):null);
+if(q.get("live")) startLive(q.get("live")); else if(src) fetch(src).then(r=>r.text()).then(load);
 </script>
 </body>
 </html>
