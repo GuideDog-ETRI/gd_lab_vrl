@@ -132,6 +132,36 @@ class GastScratchV2TeacherCfg(GastTeacherCfg):
         add_v2_terms(self)
 
 
+@configclass
+class GastGapCleanV21TeacherCfg(GastGapCleanTeacherCfg):
+    """GAST warm-start teacher on the v2.1 objective (same builder as BIVT-Ray CleanV21)."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        from gd_lab.mdp.gap_stair_v21 import add_v21_terms
+
+        add_v21_terms(self)
+
+
+@configclass
+class GastScratchV21TeacherCfg(GastScratchV2TeacherCfg):
+    """Experiment 3 on the v2.1 objective: v2 scratch teacher + the v2.1 command and terms.
+    ``add_v2_terms`` already ran in the parent, so only the v2.1 additions are applied here."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        from isaaclab.managers import RewardTermCfg, SceneEntityCfg
+        from gd_lab.mdp import gap_stair_v21 as v21
+
+        self.commands.base_velocity.class_type = v21.V21VelocityCommand
+        self.rewards.gap_foothold_margin.weight = v21.V21_WEIGHTS["gap_foothold_margin"]
+        self.rewards.gap_hind_hop = RewardTermCfg(
+            func=v21.GapHindHop, weight=v21.V21_WEIGHTS["gap_hind_hop"],
+            params={"sensor_cfg": SceneEntityCfg("contact_forces", body_names=["RL_foot", "RR_foot"])})
+        self.rewards.overspeed = RewardTermCfg(func=v21.overspeed, weight=v21.V21_WEIGHTS["overspeed"], params={})
+        self.rewards.stair_stall = RewardTermCfg(func=v21.StairStall, weight=v21.V21_WEIGHTS["stair_stall"], params={})
+
+
 registry.register_task(task='Gast', robot='Rbq10', method='Dreamwaq',
     env_cfg='gd_lab.gast.tasks:GastTeacherCfg', agent_cfg='gd_lab.gast.teacher:GastRunnerCfg')
 registry.register_task(task='GastGapClean', robot='Rbq10', method='Dreamwaq',
@@ -140,5 +170,9 @@ registry.register_task(task='GastGapCleanV2', robot='Rbq10', method='Dreamwaq',
     env_cfg='gd_lab.gast.tasks:GastGapCleanV2TeacherCfg', agent_cfg='gd_lab.gast.teacher:GastRunnerCfg')
 registry.register_task(task='GastScratchV2', robot='Rbq10', method='Dreamwaq',
     env_cfg='gd_lab.gast.tasks:GastScratchV2TeacherCfg', agent_cfg='gd_lab.gast.teacher:GastRunnerCfg')
+registry.register_task(task='GastGapCleanV21', robot='Rbq10', method='Dreamwaq',
+    env_cfg='gd_lab.gast.tasks:GastGapCleanV21TeacherCfg', agent_cfg='gd_lab.gast.teacher:GastRunnerCfg')
+registry.register_task(task='GastScratchV21', robot='Rbq10', method='Dreamwaq',
+    env_cfg='gd_lab.gast.tasks:GastScratchV21TeacherCfg', agent_cfg='gd_lab.gast.teacher:GastRunnerCfg')
 registry.register_task(task='Gast', robot='Rbq10', method='Dreamwaq', mode='Vision',
     env_cfg='gd_lab.gast.tasks:GastStudentCfg', agent_cfg='gd_lab.gast.teacher:GastRunnerCfg')

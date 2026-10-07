@@ -123,3 +123,28 @@ def front_lift_cost(front_contact: torch.Tensor, nose_up_rate: torch.Tensor, rat
     both_air = (~front_contact).all(-1).float()
     excess = (nose_up_rate - rate_threshold).clamp(min=0)
     return (both_air + excess).clamp(max=1.0)
+
+
+# --- v2.1 speeds (used by gd_lab.mdp.gap_stair_v21) ---------------------------------------------------
+# (probability, low, high) m/s: usual 0.8-1.0, a slow tail and a fast tail up to the 1.2 m/s maximum.
+V21_SPEED_MIX = ((0.25, 0.2, 0.8), (0.60, 0.8, 1.0), (0.15, 1.0, 1.2))
+V21_SPEED_FLOOR_CEILING = (0.6, 1.2)
+
+
+def sample_v21_speed(n: int, ceiling: float, device=None, generator=None) -> torch.Tensor:
+    """[n] forward speeds from V21_SPEED_MIX, clipped to the current ceiling (pure torch)."""
+    u = torch.rand(n, device=device, generator=generator)
+    out = torch.empty(n, device=device)
+    edge = 0.0
+    for p, lo, hi in V21_SPEED_MIX:
+        pick = (u >= edge) & (u < edge + p)
+        out[pick] = lo + (hi - lo) * torch.rand(int(pick.sum()), device=device, generator=generator)
+        edge += p
+    return out.clamp(max=ceiling)
+
+
+def speed_ceiling(step: int, ramp_steps: int) -> float:
+    lo, hi = V21_SPEED_FLOOR_CEILING
+    if ramp_steps <= 0:
+        return hi
+    return lo + (hi - lo) * min(1.0, step / ramp_steps)

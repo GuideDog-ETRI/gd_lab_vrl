@@ -26,6 +26,8 @@ def test_registered_blind_and_vision_ids():
         "Gd-VrlGapFinetuneCleanRaycast-Rbq10-Dreamwaq-v0",
         # v2 (2026-10-06): Clean + gap foothold margin / slot probing + stair hip-handle disturbance
         "Gd-VrlGapFinetuneCleanV2Raycast-Rbq10-Dreamwaq-v0",
+        # v2.1 (2026-10-07): v2 + speeds up to 1.2 m/s, hind-hop / overspeed / stair-stall costs
+        "Gd-VrlGapFinetuneCleanV21Raycast-Rbq10-Dreamwaq-v0",
     ]
 
 
