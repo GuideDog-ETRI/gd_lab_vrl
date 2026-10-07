@@ -215,7 +215,7 @@ def _run_launcher(tmp_path, *args, sha=None):
     if sha:
         env["GAST_BIVT_TEACHER_SHA256"] = sha
     try:
-        return subprocess.run(["bash", "gast/scripts/train_teacher_gapclean_from_bivt_3gpu.sh", *args], cwd=ROOT,
+        return subprocess.run(["bash", "experiments/gast/train_teacher_gapclean_from_bivt_3gpu.sh", *args], cwd=ROOT,
                               env=env, capture_output=True, text=True, timeout=120)
     finally:
         import shutil
@@ -239,5 +239,5 @@ def test_launcher_works_from_the_repo_root_with_relative_paths(tmp_path, checkpo
     assert args[args.index("--warm_start_sha256") + 1] == "ab" * 32
     assert "--total_envs" in args and args[args.index("--total_envs") + 1] == "4096"
     for launcher in ("train_teacher_gapclean_from_bivt_3gpu.sh", "train_teacher_3gpu.sh"):
-        text = (ROOT / "gast/scripts" / launcher).read_text()
+        text = (ROOT / "experiments/gast" / launcher).read_text()
         assert 'cp "$0"' not in text and text.index('realpath "${BASH_SOURCE[0]}"') < text.index('cd "$root"')

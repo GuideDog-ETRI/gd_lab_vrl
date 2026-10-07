@@ -141,8 +141,8 @@ def test_ray_geometry_includes_the_intrinsics_not_only_the_mounts():
     assert not torch.allclose(camera_ray_buffers(new)[0], camera_ray_buffers(same_mounts_other_sensor)[0])
 
 
-@pytest.mark.parametrize("script", ["scripts/distill_student.py", "scripts/train_cvtt.py", "scripts/train_bivt.py",
-                                    "scripts/train_bavrl.py"])
+@pytest.mark.parametrize("script", ["scripts/distill_student.py", "scripts/train_bivt.py",
+                                    "archive/cvtt/scripts/train_cvtt.py", "archive/bavrl/scripts/train_bavrl.py"])
 def test_training_entry_points_refuse_a_legacy_start(script):
     source = (ROOT / script).read_text()
     assert "require_training_camera_profile(env_cfg.camera_profile)" in source
