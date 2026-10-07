@@ -46,6 +46,12 @@ PPO의 다중 GPU 동기화 방식과 Top-5 기본값 등이 서로 다르다(13
 `checkpoints/<teachers|students>/<방법>/<묶음>/` 아래 메타데이터만 git에 있다. 가중치(`*.pt`, `*.onnx`)는
 SHA256SUMS.txt로 확인하며 서버 간에 직접 복사한다. 전체 가중치가 있는 10/07 사본: `~/gd_project/archive/gd_lab_vrl_20261007/`.
 
+## 문서
+
+- [RBQ10 교사·학생 정책 계보](docs/lineage/RBQ10_policy_lineage.md)
+- [개 보행 인사이트로 본 교사 보상 — Claude·Codex 교차검토 결과 (2026-10-07)](docs/teachers/gast_v21_reward_dog_insights_20261007.md)
+- [RL 롤아웃 분석 도구 설계](tools/rl_replay/README.md)
+
 ## 설치
 
 Apptainer 이미지(IsaacSim 5.1.0 + IsaacLab 2.3.1)와 호스트 venv 기준이다. 절차는 [docs/history/README_before_reorg_20261007.md](docs/history/README_before_reorg_20261007.md)의 Quick start를 따른다.
