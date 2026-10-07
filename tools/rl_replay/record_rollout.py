@@ -44,10 +44,7 @@ sys.argv = [sys.argv[0]] + hydra_args
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
-import hashlib
 import importlib
-import json
-import os
 from pathlib import Path
 
 import gymnasium as gym
@@ -60,6 +57,9 @@ import gd_lab  # noqa: F401  (registers the tasks)
 if args_cli.task.startswith("Gd-Gast"):
     import gd_lab.gast.tasks  # noqa: F401
 from gd_lab.managers.action_history import ensure_prev_prev_action_tracking
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from rollout_log import RolloutLog  # noqa: E402
 
 
 def _resolve(path: str):
@@ -76,18 +76,13 @@ def action_std(policy, mean):
     return torch.zeros_like(mean)
 
 
-def _round(t, digits=4):
-    return torch.round(t.float() * 10**digits).div(10**digits).cpu().tolist()
-
-
 @hydra_task_config(args_cli.task, "rsl_rl_cfg_entry_point")
 def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     env_cfg.scene.num_envs = args_cli.num_envs
     env_cfg.seed = args_cli.seed
     if args_cli.device is not None:
         env_cfg.sim.device = args_cli.device
-    cameras = args_cli.enable_cameras
-    if cameras:
+    if args_cli.enable_cameras:
         from gd_lab.core.camera_contract import DEFAULT_CAMERA_PROFILE
         from gd_lab.tasks.vrl_cameras import configure_vrl_cameras
         if not hasattr(env_cfg, "camera_profile"):
@@ -101,35 +96,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     runner.load(args_cli.checkpoint, load_optimizer=False)
     policy = runner.alg.policy
     policy.eval()
-
-    robot = base.scene["robot"]
-    rewards = base.reward_manager
-    term_names = list(rewards.active_terms)
-    scanner = base.scene.sensors.get("height_scanner") if hasattr(base.scene, "sensors") else None
-    contacts = base.scene.sensors.get("contact_forces") if hasattr(base.scene, "sensors") else None
-    foot_ids = [robot.body_names.index(n) for n in robot.body_names if n.endswith("_foot")]
-    contact_foot_ids = ([contacts.body_names.index(robot.body_names[i]) for i in foot_ids]
-                        if contacts is not None else [])
-    dt = base.step_dt
-    gamma = float(agent_cfg.algorithm.gamma)
-    lam = float(agent_cfg.algorithm.lam)
-    student_view = None
-    if cameras and args_cli.student_view:
-        from gd_lab.core.camera_contract import load_camera_contract
-        from gd_lab.core.camera_geometry import depth_pixels_world
-        from gd_lab.mdp.camera_observations import canonical_camera_snapshot
-        contract = load_camera_contract(env_cfg.camera_profile)
-        k = min(args_cli.cloud_envs, base.num_envs)
-
-        def student_view():
-            """World points of the four depth images (what the student sees), one flat [x,y,z,...] list per env."""
-            _, depths, positions, rotations, intrinsics = canonical_camera_snapshot(base.scene, contract)
-            pts = depth_pixels_world(depths[:k], positions[:k], rotations[:k], intrinsics[:k])
-            s = args_cli.cloud_stride
-            pts, dep = pts[:, :, ::s, ::s].reshape(k, -1, 3), depths[:k, :, ::s, ::s].reshape(k, -1)
-            lo, hi = contract.depth_clip
-            ok = torch.isfinite(dep) & (dep > lo) & (dep < hi * 0.999) & torch.isfinite(pts).all(-1)
-            return [torch.round(pts[e][ok[e]] * 1000).div(1000).flatten().cpu().tolist() for e in range(k)]
+    dt, n = base.step_dt, base.num_envs
 
     def set_command():
         if args_cli.vx is None:
@@ -138,136 +105,31 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         cmd.vel_command_b[:, 0] = args_cli.vx
         cmd.vel_command_b[:, 1:] = 0.0
 
-    def env_step_payload(e, i):
-        """One env's data at step i, for the live stream (same keys as the final file)."""
-        row = {key: _round(rec[key][i][e]) for key in rec if key not in ("done", "foot_contact")}
-        row["done"] = int(rec["done"][i][e])
-        row["foot_contact"] = rec["foot_contact"][i][e].int().tolist()
-        if clouds:
-            row["cloud"] = clouds[i][e] if e < len(clouds[i]) else []
-        return row
-
     obs = env.get_observations()
     with torch.inference_mode():
         for _ in range(int(round(args_cli.warmup_seconds / dt))):
             set_command()
             obs, _, _, _ = env.step(policy.act_inference(obs))
 
-    steps = int(round(args_cli.seconds / dt))
-    n = base.num_envs
-    rec = {k: [] for k in ("base_pos", "base_quat", "base_lin_vel_b", "command", "bodies", "joint_pos", "joint_vel",
-                           "action_mean", "action_std", "action", "value", "terms", "reward", "done", "foot_contact",
-                           "scan", "scan_z", "latent", "terrain_obs")}
-    clouds = []
-    live = None
-    if args_cli.live:
-        Path(args_cli.live).parent.mkdir(parents=True, exist_ok=True)
-        live = open(args_cli.live, "w")
-        live.write(json.dumps({"meta": {"task": args_cli.task, "checkpoint": os.path.abspath(args_cli.checkpoint),
-            "dt": dt, "gamma": gamma, "lam": lam, "steps_planned": steps, "num_envs": n, "stochastic": args_cli.stochastic,
-            "vx": args_cli.vx, "term_names": term_names, "body_names": list(robot.body_names),
-            "joint_names": list(robot.joint_names), "foot_names": [robot.body_names[i] for i in foot_ids], "live": True}},
-            separators=(",", ":")) + "\n")
-        live.flush()
+    log = RolloutLog(base, task=args_cli.task, checkpoint=args_cli.checkpoint,
+                     gamma=float(agent_cfg.algorithm.gamma), lam=float(agent_cfg.algorithm.lam),
+                     steps=int(round(args_cli.seconds / dt)), stochastic=args_cli.stochastic, vx=args_cli.vx,
+                     live=args_cli.live, student_view=args_cli.student_view and args_cli.enable_cameras,
+                     camera_profile=getattr(env_cfg, "camera_profile", None),
+                     cloud_envs=args_cli.cloud_envs, cloud_stride=args_cli.cloud_stride,
+                     extra_meta={"driver": "teacher"})
     with torch.inference_mode():
-        for _ in range(steps):
+        while not log.full():
             set_command()
             mean = policy.act_inference(obs)
             action = policy.act(obs) if args_cli.stochastic else mean
-            std = action_std(policy, mean)
-            value = policy.evaluate(obs).squeeze(-1)
             latent = policy.terrain_latent(obs) if hasattr(policy, "terrain_latent") else torch.zeros(n, 0, device=mean.device)
-            cmd = base.command_manager.get_command("base_velocity")
-            rec["base_pos"].append(robot.data.root_pos_w.clone())
-            rec["base_quat"].append(robot.data.root_quat_w.clone())
-            rec["base_lin_vel_b"].append(robot.data.root_lin_vel_b.clone())
-            rec["command"].append(cmd.clone())
-            rec["bodies"].append(robot.data.body_pos_w.clone())
-            rec["joint_pos"].append(robot.data.joint_pos.clone())
-            rec["joint_vel"].append(robot.data.joint_vel.clone())
-            rec["action_mean"].append(mean.clone())
-            rec["action_std"].append(std.expand_as(mean).clone())
-            rec["action"].append(action.clone())
-            rec["value"].append(value.clone())
-            rec["latent"].append(latent.clone())
-            # What the policy itself was given: its 'terrain' group (11x17 height *5 + validity), e.g. the
-            # camera-visible cells for BIVT-Ray or the noisy/blacked-out full grid for GAST.
-            if "terrain" in obs.keys():
-                terrain_in = obs["terrain"]
-            elif "gast_history" in obs.keys():  # GAST teacher: the newest of its 8 terrain frames (same encoding)
-                terrain_in = obs["gast_history"].reshape(n, 8, -1)[:, -1, :374]
-            else:
-                terrain_in = torch.zeros(n, 0, device=mean.device)
-            rec["terrain_obs"].append(terrain_in.clone())
-            rec["scan"].append(scanner.data.ray_hits_w.clone() if scanner is not None else torch.zeros(n, 0, 3, device=mean.device))
-            rec["scan_z"].append(scanner.data.pos_w[:, 2].clone() if scanner is not None else torch.zeros(n, device=mean.device))
-            if student_view is not None:
-                clouds.append(student_view())
+            log.before_step(obs, mean=mean, std=action_std(policy, mean), action=action,
+                            value=policy.evaluate(obs).squeeze(-1), latent=latent,
+                            command=base.command_manager.get_command("base_velocity"))
             obs, reward, done, _ = env.step(action)
-            # RewardManager keeps each weighted term as a rate; the per-step contribution is rate * dt.
-            rec["terms"].append(rewards._step_reward.clone() * dt)
-            rec["reward"].append(reward.clone())
-            rec["done"].append(done.clone())
-            if contacts is not None:
-                forces = contacts.data.net_forces_w[:, contact_foot_ids].norm(dim=-1)
-                rec["foot_contact"].append(forces > 1.0)
-            else:
-                rec["foot_contact"].append(torch.zeros(n, len(foot_ids), dtype=torch.bool, device=mean.device))
-            if live is not None:
-                i = len(rec["reward"]) - 1
-                live.write(json.dumps({"t": i, "envs": [env_step_payload(e, i) for e in range(n)]}, separators=(",", ":")) + "\n")
-                live.flush()
-        bootstrap = policy.evaluate(obs).squeeze(-1)
-
-    stacked = {k: torch.stack(v, 1) for k, v in rec.items()}  # [n, T, ...]
-    r, v, d = stacked["reward"], stacked["value"], stacked["done"].float()
-    terms = stacked["terms"]
-    returns = torch.zeros_like(r)
-    term_returns = torch.zeros_like(terms)
-    adv = torch.zeros_like(r)
-    delta = torch.zeros_like(r)
-    next_value, next_return, next_term_return, next_adv = bootstrap, bootstrap, torch.zeros_like(terms[:, 0]), torch.zeros_like(bootstrap)
-    for t in reversed(range(steps)):
-        alive = 1.0 - d[:, t]
-        delta[:, t] = r[:, t] + gamma * next_value * alive - v[:, t]
-        adv[:, t] = delta[:, t] + gamma * lam * alive * next_adv
-        returns[:, t] = r[:, t] + gamma * alive * next_return
-        term_returns[:, t] = terms[:, t] + gamma * alive[:, None] * next_term_return
-        next_value, next_return, next_term_return, next_adv = v[:, t], returns[:, t], term_returns[:, t], adv[:, t]
-
-    sha = hashlib.sha256(Path(args_cli.checkpoint).read_bytes()).hexdigest()
-    out = {
-        "meta": {"task": args_cli.task, "checkpoint": os.path.abspath(args_cli.checkpoint), "checkpoint_sha256": sha,
-                 "dt": dt, "gamma": gamma, "lam": lam, "steps": steps, "num_envs": n,
-                 "stochastic": args_cli.stochastic, "vx": args_cli.vx, "term_names": term_names,
-                 "body_names": list(robot.body_names), "joint_names": list(robot.joint_names),
-                 "foot_names": [robot.body_names[i] for i in foot_ids],
-                 "notes": {"terms": "weighted reward per step (rate*dt), summing to 'reward'",
-                           "scan": "height-scanner hits (privileged ground truth, 11x17)",
-                           "terrain_obs": "the policy's terrain input: 187 heights (scan_z - z - 0.5, clipped +-1, x5) + 187 validity",
-                           "cloud": "student view: belly-camera depth pixels as world points, flat [x,y,z,...]",
-                           "term_returns": "discounted return-to-go of each term; their sum is 'return' "
-                                           "(the bootstrap value V(s_T) is in 'return' only)",
-                           "advantage": "GAE(gamma, lam) with the critic value", "delta": "TD error"}},
-        "envs": [],
-    }
-    for e in range(n):
-        env_out = {k: _round(stacked[k][e]) for k in stacked if k not in ("done", "foot_contact")}
-        env_out["done"] = stacked["done"][e].cpu().int().tolist()
-        env_out["foot_contact"] = stacked["foot_contact"][e].cpu().int().tolist()
-        env_out["return"] = _round(returns[e])
-        env_out["term_returns"] = _round(term_returns[e])
-        env_out["advantage"] = _round(adv[e])
-        env_out["delta"] = _round(delta[e])
-        if clouds and e < len(clouds[0]):
-            env_out["cloud"] = [c[e] for c in clouds]
-        out["envs"].append(env_out)
-    Path(args_cli.out).parent.mkdir(parents=True, exist_ok=True)
-    Path(args_cli.out).write_text(json.dumps(out, separators=(",", ":")))
-    if live is not None:
-        live.write(json.dumps({"end": True, "out": args_cli.out}) + "\n")
-        live.close()
-    print(f"[INFO] wrote {args_cli.out}: {n} envs x {steps} steps, {len(term_names)} reward terms", flush=True)
+            log.after_step(reward, done)
+        log.finish(policy.evaluate(obs).squeeze(-1), args_cli.out)
     env.close()
 
 
