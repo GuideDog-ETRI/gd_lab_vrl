@@ -19,6 +19,8 @@ import re
 import subprocess
 import threading
 import time
+import math
+from runtime import validate_window
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -69,11 +71,27 @@ def live_lines(query):
     path = (REPO / q.get("path", [""])[0]).resolve()
     if path.parent != RECORDINGS.resolve() or not path.name.endswith(".live.ndjson") or not path.is_file():
         return 404, {"error": "no such live stream"}
-    start = int(q.get("from", ["0"])[0])
-    with path.open() as f:
-        text = f.read()
-    lines = text.split("\n")[:-1]  # the last element is "" or an unfinished line
-    return 200, {"lines": [json.loads(x) for x in lines[start:]], "next": len(lines)}
+    try:
+        start = int(q.get("offset", ["0"])[0])
+        if start < 0 or start > path.stat().st_size:
+            raise ValueError("invalid offset")
+        rows = []
+        with path.open("rb") as f:
+            f.seek(start)
+            if start:
+                f.seek(start-1)
+                if f.read(1) != b"\n":
+                    raise ValueError("offset must be a line boundary")
+            next_offset = start
+            for _ in range(32):
+                line = f.readline()
+                if not line.endswith(b"\n"):
+                    break
+                rows.append(json.loads(line))
+                next_offset = f.tell()
+        return 200, {"lines": rows, "next": next_offset}
+    except (ValueError, UnicodeError):
+        return 400, {"error": "invalid offset or stream"}
 
 
 def sources():
@@ -82,22 +100,65 @@ def sources():
 
 
 def gpu_busy():
-    ps = subprocess.run(["ps", "-eo", "args"], capture_output=True, text=True).stdout
-    return [line.strip()[:120] for line in ps.splitlines() if BUSY.search(line) and "server.py" not in line]
+    try:
+        gpu = os.environ.get("RL_REPLAY_GPU", "0")
+        result = subprocess.run(["nvidia-smi", "-i", gpu, "--query-gpu=memory.used",
+                                 "--format=csv,noheader,nounits"], capture_output=True, text=True, timeout=5)
+        processes = subprocess.run(["nvidia-smi", "-i", gpu, "--query-compute-apps=pid",
+                                    "--format=csv,noheader"], capture_output=True, text=True, timeout=5)
+        if result.returncode or processes.returncode:
+            return ["GPU status unavailable (fail closed)"]
+        used = int(result.stdout.strip())
+        return [f"GPU {gpu}: {used} MiB; PIDs {processes.stdout.strip()}"] if used > 512 or processes.stdout.strip() else []
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return ["GPU status unavailable (fail closed)"]
+
+
+def validate_request(req):
+    if not isinstance(req, dict):
+        raise ValueError("JSON object required")
+    for key in ("force", "live", "student_view", "stochastic"):
+        if key in req and type(req[key]) is not bool:
+            raise ValueError(f"{key} must be boolean")
+    vx = req.get("vx")
+    if vx == "":
+        vx = None
+    # UI sends numeric input as string; accept only finite numeric strings.
+    if isinstance(vx, str):
+        vx = float(vx)
+    validate_window(req.get("num_envs", 8), req.get("seconds", 4), 1, vx)
+    task, ckpt = req.get("task"), req.get("checkpoint")
+    if task not in [t for _, t in TASKS] or not isinstance(ckpt, str):
+        raise ValueError("unknown task/checkpoint")
+    path = (REPO / ckpt).resolve()
+    if not path.is_relative_to(REPO.resolve()) or not path.is_file() or path.suffix != ".pt":
+        raise ValueError("checkpoint must be a .pt under this repository")
+    name = req.get("name") or f"{path.stem}_{time.time_ns()}"
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,119}", name):
+        raise ValueError("invalid recording name")
+    return {**req, "vx": vx, "name": name}
 
 
 def start(req):
+    try:
+        req = validate_request(req)
+    except (ValueError, TypeError) as exc:
+        return 400, {"error": str(exc)}
+    if not os.environ.get("TRAIN_ARM"):
+        return 400, {"error": "server requires explicit TRAIN_ARM"}
     with lock:
         if job.get("state") == "running":
             return 409, {"error": "a recording is already running"}
         busy = gpu_busy()
-        if busy and not req.get("force"):
-            return 409, {"error": "GPU is busy with training; tick 'force' to record anyway", "busy": busy}
+        if busy:
+            return 409, {"error": "GPU busy or unavailable; force override disabled", "busy": busy}
         task, ckpt = req.get("task", ""), req.get("checkpoint", "")
         if task not in [t for _, t in TASKS] or not (REPO / ckpt).is_file():
             return 400, {"error": "unknown task or checkpoint"}
         name = re.sub(r"[^A-Za-z0-9_.-]", "_", req.get("name") or f"{Path(ckpt).stem}_{time.strftime('%Y%m%d_%H%M%S')}")
         out = RECORDINGS / (name if name.endswith(".json") else name + ".json")
+        if any(p.exists() for p in (out, out.with_suffix(".log"), out.with_suffix(".live.ndjson"))):
+            return 409, {"error": "recording name already exists"}
         RECORDINGS.mkdir(parents=True, exist_ok=True)
         cmd = ["apptainer", "exec", "--nv", "--writable-tmpfs", SIF, PYTHON, "tools/rl_replay/record_rollout.py",
                "--headless", "--task", task, "--checkpoint", ckpt, "--num_envs", str(int(req.get("num_envs", 8))),
@@ -111,11 +172,16 @@ def start(req):
         live = None
         if req.get("live", True):
             live = out.with_name(out.stem + ".live.ndjson")
-            live.unlink(missing_ok=True)
             cmd += ["--live", str(live)]
         log = RECORDINGS / (out.stem + ".log")
-        env = dict(os.environ, PYTHONPATH=str(REPO / "src"), TRAIN_ARM="4", OMNI_KIT_ACCEPT_EULA="YES", PYTHONUNBUFFERED="1")
-        proc = subprocess.Popen(cmd, cwd=REPO, env=env, stdout=log.open("w"), stderr=subprocess.STDOUT)
+        source = REPO / "gast/src" if (REPO / "gast/src/gd_lab/gast").is_dir() else REPO / "src"
+        env = dict(os.environ, PYTHONPATH=str(source), OMNI_KIT_ACCEPT_EULA="YES", PYTHONUNBUFFERED="1",
+                   CUDA_VISIBLE_DEVICES=os.environ.get("RL_REPLAY_GPU", "0"))
+        try:
+            with log.open("x") as output:
+                proc = subprocess.Popen(cmd, cwd=REPO, env=env, stdout=output, stderr=subprocess.STDOUT)
+        except OSError as exc:
+            return 409, {"error": str(exc)}
         job.clear()
         job.update(state="running", pid=proc.pid, out=str(out.relative_to(REPO)), log=str(log), started=time.time(), cmd=" ".join(cmd),
                    live=str(live.relative_to(REPO)) if live else None)
@@ -132,7 +198,10 @@ def status():
     with lock:
         s = dict(job)
     if "log" in s and Path(s["log"]).is_file():
-        lines = [line for line in Path(s["log"]).read_text(errors="replace").splitlines()
+        with Path(s["log"]).open("rb") as f:
+            f.seek(max(0, Path(s["log"]).stat().st_size - 65536))
+            tail = f.read().decode(errors="replace")
+        lines = [line for line in tail.splitlines()
                  if "[Warning]" not in line and "[omni" not in line]
         s["tail"] = lines[-12:]
     if "started" in s:
@@ -164,12 +233,18 @@ class Handler(SimpleHTTPRequestHandler):
         return super().do_GET()
 
     def do_POST(self):
-        if not self.path.startswith("/api/record"):
+        if self.path != "/api/record":
             return self._json(404, {"error": "not found"})
-        length = int(self.headers.get("Content-Length", 0))
+        host = self.headers.get("Host")
+        allowed = {f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}
+        if host not in allowed or self.headers.get("Origin") not in (None, f"http://{host}"):
+            return self._json(403, {"error": "same-origin localhost required"})
         try:
+            length = int(self.headers.get("Content-Length", 0))
+            if not 0 < length <= 16384:
+                raise ValueError("invalid length")
             req = json.loads(self.rfile.read(length) or b"{}")
-        except json.JSONDecodeError:
+        except (ValueError, UnicodeError):
             return self._json(400, {"error": "bad json"})
         code, body = start(req)
         return self._json(code, body)

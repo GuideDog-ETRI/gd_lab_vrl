@@ -5,9 +5,9 @@ joint positions/velocities, the command, the policy's mean action and std, the c
 reward term (weighted, per step, as the RewardManager adds it), foot contacts, the 11x17 height-scan points
 and the terrain latent. After the rollout it adds, per env, the discounted return-to-go G_t, its split by
 reward term (G_t^k = sum_i gamma^i r^k_{t+i}), the TD error delta_t and the GAE advantage A_t -- the numbers
-that say why PPO pushes the policy toward the action it took.
+that describe this recorded trajectory relative to the teacher critic, not an actual PPO update.
 
-  PYTHONPATH=src python tools/rl_replay/record_rollout.py --headless \
+  TRAIN_ARM=4 PYTHONPATH=gast/src:src python tools/rl_replay/record_rollout.py --headless \
       --task Gd-GastGapCleanV21-Rbq10-Dreamwaq-v0 --checkpoint <model.pt> --num_envs 8 --seconds 4 \
       --out logs/rl_replay/gast2000.json [--vx 0.8] [--stochastic] [--student_view] [--live <file.ndjson>]
 
@@ -18,7 +18,15 @@ line while the simulator runs, so the viewer can follow it live (G_t and A_t the
 The JSON is self-contained (meta + per-env arrays, rounded to 4 decimals).
 """
 import argparse
+import os
 import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+if (ROOT / "gast/src/gd_lab/gast").is_dir():
+    sys.path.insert(0, str(ROOT / "gast/src"))
+from runtime import fix_velocity, reserve_recording, validate_window, environment_metadata
+from gd_lab.core.experiments import training_arm_overrides
 
 from isaaclab.app import AppLauncher
 
@@ -40,7 +48,17 @@ AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
 if args_cli.student_view or "Raycast" in args_cli.task or "Vision" in args_cli.task:
     args_cli.enable_cameras = True  # BIVT-Ray's camera-visible terrain needs the cameras too
-sys.argv = [sys.argv[0]] + hydra_args
+try:
+    if not os.environ.get("TRAIN_ARM"):
+        raise ValueError("TRAIN_ARM must be explicitly set")
+    validate_window(args_cli.num_envs, args_cli.seconds, args_cli.warmup_seconds, args_cli.vx)
+    if args_cli.cloud_stride < 1 or not 0 <= args_cli.cloud_envs <= args_cli.num_envs:
+        raise ValueError("invalid cloud_envs/cloud_stride")
+    arm_overrides = training_arm_overrides(os.environ["TRAIN_ARM"], play=True)
+    replay_lock = reserve_recording(args_cli.out, args_cli.live)
+except (ValueError, OSError) as exc:
+    parser.error(str(exc))
+sys.argv = [sys.argv[0]] + arm_overrides + hydra_args
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
@@ -54,6 +72,7 @@ from isaaclab_rl.rsl_rl import RslRlBaseRunnerCfg, RslRlVecEnvWrapper
 from isaaclab_tasks.utils.hydra import hydra_task_config
 
 import gd_lab  # noqa: F401  (registers the tasks)
+import gd_lab.teachers.bivt  # noqa: F401
 if args_cli.task.startswith("Gd-Gast"):
     import gd_lab.gast.tasks  # noqa: F401
 from gd_lab.managers.action_history import ensure_prev_prev_action_tracking
@@ -82,33 +101,28 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     env_cfg.seed = args_cli.seed
     if args_cli.device is not None:
         env_cfg.sim.device = args_cli.device
+        agent_cfg.device = args_cli.device
     if args_cli.enable_cameras:
         from gd_lab.core.camera_contract import DEFAULT_CAMERA_PROFILE
         from gd_lab.tasks.vrl_cameras import configure_vrl_cameras
         if not hasattr(env_cfg, "camera_profile"):
             env_cfg.camera_profile = DEFAULT_CAMERA_PROFILE
         configure_vrl_cameras(env_cfg)
+        env_cfg.sim.render_interval = env_cfg.decimation
     env = gym.make(args_cli.task, cfg=env_cfg)
     ensure_prev_prev_action_tracking(env.unwrapped)
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
     base = env.unwrapped
+    fix_velocity(base.command_manager.get_term("base_velocity"), args_cli.vx)
     runner = _resolve(agent_cfg.class_name)(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
     runner.load(args_cli.checkpoint, load_optimizer=False)
     policy = runner.alg.policy
     policy.eval()
     dt, n = base.step_dt, base.num_envs
 
-    def set_command():
-        if args_cli.vx is None:
-            return
-        cmd = base.command_manager.get_term("base_velocity")
-        cmd.vel_command_b[:, 0] = args_cli.vx
-        cmd.vel_command_b[:, 1:] = 0.0
-
-    obs = env.get_observations()
+    obs, _ = env.reset()
     with torch.inference_mode():
         for _ in range(int(round(args_cli.warmup_seconds / dt))):
-            set_command()
             obs, _, _, _ = env.step(policy.act_inference(obs))
 
     log = RolloutLog(base, task=args_cli.task, checkpoint=args_cli.checkpoint,
@@ -117,10 +131,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                      live=args_cli.live, student_view=args_cli.student_view and args_cli.enable_cameras,
                      camera_profile=getattr(env_cfg, "camera_profile", None),
                      cloud_envs=args_cli.cloud_envs, cloud_stride=args_cli.cloud_stride,
-                     extra_meta={"driver": "teacher"})
+                     extra_meta={"driver": "teacher", **environment_metadata(base)},
+                     terrain_source="gast_history" if args_cli.task.startswith("Gd-Gast") else "terrain",
+                     capture_current_camera=args_cli.student_view)
     with torch.inference_mode():
         while not log.full():
-            set_command()
             mean = policy.act_inference(obs)
             action = policy.act(obs) if args_cli.stochastic else mean
             latent = policy.terrain_latent(obs) if hasattr(policy, "terrain_latent") else torch.zeros(n, 0, device=mean.device)
