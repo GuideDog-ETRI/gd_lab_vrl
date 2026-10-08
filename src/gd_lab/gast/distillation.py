@@ -1,6 +1,6 @@
 import torch
 from torch.nn import functional as F
-from gd_lab.gast.geometry import SeenCells, near_gap_rows, reconstruction_loss, weighted_mean
+from gd_lab.gast.geometry import SeenCells, near_gap_rows, reconstruction_loss, targets, weighted_mean
 from gd_lab.gast.targets import gated_teacher_action
 from gd_lab.gast.observations import pose_xyyaw
 from gd_lab.core.camera_contract import load_camera_contract
@@ -58,6 +58,8 @@ class GastDistillation:
         self.target_gate = None
         # 0 keeps the original supervision (teacher-visible cells only).
         self.seen = SeenCells(env.num_envs, env.device, seen_window_s) if seen_window_s > 0 else None
+        # P2 gap-supervision counts: real gap cells and the supervised ones, per logging window and per run.
+        self.gap_counts = {"window": [0, 0], "run": [0, 0]}
 
     @torch.no_grad()
     def capture(self, obs, teacher_action):
@@ -132,17 +134,18 @@ class GastDistillation:
                        else actual.sum() * 0.0)
         seen_cells = None
         if self.seen is not None:
-            seen_cells = self.seen.update(rows, teacher_terrain[:, 187:] > .5, pose[:, :3], stamp)
+            # Only frames the student actually got: no new "seen" cells from a dropped frame or a hidden camera.
+            received = ~missing & ~partial.any(1)
+            seen_cells = self.seen.update(rows, teacher_terrain[:, 187:] > .5, pose[:, :3], stamp, received)
         geometry_loss, height_loss, visibility_loss, visible_fraction = reconstruction_loss(
             spatial, clean, teacher_terrain, return_components=True, row_weight=weight, seen=seen_cells)
-        with torch.no_grad():  # P2: share of real gap cells the spatial loss supervises
+        with torch.no_grad():  # P2: real gap cells the spatial loss supervises, as counts (same mask as the loss)
+            _, mask = targets(clean, teacher_terrain, seen_cells)
             _, _, gap_label, gap_known = clean.reshape(-1, 4, 11, 17).unbind(1)
             real_gap = ((gap_label > .5) & gap_known.bool()).flatten(1)
-            sup = teacher_terrain[:, 187:] > .5
-            if seen_cells is not None:
-                sup = sup | seen_cells
-            if real_gap.any():
-                self.metrics["gap_supervised_fraction"] = float((real_gap & sup).sum() / real_gap.sum())
+            num, den = int((real_gap & mask[..., 2].bool()).sum()), int(real_gap.sum())
+            for c in self.gap_counts.values():
+                c[0] += num; c[1] += den
         with torch.no_grad():
             near_seen = near_gap & seen
             self.near_gap_action_sse = float((actual[near_seen] - expected[near_seen]).pow(2).mean(-1).sum())
