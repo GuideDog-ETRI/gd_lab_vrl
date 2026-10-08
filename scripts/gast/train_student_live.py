@@ -102,6 +102,9 @@ parser.add_argument("--gap_terrain_columns", type=int, default=0,
                          "E.g. 20 gives 20/30 gap columns instead of 5/15.")
 parser.add_argument("--gap_top5_min_rows", type=int, default=64,
                     help="Minimum near-gap rows in a BPTT window for it to count toward the gap Top-5.")
+parser.add_argument("--seen_supervision_seconds", type=float, default=0.0,
+                    help="Also supervise height/gap on cells a camera saw within this many seconds (warped by body "
+                         "motion), not only the currently teacher-visible cells. 0 = original supervision.")
 parser.add_argument("--resume_lr", type=float, default=None,
                     help="With --student_resume: set this learning rate instead of the checkpoint optimizer's.")
 parser.add_argument("--replay_out", default=None,
@@ -324,8 +327,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
 
     student = GastStudent(env_cfg.camera_profile).to(device)
     attention = GastDistillation(teacher, student, env.unwrapped, camera_contract,
-                                args_cli.student_warmup, args_cli.student_ramp, args_cli.gap_loss_weight)
+                                args_cli.student_warmup, args_cli.student_ramp, args_cli.gap_loss_weight,
+                                args_cli.seen_supervision_seconds)
     print(f"[INFO] Near-gap sample loss weight: {args_cli.gap_loss_weight}", flush=True)
+    print(f"[INFO] Seen-cell supervision window: {args_cli.seen_supervision_seconds} s (0 = teacher-visible only)", flush=True)
     optimizer = None if args_cli.replay_out else torch.optim.Adam(student.parameters(), lr=args_cli.lr)
     start_iteration = 0
     if args_cli.student_resume:
