@@ -51,16 +51,52 @@ def test_seen_cells_add_gap_supervision_with_clean_labels():
     assert torch.equal(y1[..., 1], teacher[:, 187:])                    # visibility target unchanged
 
 
-def test_seen_cells_follow_body_motion_and_expire():
-    s = SeenCells(1, "cpu", window_s=1.0)
-    vis = torch.zeros(1, 11, 17, dtype=torch.bool); vis[0, 5, 16] = True    # a cell 0.8 m ahead
-    m = s.update(torch.tensor([0]), vis.flatten(1), torch.tensor([[0., 0., 0.]]), torch.tensor([0.]))
-    assert m.view(11, 17)[5, 16]
+def cell(row, col):
+    m = torch.zeros(1, 11, 17, dtype=torch.bool); m[0, row, col] = True
+    return m.flatten(1)
+
+
+def pose(x=0., y=0., yaw=0.):
+    return torch.tensor([[x, y, yaw]])
+
+
+def step(s, visible, p, t, received=True):
+    return s.update(torch.tensor([0]), visible, p, torch.tensor([t]), torch.tensor([received])).view(11, 17)
+
+
+def test_single_cell_survives_sub_cell_steps_and_moves_with_the_body():
+    s = SeenCells(1, "cpu", window_s=2.0)
     none = torch.zeros(1, 187, dtype=torch.bool)
-    m = s.update(torch.tensor([0]), none, torch.tensor([[0.3, 0., 0.]]), torch.tensor([0.5]))   # moved 0.3 m
-    grid = m.view(11, 17)
-    assert grid[5, 13] and not grid[5, 16]                                  # now 0.5 m ahead
-    m = s.update(torch.tensor([0]), none, torch.tensor([[0.3, 0., 0.]]), torch.tensor([2.0]))   # 1.5 s later
-    assert not m.any()                                                      # expired
+    assert step(s, cell(5, 16), pose(), 0.0)[5, 16]
+    for i in range(1, 7):                                   # six 0.05 m steps = 0.3 m
+        g = step(s, none, pose(0.05 * i), 0.1 * i)
+        assert 1 <= g.sum() <= 2, i                         # never lost; an exact half-cell tie may mark 2
+    assert g[5, 13]                                         # 0.8 - 0.3 = 0.5 m ahead
+    assert step(s, none, pose(0.05 * 6), 0.65).any()        # still inside the window when stationary
+
+
+def test_rotation_out_of_range_expiry_and_reset():
+    s = SeenCells(1, "cpu", window_s=2.0)
+    none = torch.zeros(1, 187, dtype=torch.bool)
+    step(s, cell(5, 13), pose(), 0.0)                       # 0.5 m ahead
+    g = step(s, none, pose(yaw=torch.pi / 2), 0.1)          # turn left 90 deg: now on the right
+    assert g[0, 8] and g.sum() == 1
+    assert not step(s, none, pose(2.0), 0.2).any()          # moved 2 m: outside the grid
     s.reset(torch.tensor([True]))
-    assert s.value.sum() == 0
+    step(s, cell(5, 8), pose(), 10.0)
+    assert step(s, none, pose(), 11.9).any() and not step(s, none, pose(), 12.1).any()   # 2 s window
+
+
+def test_frames_the_student_did_not_get_are_not_recorded():
+    s = SeenCells(2, "cpu", window_s=2.0)
+    vis = torch.zeros(2, 187, dtype=torch.bool); vis[:, 100] = True
+    out = s.update(torch.tensor([0, 1]), vis, torch.zeros(2, 3), torch.tensor([0., 0.]), torch.tensor([True, False]))
+    assert out[0, 100] and not out[1].any()
+    out = s.update(torch.tensor([1]), torch.zeros(1, 187, dtype=torch.bool), torch.zeros(1, 3), torch.tensor([.1]))
+    assert not out.any()                                    # rows update independently
+
+
+def test_nearest_mode_keeps_the_default_warp_unchanged():
+    m = torch.rand(3, 187, 32)
+    a, b = torch.rand(3, 3), torch.rand(3, 3)
+    assert torch.equal(geometry.warp_memory(m, a, b), geometry.warp_memory(m, a, b, mode="bilinear"))

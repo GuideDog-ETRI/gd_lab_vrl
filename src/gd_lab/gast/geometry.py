@@ -84,37 +84,54 @@ def reconstruction_loss(pred, clean, teacher_terrain=None, return_components=Fal
 
 
 class SeenCells:
-    """Per-env grid of cells a camera saw within the last ``window_s`` seconds, kept in the current body grid.
+    """Per-env cells a camera delivered to the student within the last ``window_s`` seconds, in the current grid.
 
-    At every capture the previous grid is warped by the body motion (same warp as the student memory), aged by a
-    half-life of ``window_s`` (so a cell stays "seen" for about ``window_s``) and merged with the cells visible now.
+    Keeps the received visibility snapshots of that window with the pose they were taken at (ring buffer) and
+    warps each one straight to the current pose with nearest sampling. One warp per snapshot, so sub-cell motion
+    never accumulates rounding or interpolation loss (a repeatedly warped, thresholded grid lost a single cell
+    after a 0.05 m step).
     """
 
-    def __init__(self, num_envs, device, window_s):
+    def __init__(self, num_envs, device, window_s, min_capture_period_s=0.07):
+        if not (window_s > 0 and window_s == window_s and window_s < 60):
+            raise ValueError("window_s must be finite and in (0, 60)")
         self.window = float(window_s)
-        self.value = torch.zeros(num_envs, 187, 1, device=device)
-        self.pose = torch.zeros(num_envs, 3, device=device)
-        self.stamp = torch.full((num_envs,), -1.0, device=device)
+        k = int(-(-window_s // min_capture_period_s)) + 2
+        self.masks = torch.zeros(num_envs, k, 187, dtype=torch.bool, device=device)
+        self.poses = torch.zeros(num_envs, k, 3, device=device)
+        self.stamps = torch.full((num_envs, k), float("-inf"), device=device)
+        self.next = torch.zeros(num_envs, dtype=torch.long, device=device)
 
     def reset(self, done):
-        self.value[done] = 0
-        self.stamp[done] = -1.0
+        self.stamps[done] = float("-inf")
+        self.masks[done] = False
+        self.next[done] = 0
 
     @torch.no_grad()
-    def update(self, rows, visible, pose_xyyaw, stamp):
-        """visible [R,187] bool for env ``rows``; returns the seen mask [R,187] (includes visible)."""
-        old = self.value[rows]
-        fresh = self.stamp[rows] < 0
-        warped = warp_memory(old, self.pose[rows], pose_xyyaw)
-        age = (stamp - self.stamp[rows]).clamp_min(0)
-        decay = torch.where(fresh, torch.zeros_like(age), 0.5 ** (age / self.window))
-        value = torch.maximum(warped * decay[:, None, None], visible.float()[..., None])
-        self.value[rows], self.pose[rows], self.stamp[rows] = value, pose_xyyaw, stamp
-        return value[..., 0] > 0.5
+    def update(self, rows, visible, pose_xyyaw, stamp, received=None):
+        """visible [R,187] bool (cells delivered now); ``received`` [R] bool: False for frames the student did not
+        get (augmentation drop or a hidden camera) -> nothing new is recorded for that row. Returns the seen mask
+        [R,187] over the window (snapshots still inside it, warped to ``pose_xyyaw``)."""
+        rows = torch.as_tensor(rows, device=self.masks.device)
+        if received is None:
+            received = torch.ones(len(rows), dtype=torch.bool, device=rows.device)
+        write = rows[received]
+        if len(write):
+            slot = self.next[write]
+            self.masks[write, slot] = visible[received]
+            self.poses[write, slot] = pose_xyyaw[received]
+            self.stamps[write, slot] = stamp[received]
+            self.next[write] = (slot + 1) % self.masks.shape[1]
+        r, k = len(rows), self.masks.shape[1]
+        age = stamp[:, None] - self.stamps[rows]                       # [R, K]
+        live = (age >= 0) & (age < self.window)
+        warped = warp_memory(self.masks[rows].reshape(r * k, 187, 1).float(), self.poses[rows].reshape(r * k, 3),
+                             pose_xyyaw.repeat_interleave(k, 0), mode="nearest").reshape(r, k, 187) > .5
+        return (warped & live[..., None]).any(1)
 
 
-def warp_memory(memory, previous_pose, current_pose):
-    """B,187,C yaw-grid memory. Pose=(world x,y,yaw); new cells query old grid."""
+def warp_memory(memory, previous_pose, current_pose, mode="bilinear"):
+    """B,187,C yaw-grid memory. Pose=(world x,y,yaw); new cells query old grid. ``mode`` as in grid_sample."""
     y, x = torch.meshgrid(torch.linspace(-.5, .5, 11, device=memory.device),
                           torch.linspace(-.8, .8, 17, device=memory.device), indexing='ij')
     angle = current_pose[:, 2] - previous_pose[:, 2]
@@ -127,4 +144,4 @@ def warp_memory(memory, previous_pose, current_pose):
     gy = (sa*x + ca*y + ty[:, None, None]) / .5
     grid = torch.stack((gx, gy), -1)
     old = memory.transpose(1, 2).reshape(-1, memory.shape[-1], 11, 17)
-    return F.grid_sample(old, grid, align_corners=True).flatten(2).transpose(1, 2)
+    return F.grid_sample(old, grid, mode=mode, align_corners=True).flatten(2).transpose(1, 2)

@@ -146,6 +146,8 @@ if (args_cli.top5_start_iteration < 0 or args_cli.top5_keep < 1 or args_cli.top5
     parser.error("invalid Top-5 checkpoint criteria")
 if args_cli.lr <= 0 or args_cli.hazard_loss_coef < 0:
     parser.error("lr must be positive and hazard_loss_coef nonnegative")
+if not (0 <= args_cli.seen_supervision_seconds < 60):  # also rejects NaN
+    parser.error("seen_supervision_seconds must be finite and in [0, 60)")
 if args_cli.gap_loss_weight < 1 or args_cli.gap_terrain_columns < 0:
     parser.error("gap_loss_weight must be >= 1 and gap_terrain_columns >= 0")
 if args_cli.resume_lr is not None and (args_cli.resume_lr <= 0 or not args_cli.student_resume):
@@ -347,6 +349,11 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         if optimizer is not None:
             optimizer.load_state_dict(saved['optimizer'])
         start_iteration = int(saved['iteration'])
+        previous = saved.get('student_geometry_supervision', 'teacher_ray_visible_valid_cells_only')
+        if previous != ('teacher_ray_visible_valid_cells_only' if not args_cli.seen_supervision_seconds
+                        else f"teacher_ray_visible_or_seen_within_{args_cli.seen_supervision_seconds:g}s_clean_labels"):
+            print(f"[INFO] Spatial supervision changes on resume: was {previous}, now seen window "
+                  f"{args_cli.seen_supervision_seconds} s", flush=True)
         if args_cli.resume_lr is not None and optimizer is not None:
             for group in optimizer.param_groups:
                 group['lr'] = args_cli.resume_lr
@@ -443,7 +450,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             "teacher_kind": "gast_clean_full_grid_memory" if type(teacher).__name__ == "GastTeacherView" else "bivt_ray",
             "camera_transport": transport_config.manifest(dt), "camera_transport_seed": agent_cfg.seed,
             "gast_distillation_contract": 2,
-            "student_geometry_supervision": "teacher_ray_visible_valid_cells_only",
+            "student_geometry_supervision": ("teacher_ray_visible_valid_cells_only" if not args_cli.seen_supervision_seconds
+                                             else f"teacher_ray_visible_or_seen_within_{args_cli.seen_supervision_seconds:g}s_clean_labels"),
+            "seen_supervision_seconds": args_cli.seen_supervision_seconds,
             "student_visibility_supervision": "teacher_ray_mask_all_cells",
             "teacher_behavior_target": "same_capture_step_teacher_action"}
         if top5_selection is not None: payload["student_top5_selection"] = top5_selection
@@ -576,6 +585,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         if attention:
             for key, value in attention.metrics.items():
                 writer.add_scalar(f"attention/{key}", value, it)
+            for scope, (num, den) in attention.gap_counts.items():
+                if den:  # no gap cell in this window: nothing to report, never reuse an old value
+                    writer.add_scalar(f"attention/gap_supervised_fraction_{scope}", num / den, it)
+            attention.gap_counts["window"] = [0, 0]
         mse_val = window_mse_sum / count
         hazard_val = window_hazard_sum / count
         extra_val = window_extra_sum / count
