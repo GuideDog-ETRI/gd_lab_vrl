@@ -2,6 +2,7 @@
 # Gap-focused fine-tune of a GAST student distilled from a GAST v2.1 teacher: same recipe as
 # train_gast19840_gapfocus.sh (student drives, 20/30 terrain columns are platform gaps, near-gap samples
 # weigh 4x, lr 1e-4), only the teacher differs, so the two fine-tunes are comparable.
+# GAST_SEEN_SECONDS>0 also supervises height/gap on cells seen within that window (seen-cell supervision).
 #   experiments/gast/train_gastv21_student_gapfocus.sh <teacher_package_dir> <student.pt> [captures=8000] [num_envs=256] [run_name]
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -21,5 +22,6 @@ exec bash "$root/scripts/gast/run_student_live.sh" student \
   --num_envs "$envs" --bptt_steps 16 --iterations "$total" --save_interval "${GAST_SAVE_INTERVAL:-500}" \
   --top5_start_iteration $((start + ${GAST_TOP5_DELAY:-1000})) \
   --gap_loss_weight "${GAST_GAP_WEIGHT:-4}" --gap_terrain_columns "${GAST_GAP_COLUMNS:-20}" \
+  --seen_supervision_seconds "${GAST_SEEN_SECONDS:-0}" \
   --camera_interval_ms 70 100 --camera_delay_ms 0 150 --camera_drop_prob .05 \
   --perception_run_name "${5:-gastv21_$(basename "$package")_student${start}_gapfocus_${envs}env_w${GAST_GAP_WEIGHT:-4}_$(date +%Y%m%d_%H%M%S)}"
