@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from collections import deque
 from typing import Any
 
@@ -84,10 +85,71 @@ class DreamwaqPPO(PPO):
 
         super().process_env_step(obs, rewards, dones, extras)
 
+    # -- non-finite step guard -------------------------------------------
+    # 2026-10-08 22:18 the 3-GPU run died at iteration 8016: a non-finite PPO gradient, averaged into every
+    # rank by reduce_parameters, made the scalar action std NaN and the next minibatch's sample() raised.
+    # Each PPO optimizer step is now taken only if every rank agrees the (already averaged and clipped)
+    # gradients are finite; otherwise the step is skipped on all ranks (no Adam moment/step-count change).
+    # After a step, non-finite parameters roll the parameters AND optimizer state back to before the step.
+    # The scalar std is kept >= ``min_action_std``. Too many consecutive skips stop the run on all ranks.
+    min_action_std = 0.01
+    max_consecutive_guard_skips = 50
+
+    def _install_step_guard(self) -> None:
+        optimizer = self.optimizer
+        if getattr(optimizer, "_gd_step_guard", False):
+            return
+        from .distributed import any_rank
+        original = optimizer.step
+
+        def guarded_step(*args: Any, **kwargs: Any):
+            params = [p for group in optimizer.param_groups for p in group["params"]]
+            bad_grad = any(p.grad is not None and not bool(torch.isfinite(p.grad).all()) for p in params)
+            if any_rank(bad_grad, self.device):
+                optimizer.zero_grad(set_to_none=True)
+                self._guard_skipped += 1
+                self._guard_consecutive += 1
+                if self._guard_consecutive > self.max_consecutive_guard_skips:
+                    raise RuntimeError(f"{self._guard_consecutive} consecutive non-finite PPO steps; stopping")
+                print(f"[GUARD] skipped PPO optimizer step (non-finite gradient), total {self._guard_skipped}",
+                      flush=True)
+                return None
+            saved_params = [p.detach().clone() for p in params]
+            saved_state = copy.deepcopy(optimizer.state_dict())
+            out = original(*args, **kwargs)
+            std = getattr(self.policy, "std", None)
+            if isinstance(std, torch.nn.Parameter) and getattr(self.policy, "noise_std_type", "scalar") == "scalar":
+                with torch.no_grad():
+                    std.clamp_(min=self.min_action_std)
+            bad_param = any(not bool(torch.isfinite(p).all()) for p in params)
+            if any_rank(bad_param, self.device):
+                with torch.no_grad():
+                    for p, saved in zip(params, saved_params):
+                        p.copy_(saved)
+                optimizer.load_state_dict(saved_state)
+                self._guard_rolled_back += 1
+                self._guard_consecutive += 1
+                if self._guard_consecutive > self.max_consecutive_guard_skips:
+                    raise RuntimeError(f"{self._guard_consecutive} consecutive non-finite PPO steps; stopping")
+                print(f"[GUARD] rolled back PPO optimizer step (non-finite parameters), total "
+                      f"{self._guard_rolled_back}", flush=True)
+                return None
+            self._guard_consecutive = 0
+            return out
+
+        optimizer.step = guarded_step
+        optimizer._gd_step_guard = True
+
     # -- update ------------------------------------------------------------
     def update(self) -> dict[str, float]:
         from .distributed import active
         import torch.distributed as dist
+        for name in ("_guard_skipped", "_guard_rolled_back", "_guard_consecutive"):
+            if not hasattr(self, name):
+                setattr(self, name, 0)
+        skipped0, rolled0 = self._guard_skipped, self._guard_rolled_back
+        # The optimizer can be replaced after construction (resume rebuilds the grouped optimizer).
+        self._install_step_guard()
         returns = list(self._episode_returns)
         if active():
             gathered = [None] * dist.get_world_size()
@@ -95,6 +157,8 @@ class DreamwaqPPO(PPO):
             returns = [value for batch in gathered for value in batch]
         self.policy.cenet.update_bootstrap_from_episode_rewards(returns)
         loss_dict = super().update()
+        loss_dict["guard_skipped_steps"] = float(self._guard_skipped - skipped0)
+        loss_dict["guard_rolled_back_steps"] = float(self._guard_rolled_back - rolled0)
         loss_dict.update(self._update_cenet())
         self.policy.notify_iteration_done()
         if active():
