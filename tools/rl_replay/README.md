@@ -9,7 +9,7 @@ PPO 정책이 어떤 상태에서 왜 그 행동을 냈는지를 보상 관점�
 
 - 그 스텝의 보상이 어떤 항목의 합으로 만들어졌는가 (항목별 막대)
 - critic이 예상한 미래 보상 V(s)와 실제로 받은 할인 미래 보상 G_t는 얼마인가, 어떤 항목이 G_t를 움직였는가
-- advantage A_t의 부호: PPO가 이 상태에서 이 행동의 확률을 올리는가, 내리는가
+- advantage A_t의 부호: 이 기록 구간에서 교사 critic 기준 결과가 기대보다 큰가, 작은가 (실제 PPO 업데이트 방향 아님)
 - 정책이 받은 지형 입력과 실제 지형, 학생 카메라가 본 것의 차이
 
 비목표: 학습 중 실시간 모니터링(TensorBoard 영역), 대량 통계(MuJoCo 평가 `gd_rbq10_deploy_vrl/evaluation/` 영역).
@@ -20,7 +20,7 @@ PPO 정책이 어떤 상태에서 왜 그 행동을 냈는지를 보상 관점�
 |---|---|
 | `rollout_log.py` | 기록 핵심. `RolloutLog.before_step` / `after_step` / `finish`. 미래 보상·TD 오차·GAE 계산, JSON 쓰기, 실시간 NDJSON 스트림 |
 | `record_rollout.py` | 교사가 운전하는 기록 (Isaac, rsl_rl runner로 체크포인트 로드) |
-| `scripts/gast/train_student_live.py --replay_out` | 학생이 운전하는 기록 (증류와 같은 루프, 학습·저장 없음) |
+| `gast/scripts/train_student_live.py --replay_out` | 학생이 운전하는 기록 (증류와 같은 루프, 학습·저장 없음) |
 | `server.py` | 로컬 HTTP 서버(127.0.0.1). 저장소 파일 서빙, 기록 실행, 목록, 실시간 스트림 API |
 | `viewer.html` | 뷰어. three.js r128(`vendor/`, MIT)로 RBQ10 URDF 메시를 그림 |
 | `make_demo.py` | 시뮬레이터 없이 뷰어를 시험하는 합성 기록 |
@@ -31,14 +31,14 @@ PPO 정책이 어떤 상태에서 왜 그 행동을 냈는지를 보상 관점�
 ## 3. 실행
 
 ```bash
-python3 tools/rl_replay/server.py --port 8767     # → http://127.0.0.1:8767/tools/rl_replay/viewer.html
+TRAIN_ARM=4 python3 tools/rl_replay/server.py --port 8767     # → http://127.0.0.1:8767/tools/rl_replay/viewer.html
 ```
 
 뷰어 메뉴: ● 기록 · 📂 불러오기 · ▶ 재생 · ⏸ 일시정지 · ■ 정지 · ◀1 / 1▶ · 속도 · 환경 · 지형 레이어 3종. 키보드: Space, ←/→.
 
 교사 운전 기록 (명령줄):
 ```bash
-PYTHONPATH=src apptainer exec --nv ~/workspace/gd_lab_isaaclab.sif ~/workspace/venv_apptainer/bin/python \
+TRAIN_ARM=4 PYTHONPATH=gast/src apptainer exec --nv ~/workspace/gd_lab_isaaclab.sif ~/workspace/venv_apptainer/bin/python \
   tools/rl_replay/record_rollout.py --headless --task Gd-GastGapCleanV21-Rbq10-Dreamwaq-v0 \
   --checkpoint checkpoints/teachers/gast/gast_v21_2000_20261007/teacher/model_2000.pt \
   --num_envs 8 --seconds 4 --warmup_seconds 1.5 --vx 1.0 --student_view \
@@ -47,7 +47,7 @@ PYTHONPATH=src apptainer exec --nv ~/workspace/gd_lab_isaaclab.sif ~/workspace/v
 
 학생 운전 기록 (예: `/home/user/gd_project/claude_handoff/run_rl_replay_records_20261008.sh`):
 ```bash
-... scripts/gast/train_student_live.py --headless --task Gd-GastTeacherGastStudent-Rbq10-Dreamwaq-Vision-v0 --v21_env \
+... gast/scripts/train_student_live.py --headless --task Gd-GastTeacherGastStudent-Rbq10-Dreamwaq-Vision-v0 --v21_env \
   --teacher_checkpoint <교사 model_2000.pt> --student_resume <student_top5_iter_17200.pt> --num_envs 8 \
   --camera_interval_ms 70 100 --camera_delay_ms 0 150 --camera_drop_prob .05 \
   --replay_out logs/rl_replay/student17200.json --replay_live logs/rl_replay/student17200.live.ndjson --replay_vx 1.0
@@ -74,7 +74,7 @@ PYTHONPATH=src apptainer exec --nv ~/workspace/gd_lab_isaaclab.sif ~/workspace/v
 | 추가 기록 | 없음 | `latent_err`, `student_fresh`, `teacher_action` |
 | meta.driver | `"teacher"` | `"student"` (+ `teacher_checkpoint`, `student_iteration`) |
 
-학생 운전은 증류 루프를 그대로 씁니다. `student_warmup=0`, `student_ramp=1`로 학생이 100% 운전하게 하고, backward와 optimizer step을 건너뛰어 가중치는 바뀌지 않습니다. Top-5와 저장 간격은 10^9로 막습니다. 기록이 차면 JSON을 쓰고 바로 종료합니다.
+학생 운전은 `student_replay.py`의 별도 `torch.no_grad()` 경로다. student.eval(), actor에 학생 latent 직접 주입, 학습 증강 없음. interval/delay/drop 전송은 유지하며 optimizer·TensorBoard·Top-5·live-config를 만들지 않는다. 과거 run 이름 재사용과 출력 충돌을 거부한다. merged layout에서는 스크립트 경로만 `scripts/gast/train_student_live.py`로 바뀐다.
 
 ## 5. 데이터 형식 (`<name>.json`)
 
@@ -100,7 +100,11 @@ PYTHONPATH=src apptainer exec --nv ~/workspace/gd_lab_isaaclab.sif ~/workspace/v
 | `terms` | K | 보상 항목별 이번 스텝 값 = `RewardManager._step_reward × dt` |
 | `reward` | 스칼라 | `env.step`이 돌려준 보상 |
 | `done` | 0/1 | 이 스텝에서 에피소드 종료 (넘어짐 또는 시간 초과) |
-| `foot_contact` | 4 (0/1) | 발 접촉력 > 1 N |
+| `foot_contact` | 4 (0/1) | before_step의 발 접촉력 > 1 N |
+| `foot_contact_after` | 4 (0/1/null) | after_step; 종료 행은 pre-reset hook, 미취득은 null |
+| `terrain_scan`, `terrain_scan_z`, `terrain_capture_step` | 187×3, scalar, scalar | 실제 term capture clock과 대응한 좌표. 미취득 행은 null |
+| `terrain_history` | 8×375 | GAST 운전일 때 실제 8시점 ego-warped 입력 (과거 높이의 현재 월드 z라는 뜻 아님) |
+| `cloud_capture_step` | scalar | 표시된 카메라 snapshot의 capture step; 전달된 프레임과 구분 |
 | `scan` | 187×3 | 높이 스캐너 적중점 (11×17, 정답 지형) |
 | `scan_z` | 스칼라 | 스캐너 원점 높이 |
 | `terrain_obs` | 374 | 교사 인코더의 지형 입력: 높이 187 + 유효 187 |
@@ -116,7 +120,7 @@ PYTHONPATH=src apptainer exec --nv ~/workspace/gd_lab_isaaclab.sif ~/workspace/v
 
 ## 6. 수식
 
-보상 r_t는 그 스텝에 받은 값입니다. 각 항목 k의 몫 r^k_t = `_step_reward[k] × dt`이고, Σ_k r^k_t = r_t가 되어야 합니다(7절 확인 필요 항목).
+보상 r_t는 그 스텝에 받은 값입니다. 각 항목 k의 몫 r^k_t = `_step_reward[k] × dt`이고, Σ_k r^k_t = r_t가 되어야 합니다(RewardManager 소스 확인; PPO 내부 timeout/RND 추가 보상과는 별개).
 
 finish에서 env마다 뒤에서부터 계산합니다. alive_t = 1 − done_t이고, 부트스트랩은 마지막 스텝 다음 상태의 critic 값 V(s_T)입니다.
 
@@ -137,40 +141,45 @@ G^k_t = r^k_t + \gamma\,(1-d_t)\,G^k_{t+1}, \qquad G^k_T = 0
 - Σ_k G^k_t + γ^{T−t}·V(s_T)(중간 종료가 없을 때) = G_t입니다. 부트스트랩 V(s_T)는 항목으로 나눌 수 없어 G_t에만 들어갑니다.
 - 실시간 모드의 G·A는 뷰어가 같은 식으로 계산하되, 그때까지 받은 마지막 스텝의 V를 부트스트랩으로 씁니다(잠정값). 최종 JSON이 오면 교체합니다.
 
-**"왜 이 행동인가"** 문구: A_t > 0.02면 기대보다 좋았음(PPO가 확률을 올림), A_t < −0.02면 나빴음(내림), 그 사이는 영향 작음.
+**해석:** A의 부호는 이 기록 구간의 교사 critic 기준 GAE다. advantage 정규화·clipping·time-out 보정을 재현하지 않으므로 실제 PPO 확률 변경을 뜻하지 않는다.
 
 **교사 입력 지형 복원**: 교사 인코더 입력 높이 h = clip(scan_z − z − 0.5, −1, 1) × 5 (`CameraVisibleTerrain`). 뷰어는 유효 칸만 z = scan_z − 0.5 − h/5로 되돌려 그립니다.
 
-## 7. 알려진 한계
+## 7. 수정 및 검증 상태 (2026-10-08)
+- 격리 worktree에서만 구현. 실행 중 기본 checkout/merge_gd_lab에는 적용하지 않았다.
+- Arm override(play=False: 학습 task의 pulse=0 유지), BIVT 등록, task별 PYTHONPATH, 명령 term 고정(관측 중복 계산 없음).
+- TRAIN_ARM을 반드시 명시. 실제 dt/decimation/actuator gains는 meta에 기록.
+- NaN/Inf는 null, allow_nan=False. JSON은 같은 파일시스템에서 atomic no-clobber 게시.
+- CLI/server 공유 advisory lock. 서버는 지정 GPU compute PID가 있거나 조회 실패 시 거부한다.
+  force는 busy 우회하지 않는다. 체크포인트는 이 저장소 내부 .pt만 허용.
+- /api/live의 offset/next는 byte offset, 완성 줄 경계만 허용하며 최대 32줄씩 반환한다.
+- localhost Host/Origin 검증, 엄격한 타입/범위/출력 이름 검증. 메타데이터는 textContent로 표시.
+- CPU 수식/표준 JSON/명령/교사 입력/서버/공유 잠금/학생 frozen loop 테스트와 Node fake-live 테스트를 둔다.
+- Isaac 실기록 및 실제 브라우저 WebGL/대용량 성능 측정은 미실시. GPU가 실험 중이므로 성공으로 간주하지 않는다.
 
-**검증 상태 (2026-10-08)**
-- 실제 Isaac 기록은 아직 한 번도 성공 확인하지 않았습니다. 지금까지 확인한 것은 세 가지입니다.
-  - 합성 데모와 가짜 스트림으로 뷰어 확인
-  - 가짜 환경으로 `RolloutLog` CPU 점검
-  - 문법 검사
-- 첫 실제 기록은 `run_rl_replay_records_20261008.sh`에서 돕니다.
-
-**확인이 필요한 가정**
-- Σ_k terms = reward: RewardManager가 `_step_reward`를 가중치 적용 rate로 두고 reward = Σ rate × dt라는 가정입니다. wrapper가 보상을 바꾸면 깨집니다.
-- `gast_history` 마지막 프레임의 높이 인코딩이 `terrain`과 같다는 가정입니다(`GastTeacherView`가 같은 것으로 취급).
-
-**수식상의 차이**
-- 시간 초과(time-out)도 넘어짐과 똑같이 부트스트랩을 끊습니다. rsl_rl 학습은 time-out에 γV를 더하므로, 기록 창 안에서 시간 초과가 나면 그 근처 G·A가 학습 때와 다릅니다. 4초 창이라 드물지만, done 스텝 주변은 주의해야 합니다.
-- 4초 창 끝은 V(s_T)로 부트스트랩합니다. 창 끝 근처의 G_t는 critic 추정에 크게 의존합니다.
-- 창 안에서 에피소드가 끝나면 다음 스텝은 새 에피소드입니다(로봇이 순간이동). 뷰어 타임라인에 빨간 세로선으로 표시됩니다.
-
-**학생 운전의 해석**
-- V(s)와 A_t는 교사 critic 기준입니다. A_t는 "교사 정책 기준 기대값보다 학생 행동의 결과가 좋았나"로 읽어야 합니다. 학생 정책 자신의 가치 추정이 아닙니다.
-- 학생 프레임에 학습용 증강이 그대로 적용됩니다. `GastDistillation.update`의 증강은 프레임 누락 10%, 블러 15%, 카메라별 가림 8%입니다. 배포 때보다 입력이 나쁜 조건이라, 학생 성능이 낮게 보일 수 있습니다.
-- `action_std`는 0이라 std 막대가 없습니다.
-
-**지형 레이어**
-- 학생 카메라 점구름은 매 스텝 가장 최근 렌더입니다. 학생이 실제로 받은 프레임은 전송 지연(최대 150 ms)이 있어 그보다 늦은 장면이고, 드롭된 프레임은 받지 못했습니다. 그래서 "학생이 볼 수 있는 것"이지 "그 순간 학생이 가진 것"은 아닙니다.
-- 점구름은 앞쪽 `cloud_envs`개 env만, 픽셀 4칸마다, 유효 깊이 범위만 남깁니다.
-- 교사 입력 높이는 인코딩 전 (scan_z − z − 0.5)를 ±1 m로 자릅니다. 그래서 스캐너보다 1.5 m 넘게 낮거나 0.5 m 넘게 높은 칸은 경계값으로 그려집니다.
-
-**기타**
-- 용량: 합성 데모(1 env, 400 스텝, 점구름 없음)가 3 MB입니다. 8 env + 점구름 2 env는 수십 MB로 예상하지만 실측하지 않았습니다.
-- `file://`로 열면 URDF를 못 읽어 2D 막대 인형으로 그립니다. 3D 메시는 `server.py`로 열어야 합니다.
-- `server.py`는 127.0.0.1에만 바인딩하고 인증이 없습니다. 기록은 한 번에 하나이고, 학습·증류 프로세스가 있으면 `force` 없이는 거부합니다.
-- 기록은 GPU에서 학습과 함께 돌면 메모리가 부족할 수 있습니다(RTX 5090 32 GB에서 증류 512 env가 약 30 GB 사용).
+### 남은 해석상 한계
+- terminal과 time-out 모두 bootstrap 차단. rsl_rl timeout reward 보정은 재현하지 않는다.
+- 항목별 G에는 bootstrap 몫 없음. live의 마지막 V(s_t)는 아직 없는 V(s_next)의 잠정 근사.
+- GAST history의 과거 프레임은 xy ego-warped이나 높이 기준 z의 과거 이동 보정까지 검증된 것이 아니다.
+  뷰어는 최신 프레임만 overlay한다. 전체 history 배열 저장은 기본 끔이다.
+  교사 CLI --terrain_history, 학생 CLI --replay_terrain_history 또는 서버 JSON terrain_history=true로만 켠다.
+- Ray 입력 좌표는 실제 observation term last_step과 일치할 때만 캐시한다. 기록 시작 이전 capture는
+  다음 capture까지 null로 표시한다. 모르는 좌표를 현재 scanner에 붙이지 않는다.
+- 카메라 점구름은 캡처 snapshot이며 student transport delivery 프레임 자체가 아니다.
+  교사 student_view는 정책 tick마다 렌더하도록 설정한다. 실제 렌더/pose 정렬과 reset hook는 Isaac 검증 대기.
+- 높이 입력 clip ±1m를 역변환하므로 범위 밖 실제 높이는 복원 불가.
+- 학생 replay는 학습용 증강뿐 아니라 camera noise와 gap ghost도 끈다.
+  metadata camera_noise=false, gap_ghost=false이며 과거 replay와 동일 조건 비교하면 안 된다.
+- 고정 vx는 heading 유지를 끄고 vy/각속도를 0으로 한다. task의 heading 유지 조건과 다르다.
+- 수정 전 기록은 capture_aligned 좌표가 없어 교사 지형 레이어를 표시하지 않는다.
+- file:// 열기는 URDF fetch 제한 때문에 2D로 fallback할 수 있다.
+- 서버는 localhost Host/Origin을 검사하지만 사용자 인증은 없다. 신뢰하는 로컬 사용자만 사용한다.
+- compute PID 기준 판정은 compositor/화면 표시 메모리만으로 기록을 막지 않는다.
+  그래픽 전용 작업과 사용 가능한 VRAM까지 보장하지는 않는다. 실제 실행 전 작업·메모리를 확인해야 한다.
+  유휴 GPU baseline은 이번 실험 중에 측정하지 않았고 512 MiB 고정 임계값은 제거했다.
+- advisory lock는 갱신된 recorder끼리만 공유한다. 기존 training/sim 외부 작업은 이 잠금을 사용하지 않는다.
+  GPU 검사는 순간 snapshot이며 이후 외부 작업이 시작되는 경쟁을 원천 차단하지 않는다. CLI도 실행 전에 GPU를 직접 확인해야 한다.
+- server/GUI를 실행하는 것과 Isaac recording을 실행하는 것은 별개다. 현재 실험이 끝나기 전에는 recording 금지.
+- CPU 검증 명령:
+  `python -B -m unittest discover -s tools/rl_replay -p 'test_*.py' -v`
+  `node tools/rl_replay/test_viewer.cjs`

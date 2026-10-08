@@ -75,7 +75,7 @@ header label{color:var(--quiet)}
     <label>전진 명령 vx (비우면 학습 명령) <input id="recVx" type="number" step="0.1" placeholder="예: 0.8"></label>
     <label><input id="recStoch" type="checkbox"> 행동 샘플 (학습처럼)</label>
     <label>파일 이름 <input id="recName" placeholder="비우면 자동"></label>
-    <label><input id="recForce" type="checkbox"> GPU 사용 중이어도 기록</label>
+    <label><input id="recForce" type="checkbox" disabled> GPU 점유 시 기록 금지 (우회 불가)</label>
     <label><input id="recLive" type="checkbox" checked> 시뮬레이터에서 바로 받아 보기 (실시간)</label>
     <label><input id="recStudent" type="checkbox" checked> 학생 카메라 시점도 기록 (벨리 카메라 4대 깊이)</label>
   </div>
@@ -120,19 +120,25 @@ function show(keep){
   $("drop").hidden=true; $("app").hidden=false; $("liveBadge").hidden=!D.meta.live;
   for(const [id,key] of [["layTeacher","terrain_obs"],["layStudent","cloud"]]){ const has=D.envs.some(e=>e[key]&&e[key].some(x=>x&&x.length)); $(id).disabled=!has; $(id).parentElement.title=has?"":"이 기록에는 없음" }
   if(keep&&E){ E=D.envs[+sel.value]; $("slider").max=D.meta.steps-1; return }
-  (R3?Promise.resolve(true):init3D()).then(ok=>{if(!ok) console.log("URDF 3D unavailable (open through serve.sh); stick figure"); selectEnv(+$("env").value||0)})
-    .catch(err=>{console.warn("URDF 3D failed",err); R3=null; $("v3d").hidden=true; $("view").hidden=false; selectEnv(0)});
+  const gen=generation; (R3?Promise.resolve(true):(initPromise||(initPromise=init3D()))).then(ok=>{if(gen!==generation)return;if(!ok) console.log("URDF 3D unavailable (open through serve.sh); stick figure"); selectEnv(+$("env").value||0)})
+    .catch(err=>{if(gen!==generation)return;console.warn("URDF 3D failed",err); R3=null; $("v3d").hidden=true; $("view").hidden=false; selectEnv(0)});
 }
 // ---------- live: follow a recorder that streams one JSON line per step ----------
-let live=null;
+let live=null, generation=0, playbackFrame=null, initPromise=null;
+function beginLoad(){ setPlaying(false); stopLive(); return ++generation }
+function finiteNumber(x){return typeof x==="number"&&Number.isFinite(x)}
+function fmt(x,n=3){return finiteNumber(x)?x.toFixed(n):"미확인"}
 function blankEnv(){ return {} }
 function appendStep(row){ row.envs.forEach((r,e)=>{ const E2=D.envs[e]||(D.envs[e]={}); for(const k in r){ (E2[k]||(E2[k]=[])).push(r[k]) } }) }
 function finishProvisional(){ // G, G^k, delta, A from the steps so far, bootstrapping with the last V (exact values come with the final file)
   const g=D.meta.gamma, l=D.meta.lam;
   D.envs.forEach(E2=>{ const n=E2.reward.length, K=D.meta.term_names.length; E2.return=new Array(n); E2.advantage=new Array(n); E2.delta=new Array(n); E2.term_returns=new Array(n);
     let nv=E2.value[n-1], nr=nv, na=0, nk=new Array(K).fill(0);
-    for(let i=n-1;i>=0;i--){ const alive=E2.done[i]?0:1; E2.delta[i]=E2.reward[i]+g*nv*alive-E2.value[i]; E2.advantage[i]=E2.delta[i]+g*l*alive*na;
-      E2.return[i]=E2.reward[i]+g*alive*nr; E2.term_returns[i]=E2.terms[i].map((x,k)=>x+g*alive*nk[k]);
+    for(let i=n-1;i>=0;i--){ const alive=E2.done[i]?0:1;
+      E2.delta[i]=finiteNumber(E2.reward[i])&&finiteNumber(E2.value[i])&&(!alive||finiteNumber(nv))?E2.reward[i]+(alive?g*nv:0)-E2.value[i]:null;
+      E2.advantage[i]=finiteNumber(E2.delta[i])&&(!alive||finiteNumber(na))?E2.delta[i]+(alive?g*l*na:0):null;
+      E2.return[i]=finiteNumber(E2.reward[i])&&(!alive||finiteNumber(nr))?E2.reward[i]+(alive?g*nr:0):null;
+      E2.term_returns[i]=E2.terms[i].map((x,k)=>finiteNumber(x)&&(!alive||finiteNumber(nk[k]))?x+(alive?g*nk[k]:0):null);
       nv=E2.value[i]; nr=E2.return[i]; na=E2.advantage[i]; nk=E2.term_returns[i] } });
 }
 function loadStream(rows){ // a finished or partial .live.ndjson file opened from disk
@@ -144,41 +150,41 @@ function unfollow(){ if(live){ live.follow=false; $("liveBadge").textContent="�
 $("liveBadge").onclick=()=>{ if(live){ live.follow=true; setPlaying(false); $("liveBadge").textContent="● 실시간"; t=D.meta.steps-1; draw() } };
 function stopLive(){ if(live){ clearTimeout(live.timer); live=null } $("liveBadge").hidden=true }
 function startLive(path){
-  stopLive(); live={path,next:0,timer:null,follow:true}; D=null; E=null;
+  beginLoad(); live={path,next:0,timer:null,follow:true}; D=null; E=null;
   $("openPanel").hidden=true; $("recordPanel").hidden=true; $("drop").hidden=false; $("drop").textContent="시뮬레이터 시작을 기다리는 중… (Isaac 기동에 1~2분)";
   pollLive();
 }
 async function pollLive(){
   if(!live) return; const L=live;
-  let j; try{ j=await (await fetch(`/api/live?path=${encodeURIComponent(L.path)}&from=${L.next}`)).json() }catch(e){ j={lines:[],next:L.next} }
+  let j; try{ j=await (await fetch(`/api/live?path=${encodeURIComponent(L.path)}&offset=${L.next}`)).json() }catch(e){ j={lines:[],next:L.next} }
   if(L!==live) return;
-  let ended=null;
-  for(const row of j.lines||[]){ if(row.meta){ D={meta:{...row.meta,steps:0},envs:[]} } else if(row.envs&&D){ appendStep(row) } else if(row.end){ ended=row.out } }
+  let ended=null, changed=false;
+  for(const row of j.lines||[]){ if(row.meta){ D={meta:{...row.meta,steps:0},envs:[]} } else if(row.envs&&D){ appendStep(row); changed=true } else if(row.end){ ended=row.out } }
   if(j.next!==undefined) L.next=j.next;
-  if(D&&D.envs.length&&D.envs[0].reward){ const first=!E, atEnd=!E||t>=D.meta.steps-1; D.meta.steps=D.envs[0].reward.length; finishProvisional();
+  if(changed&&D&&D.envs.length&&D.envs[0].reward){ const first=!E, atEnd=!E||t>=D.meta.steps-1; D.meta.steps=D.envs[0].reward.length; finishProvisional();
     show(!first); if(L.follow&&!playing&&E){ t=D.meta.steps-1 } if(E) draw() }
-  if(ended){ stopLive(); const out=ended.includes("/logs/rl_replay/")?ended.slice(ended.indexOf("logs/rl_replay/")):ended; const keepT=t, env=$("env").value;
-    fetch("/"+out).then(r=>r.ok?r.text():Promise.reject()).then(txt=>{ D=JSON.parse(txt); show(true); $("env").value=env; E=D.envs[+env]; t=Math.min(keepT,D.meta.steps-1); draw();
+  if(ended){ const gen=generation; stopLive(); const out=ended.includes("/logs/rl_replay/")?ended.slice(ended.indexOf("logs/rl_replay/")):ended; const keepT=t, env=$("env").value;
+    fetch("/"+out).then(r=>r.ok?r.text():Promise.reject()).then(txt=>{ if(gen!==generation)return; D=JSON.parse(txt); show(true); $("env").value=env; E=D.envs[+env]; t=Math.min(keepT,D.meta.steps-1); draw();
       $("recState").textContent="실시간 기록 완료 — 최종 파일(정확한 G, A)로 바꿨습니다: "+out }).catch(()=>{}); return }
   L.timer=setTimeout(pollLive,250);
 }
 function selectEnv(i){E=D.envs[i];t=0;$("slider").max=D.meta.steps-1;$("slider").value=0;setPlaying(false)}
-$("file").onchange=e=>{const f=e.target.files[0]; if(f) f.text().then(t=>{$("openPanel").hidden=true; load(t)})};
+$("file").onchange=e=>{const f=e.target.files[0],gen=beginLoad(); if(f) f.text().then(t=>{if(gen!==generation)return;$("openPanel").hidden=true; load(t)})};
 document.addEventListener("dragover",e=>e.preventDefault());
-document.addEventListener("drop",e=>{e.preventDefault();const f=e.dataTransfer.files[0]; if(f) f.text().then(load)});
+document.addEventListener("drop",e=>{e.preventDefault();const f=e.dataTransfer.files[0],gen=beginLoad(); if(f) f.text().then(txt=>{if(gen===generation)load(txt)})});
 $("env").onchange=e=>{ if(live){ E=D.envs[+e.target.value]; draw() } else selectEnv(+e.target.value) };
 $("slider").oninput=e=>{unfollow();t=+e.target.value;draw()};
 $("back").onclick=()=>{unfollow();t=Math.max(0,t-1);draw()};
 $("fwd").onclick=()=>{unfollow();t=Math.min(D.meta.steps-1,t+1);draw()};
-function setPlaying(on){ if(!D)return; if(on&&t>=D.meta.steps-1)t=0; playing=on; $("play").disabled=on; $("pause").disabled=!on; last=performance.now(); acc=0; if(on)requestAnimationFrame(tick); draw() }
+function setPlaying(on){ cancelAnimationFrame(playbackFrame); playing=false; if(!D)return; if(on&&t>=D.meta.steps-1)t=0; playing=on; $("play").disabled=on; $("pause").disabled=!on; last=performance.now(); acc=0; if(on)playbackFrame=requestAnimationFrame(tick); draw() }
 $("play").onclick=()=>{unfollow();setPlaying(true)};
 $("pause").onclick=()=>setPlaying(false);
 $("stop").onclick=()=>{unfollow();setPlaying(false); t=0; draw()};
 document.addEventListener("keydown",e=>{if(!D||e.target.tagName==="INPUT")return;if(e.key===" "){setPlaying(!playing);e.preventDefault()}
   if(e.key==="ArrowRight")$("fwd").click(); if(e.key==="ArrowLeft")$("back").click()});
-function tick(now){if(!playing)return;acc+=(now-last)/1000*(+$("speed").value);last=now;
-  const dt=D.meta.dt; while(acc>=dt){acc-=dt;t++; if(t>=D.meta.steps){t=D.meta.steps-1;if(live){draw();requestAnimationFrame(tick);return} setPlaying(false);return}}
-  draw(); requestAnimationFrame(tick)}
+function tick(now){if(!playing||!D)return;acc+=(now-last)/1000*(+$("speed").value);last=now;
+  const dt=D.meta.dt; while(acc>=dt){acc-=dt;t++; if(t>=D.meta.steps){t=D.meta.steps-1;if(live){draw();playbackFrame=requestAnimationFrame(tick);return} setPlaying(false);return}}
+  draw(); playbackFrame=requestAnimationFrame(tick)}
 
 // ---------- 3D view (own projection: no libraries, works offline) ----------
 const view=$("view"); let drag=null;
@@ -206,7 +212,7 @@ function drawView(){
   const [g,w,h]=fit(view,420); g.clearRect(0,0,w,h);
   const base=E.base_pos[t], center=[base[0],base[1],base[2]-0.25];
   // terrain scan points coloured by height under the body
-  const scan=E.scan[t]||[];
+  const scan=(E.scan[t]||[]).filter(p=>p.every(finiteNumber));
   const pts=scan.map(p=>[project(p,center,w,h),p[2]]).sort((a,b)=>b[0][2]-a[0][2]);
   const zs=scan.map(p=>p[2]).filter(Number.isFinite), zmin=Math.min(...zs), zmax=Math.max(...zs,zmin+0.05);
   for(const [q,z] of pts){ if(!Number.isFinite(z))continue; const k=(z-zmin)/(zmax-zmin);
@@ -253,13 +259,13 @@ function drawFuture(){
 }
 function drawTimeline(){
   const [g,w,h]=fit($("timeline"),190), n=D.meta.steps, pad=34;
-  const series=[["V(s)",E.value,css("--accent")],["G_t",E.return,css("--ink")],["A_t",E.advantage,css("--warn")],["r_t ×20",E.reward.map(x=>x*20),css("--pos")]];
-  const all=series.flatMap(s=>s[1]); const lo=Math.min(...all,0), hi=Math.max(...all,0.01);
-  const X=i=>pad+i/(n-1)*(w-pad-8), Y=v=>8+(hi-v)/(hi-lo)*(h-30);
+  const series=[["V(s)",E.value,css("--accent")],["G_t",E.return,css("--ink")],["A_t",E.advantage,css("--warn")],["r_t ×20",E.reward.map(x=>finiteNumber(x)?x*20:null),css("--pos")]];
+  const all=series.flatMap(s=>s[1]).filter(finiteNumber); const lo=Math.min(...all,0), hi=Math.max(...all,0.01);
+  const X=i=>pad+i/Math.max(1,n-1)*(w-pad-8), Y=v=>8+(hi-v)/(hi-lo)*(h-30);
   g.strokeStyle=css("--line"); g.beginPath(); g.moveTo(pad,Y(0)); g.lineTo(w-8,Y(0)); g.stroke();
   g.fillStyle=css("--quiet"); g.font="11px system-ui"; g.textAlign="right"; g.fillText(hi.toFixed(2),pad-4,12); g.fillText(lo.toFixed(2),pad-4,h-24);
   E.done.forEach((d,i)=>{if(d){g.fillStyle=css("--neg");g.fillRect(X(i)-1,8,2,h-30)}});
-  series.forEach(([name,vals,col],k)=>{g.strokeStyle=col;g.lineWidth=1.5;g.beginPath();vals.forEach((v,i)=>i?g.lineTo(X(i),Y(v)):g.moveTo(X(i),Y(v)));g.stroke();
+  series.forEach(([name,vals,col],k)=>{g.strokeStyle=col;g.lineWidth=1.5;g.beginPath();let gap=true;vals.forEach((v,i)=>{if(!finiteNumber(v)){gap=true;return}if(gap)g.moveTo(X(i),Y(v));else g.lineTo(X(i),Y(v));gap=false});g.stroke();
     g.fillStyle=col;g.textAlign="left";g.fillText(name,pad+k*90,h-6)});
   g.strokeStyle=css("--ink"); g.lineWidth=1; g.setLineDash([4,3]); g.beginPath(); g.moveTo(X(t),6); g.lineTo(X(t),h-22); g.stroke(); g.setLineDash([]);
 }
@@ -278,27 +284,35 @@ function drawActions(){
 }
 function drawInfo(){
   const v=E.value[t],G=E.return[t],A=E.advantage[t],d=E.delta[t];
-  const verdict=A>0.02?`이 행동은 critic의 기대(V)보다 결과가 좋았습니다 (A=${A.toFixed(3)}). PPO는 이 상태에서 이 행동의 확률을 높입니다.`
-    :A<-0.02?`이 행동은 기대보다 결과가 나빴습니다 (A=${A.toFixed(3)}). PPO는 이 행동의 확률을 낮춥니다.`
-    :`기대와 결과가 거의 같습니다 (A≈0). 이 스텝은 정책을 크게 바꾸지 않습니다.`;
-  const top=D.meta.term_names.map((n,i)=>[n,E.term_returns[t][i]]).sort((a,b)=>Math.abs(b[1])-Math.abs(a[1])).slice(0,3)
-    .map(x=>`${x[0]} (${x[1]>=0?"+":""}${x[1].toFixed(3)})`).join(", ");
-  $("info").innerHTML=`<h3>스텝 ${t} / ${D.meta.steps-1} · ${D.meta.task}</h3><table>
-    <tr><td>가치 V(s<sub>t</sub>) — critic이 예상한 미래 보상</td><td>${v.toFixed(3)}</td></tr>
-    <tr><td>실제 미래 보상 G<sub>t</sub> (γ=${D.meta.gamma})</td><td>${G.toFixed(3)}</td></tr>
-    <tr><td>advantage A<sub>t</sub> (GAE λ=${D.meta.lam})</td><td>${A.toFixed(3)}</td></tr>
-    <tr><td>TD 오차 δ<sub>t</sub> = r<sub>t</sub> + γV(s<sub>t+1</sub>) − V(s<sub>t</sub>)</td><td>${d.toFixed(4)}</td></tr>
-    <tr><td>이번 보상 r<sub>t</sub></td><td>${E.reward[t].toFixed(4)}</td></tr>
-    <tr><td>명령 (vx, vy, ωz)</td><td>${E.command[t].map(x=>x.toFixed(2)).join(", ")}</td></tr>
-    <tr><td>발 접지 (${D.meta.foot_names.map(n=>n.split("_")[0]).join(" ")})</td><td>${E.foot_contact[t].join(" ")}</td></tr>
-    <tr><td>행동 방식</td><td>${D.meta.driver==="student"?"학생이 운전 (교사 actor + 학생 latent)":D.meta.stochastic?"샘플 (학습과 같음)":"평균 (배포와 같음)"}</td></tr>
-    ${E.latent_err?`<tr><td>학생 latent 오차 (교사 latent 대비 MSE)</td><td>${E.latent_err[t].toFixed(4)}</td></tr>
-    <tr><td>학생 프레임 (0.3 s 이내)</td><td>${E.student_fresh[t]>0.5?"신선":"오래됨 → latent 0"}</td></tr>
-    <tr><td>교사였다면 다른 행동 (관절 평균 |차|)</td><td>${(E.teacher_action[t].reduce((a,x,i)=>a+Math.abs(x-E.action[t][i]),0)/E.action[t].length).toFixed(3)}</td></tr>`:""}</table>
-    <div class="why"><b>왜 이 행동인가:</b> ${verdict}<br>미래 보상을 가장 크게 움직이는 항목: ${top}.</div>`;
+  const verdict = finiteNumber(A) ? (A>0.02?"양수":A<-.02?"음수":"0 근처") : "미확인";
+  const rows=[
+    ["기록",D.meta.task],["V(s)",fmt(v)],["G (창 끝 critic bootstrap)",fmt(G)],
+    ["GAE",fmt(A)],["TD 오차",fmt(d,4)],["보상",fmt(E.reward[t],4)],
+    ["명령",E.command[t].map(x=>fmt(x,2)).join(", ")],["발 접지 (before step)",E.foot_contact[t].join(" ")],
+    ["운전자",D.meta.driver==="student"?"학생":D.meta.stochastic?"교사 샘플":"교사 평균"],
+    ["해석","이 기록 구간의 교사 critic 기준 GAE 부호: "+verdict+". 실제 PPO 업데이트가 아님. 정규화/clipping/time-out 보정 미재현."],
+    ["지형 좌표",D.meta.terrain_coordinates||"legacy: capture alignment unknown"]];
+  if(E.latent_err) rows.push(["학생 latent MSE",fmt(E.latent_err[t],6)]);
+  if(E.student_fresh) rows.push(["학생 프레임 신선도",fmt(E.student_fresh[t],2)]);
+  if(E.teacher_action){
+    const diffs=E.teacher_action[t].map((v,i)=>finiteNumber(v)&&finiteNumber(E.action[t][i])?Math.abs(v-E.action[t][i]):null);
+    rows.push(["교사 행동 평균 |차|",fmt(diffs.every(finiteNumber)?diffs.reduce((a,b)=>a+b,0)/diffs.length:null,6)]);
+  }
+  const ranked=(D.meta.term_names||[]).map((name,i)=>({name,value:E.term_returns?.[t]?.[i]}))
+    .filter(x=>finiteNumber(x.value)).sort((a,b)=>Math.abs(b.value)-Math.abs(a.value)).slice(0,3);
+  rows.push(["미래 보상 상위 3항목",ranked.map(x=>x.name+": "+fmt(x.value,4)).join(" / ")||"미확인"]);
+  $("info").replaceChildren();
+  const heading=document.createElement("h3");heading.textContent="스텝 "+t+" / "+(D.meta.steps-1);$("info").append(heading);
+  const table=document.createElement("table");for(const pair of rows){const tr=document.createElement("tr");
+    for(const value of pair){const td=document.createElement("td");td.textContent=value;tr.append(td)}table.append(tr)}
+  $("info").append(table);
   $("clock").textContent=`t=${(t*D.meta.dt).toFixed(2)} s`;
 }
-function draw(){ if(!E)return; $("slider").value=t; if(R3) update3D(); else drawView(); drawInfo(); drawNow(); drawFuture(); drawTimeline(); drawActions(); }
+function draw(){ if(!E)return; $("slider").value=t; drawInfo();
+  const valid=["base_pos","base_quat","base_lin_vel_b","command","bodies","joint_pos","action_mean","action_std","action","value","reward","terms","return","advantage","delta","term_returns"]
+    .every(key=>[E[key]&&E[key][t]].flat(Infinity).every(finiteNumber));
+  if(!valid){$("viewtitle").textContent="비유한/미확인 수치 — 이 스텝의 시각화를 생략합니다";return}
+  if(R3) update3D(); else drawView(); drawNow(); drawFuture(); drawTimeline(); drawActions(); }
 // ---------- menus: record (through server.py) and open ----------
 const API=location.protocol.startsWith("http");
 function showPanel(id){ for(const p of ["recordPanel","openPanel"]) $(p).hidden = p!==id || !$(p).hidden; if(id==="openPanel"&&!$(id).hidden) listRecordings(); if(id==="recordPanel"&&!$(id).hidden) loadSources() }
@@ -307,8 +321,8 @@ $("menuOpen").onclick=()=>showPanel("openPanel");
 async function loadSources(){
   if(!API){$("recState").textContent="기록하려면 server.py로 열어야 합니다: python3 tools/rl_replay/server.py";return}
   const s=await (await fetch("/api/sources")).json();
-  $("recTask").innerHTML=s.tasks.map(x=>`<option value="${x.task}">${x.label} — ${x.task}</option>`).join("");
-  $("recCkpt").innerHTML=s.checkpoints.map(c=>`<option>${c}</option>`).join("");
+  $("recTask").replaceChildren(...s.tasks.map(x=>new Option(x.label+" — "+x.task,x.task)));
+  $("recCkpt").replaceChildren(...s.checkpoints.map(c=>new Option(c,c)));
   pollRecord();
 }
 $("recStart").onclick=async()=>{
@@ -316,7 +330,7 @@ $("recStart").onclick=async()=>{
     vx:$("recVx").value,stochastic:$("recStoch").checked,name:$("recName").value,force:$("recForce").checked,
     live:$("recLive").checked,student_view:$("recStudent").checked};
   const r=await fetch("/api/record",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}); const j=await r.json();
-  $("recState").textContent=j.error?("거부: "+j.error+(j.busy?" ("+j.busy.length+"개 학습 프로세스)":"")):"기록 중…"; if(!j.error){ pollRecord(); if(j.live) startLive(j.live) }
+  $("recState").textContent=j.error?("거부: "+j.error+(j.busy?" ("+j.busy.join("; ")+")":"")):"기록 중…"; if(!j.error){ pollRecord(); if(j.live) startLive(j.live) }
 };
 async function pollRecord(){
   if(!API)return; const s=await (await fetch("/api/record")).json();
@@ -330,11 +344,20 @@ async function pollRecord(){
 async function listRecordings(){
   if(!API){$("recList").innerHTML="<tr><td>저장된 목록은 server.py로 열었을 때 보입니다. 위에서 파일을 직접 고르세요.</td></tr>";return}
   const list=await (await fetch("/api/recordings")).json();
-  $("recList").innerHTML="<tr><th>파일</th><th>정책(task)</th><th>환경 × 스텝</th><th>시각</th></tr>"+list.map(r=>
-    `<tr data-path="${r.path}" data-live="${r.live&&!r.finished?1:""}"><td>${r.live?(r.finished?"⏺ 스트림(완료) ":"<b style='color:var(--neg)'>● 실시간</b> "):""}${r.name}</td><td>${r.meta.task||""}</td><td>${r.meta.num_envs||"?"} × ${r.meta.steps||(r.live?"…":"?")}</td><td>${r.mtime}</td></tr>`).join("");
-  $("recList").querySelectorAll("tr[data-path]").forEach(tr=>tr.onclick=()=>tr.dataset.live?startLive(tr.dataset.path):openPath(tr.dataset.path));
+  renderRecordings(list);
 }
-function openPath(path){ stopLive(); fetch("/"+path).then(r=>r.text()).then(txt=>{ $("openPanel").hidden=true; $("recordPanel").hidden=true; load(txt) }) }
+function renderRecordings(list){
+  $("recList").replaceChildren();
+  const header=document.createElement("tr");
+  for(const label of ["이름","상태","task","env × steps","수정 시각"]){const th=document.createElement("th");th.textContent=label;header.append(th)}
+  $("recList").append(header);
+  for(const r of list){const tr=document.createElement("tr");
+    for(const value of [r.name,r.live?(r.finished?"스트림(완료)":"● 실시간"):"완료",r.meta.task||"",String(r.meta.num_envs||"?")+" × "+String(r.meta.steps||"…"),r.mtime]){
+      const td=document.createElement("td");td.textContent=value;tr.append(td)}
+    tr.onclick=()=>r.live&&!r.finished?startLive(r.path):openPath(r.path);$("recList").append(tr)}
+
+}
+function openPath(path){ const gen=beginLoad(); fetch("/"+path).then(r=>r.ok?r.text():Promise.reject(new Error("load failed"))).then(txt=>{ if(gen!==generation)return; $("openPanel").hidden=true; $("recordPanel").hidden=true; load(txt) }).catch(err=>{if(gen===generation)$("recState").textContent="기록 로드 실패: "+err.message}) }
 
 window.onresize=()=>{if(R3){const w=$("v3d").clientWidth;R3.renderer.setSize(w,420);R3.camera.aspect=w/420;R3.camera.updateProjectionMatrix()} draw()};
 
@@ -394,10 +417,12 @@ async function init3D(){
   return true;
 }
 function teacherCells(){ // the policy's terrain input back in world coordinates: z = scanner_z - 0.5 - h/5, valid cells only
-  const pts=E.scan[t]||[], obs=(E.terrain_obs&&E.terrain_obs[t])||[], n=pts.length;
+  if(D.meta.terrain_coordinates!=="capture_aligned") return [];
+  const pts=(E.terrain_scan&&E.terrain_scan[t])||[], obs=(E.terrain_obs&&E.terrain_obs[t])||[], n=pts.length;
   if(obs.length!==2*n) return [];
-  const sz=E.scan_z?E.scan_z[t]:E.base_pos[t][2];
-  return pts.map((p,i)=>obs[n+i]>0.5?[p[0],p[1],sz-0.5-obs[i]/5]:null).filter(Boolean);
+  const sz=E.terrain_scan_z?E.terrain_scan_z[t]:null;
+  if(!finiteNumber(sz))return [];
+  return pts.map((p,i)=>obs[n+i]>0.5&&p.every(finiteNumber)&&finiteNumber(obs[i])?[p[0],p[1],sz-0.5-obs[i]/5]:null).filter(Boolean);
 }
 for(const id of ["layTruth","layTeacher","layStudent"]) $(id).onchange=()=>draw();
 function update3D(){
@@ -411,7 +436,7 @@ function update3D(){
   D.meta.foot_names.forEach((n,k)=>{ if(feet[n]) feet[n].material.color.set(E.foot_contact[t][k]?css("--pos"):css("--neg"));
     const bi=D.meta.body_names.indexOf(n); if(links[n]&&bi>=0){links[n].getWorldPosition(v); const b=E.bodies[t][bi]; err=Math.max(err,Math.hypot(v.x-b[0],v.y-b[1],v.z-b[2]))} });
   const m=new THREE.Matrix4(), c=new THREE.Color();
-  const pts=(E.scan[t]||[]).filter(x=>Number.isFinite(x[2])), zs=pts.map(x=>x[2]), zmin=Math.min(...zs,0), zmax=Math.max(...zs,zmin+0.05);
+  const pts=(E.scan[t]||[]).filter(x=>x.every(finiteNumber)), zs=pts.map(x=>x[2]), zmin=Math.min(...zs,0), zmax=Math.max(...zs,zmin+0.05);
   scan.visible=$("layTruth").checked; scan.count=pts.length;
   pts.forEach((x,i)=>{ m.makeTranslation(x[0],x[1],x[2]); scan.setMatrixAt(i,m); c.setHSL((225-25*(x[2]-zmin)/(zmax-zmin))/360,0.75,0.35+0.3*(x[2]-zmin)/(zmax-zmin)); scan.setColorAt(i,c) });
   scan.instanceMatrix.needsUpdate=true; if(scan.instanceColor) scan.instanceColor.needsUpdate=true;
@@ -427,7 +452,7 @@ function update3D(){
   $("viewtitle").textContent=`RBQ10 (URDF 메시) · 명령 vx=${E.command[t][0].toFixed(2)}, 실제 vx=${E.base_lin_vel_b[t][0].toFixed(2)} m/s · 교사가 받은 칸 ${tc.length}/${obsN||pts.length} · 학생 점 ${cl.length/3} · FK 오차 ${(err*1000).toFixed(0)} mm`;
 }
 const q=new URLSearchParams(location.search); const src=q.get("data")||(location.hash.startsWith("#url=")?decodeURIComponent(location.hash.slice(5)):null);
-if(q.get("live")) startLive(q.get("live")); else if(src) fetch(src).then(r=>r.text()).then(load);
+if(q.get("live")) startLive(q.get("live")); else if(src){const gen=beginLoad();fetch(src).then(r=>r.text()).then(txt=>{if(gen===generation)load(txt)})}
 </script>
 </body>
 </html>
