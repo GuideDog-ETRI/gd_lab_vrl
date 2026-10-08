@@ -24,7 +24,8 @@ printf 'teacher_package=%s\narchitecture=%s\niterations=%s\nenvs=%s\nbptt=%s\n' 
 export PYTHONPATH="$repo/src"
 export CUDA_VISIBLE_DEVICES="${DISTILL_GPU:-0}" TRAIN_ARM=4 OMNI_KIT_ACCEPT_EULA=YES PYTHONUNBUFFERED=1
 exec apptainer exec --nv --writable-tmpfs --bind "$repo/logs/usd_tmp/$run:/tmp/IsaacLab" \
-  "${DISTILL_IMAGE:-/home/user/workspace/gd_lab_isaaclab.sif}" "${DISTILL_PYTHON:-/home/user/workspace/venv_apptainer/bin/python}" \
+  "${DISTILL_IMAGE:-${GD_LAB_SIF:-$HOME/workspace/gd_lab_isaaclab.sif}}" \
+  "${DISTILL_PYTHON:-${GD_LAB_PYTHON:-$HOME/workspace/venv_apptainer/bin/python}}" \
   scripts/distill_student.py --task Gd-GastTeacherGastStudent-Rbq10-Dreamwaq-Vision-v0 --v21_env \
   --headless --device cuda:0 --num_envs "$envs" --seed 42 \
   --teacher_checkpoint "$launch_dir/teacher.pt" --student_arch "$arch" \
