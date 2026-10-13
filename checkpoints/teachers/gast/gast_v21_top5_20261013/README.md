@@ -1,8 +1,9 @@
 # GAST v2.1 teacher Top-5 (2026-10-13)
 
 This package preserves the five ranked teacher checkpoints from the completed
-30,000-iteration GAST GapClean v2.1 run. Each `.pt` file is included in Git by
-explicit request, along with the saved training configuration and provenance.
+30,000-iteration GAST GapClean v2.1 run. The `.pt` files were pushed once (a71b669) to
+transfer them from the multi-GPU server and then removed from Git (weights stay outside Git);
+copy them between servers and check them with SHA256SUMS.txt. Configuration and provenance stay in Git.
 The original run files remain untouched.
 
 | Rank | Checkpoint | Online score | Clean gap | Mean terrain level |
