@@ -1,0 +1,8 @@
+{
+  "completed_updates": 21600,
+  "wall_seconds": 351090.08202599734,
+  "checkpoint": "/data/users/bsseo/gd_lab_vrl_worktrees/gast-v21-20261007/gast/logs/gast/arm4/2026-10-09_08-40-05_gast_gapclean_from_bivt_train_resume8400mathsdpa/model_30000.pt",
+  "num_envs_per_rank0": 1366,
+  "total_envs": 4096,
+  "horizon": 100
+}
