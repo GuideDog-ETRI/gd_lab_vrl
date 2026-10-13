@@ -1,0 +1,106 @@
+{
+  "artifact_type": "gast_v21_teacher_top5",
+  "format": "PyTorch training checkpoints",
+  "robot": "RBQ10",
+  "task": "Gd-GastGapCleanV21-Rbq10-Dreamwaq-v0",
+  "source_run": "/data/users/bsseo/gd_lab_vrl_worktrees/gast-v21-20261007/gast/logs/gast/arm4/2026-10-09_08-40-05_gast_gapclean_from_bivt_train_resume8400mathsdpa",
+  "source_training_commit": "0e3ef0ac4e7658d3a46e8e7e85179c1a66480d72",
+  "source_worktree_had_uncommitted_changes": true,
+  "source_snapshot": {
+    "commit": "provenance/commit.txt",
+    "tracked_changes": "provenance/tracked_changes.patch",
+    "additional_untracked_module": "provenance/nan_debug.py",
+    "launcher": "provenance/launcher.sh",
+    "top5_criteria": "provenance/online_top5.json"
+  },
+  "training": {
+    "seed": 42,
+    "total_envs": 4096,
+    "world_size": 3,
+    "horizon": 100,
+    "completed_iteration": 30000,
+    "resumed_from_iteration": 8400,
+    "policy_lr": 0.0001,
+    "terrain_lr": 0.001
+  },
+  "ranking": "online proxy, not fixed-seed deployment evaluation",
+  "leaderboard": "leaderboard.json",
+  "params": [
+    "params/agent.yaml",
+    "params/env.yaml",
+    "params/gast_warm_start.yaml"
+  ],
+  "checkpoints": [
+    {
+      "rank": 1,
+      "iteration": 26123,
+      "file": "teacher/26123_top1.pt",
+      "sha256": "113c2b88a0518edfe85bdc33e3984f4f89d6412edb7773649548beaa65ed429e",
+      "online_score": 0.8701872422169028,
+      "mean_terrain_level": 9.155555555555555,
+      "gap_clean_crossing_rate": 0.9563186813186813,
+      "gap_crossing_rate": 0.9871794871794871,
+      "base_contact_rate": 0.00996376811594203,
+      "platform_gap_termination_rate": 0.012820512820512822,
+      "stairs_termination_rate": 0,
+      "platform_gap_samples": 92
+    },
+    {
+      "rank": 2,
+      "iteration": 24906,
+      "file": "teacher/24906_top2.pt",
+      "sha256": "cf0ff4f590e681ea4885620c15fa95bf9c87c44e701d96ea7c7c358d3dc0d28b",
+      "online_score": 0.8670516449465592,
+      "mean_terrain_level": 9.338308457711443,
+      "gap_clean_crossing_rate": 0.9583333333333333,
+      "gap_crossing_rate": 1,
+      "base_contact_rate": 0.015070921985815602,
+      "platform_gap_termination_rate": 0,
+      "stairs_termination_rate": 0,
+      "platform_gap_samples": 61
+    },
+    {
+      "rank": 3,
+      "iteration": 27869,
+      "file": "teacher/27869_top3.pt",
+      "sha256": "cfe77abffa2207c7a07af768f79c8c971c15376569653a4771b77b7b886927b0",
+      "online_score": 0.8663786603134461,
+      "mean_terrain_level": 9.205714285714286,
+      "gap_clean_crossing_rate": 0.9527777777777778,
+      "gap_crossing_rate": 1,
+      "base_contact_rate": 0,
+      "platform_gap_termination_rate": 0,
+      "stairs_termination_rate": 0,
+      "platform_gap_samples": 53
+    },
+    {
+      "rank": 4,
+      "iteration": 18277,
+      "file": "teacher/18277_top4.pt",
+      "sha256": "f1465a772df43d8239e1ed80d6d7cceea9f4d3a783fae428f93a383195565403",
+      "online_score": 0.8650282043454306,
+      "mean_terrain_level": 9.422222222222222,
+      "gap_clean_crossing_rate": 0.9461142032570604,
+      "gap_crossing_rate": 1,
+      "base_contact_rate": 0.007751937984496124,
+      "platform_gap_termination_rate": 0,
+      "stairs_termination_rate": 0.017094017094017092,
+      "platform_gap_samples": 71
+    },
+    {
+      "rank": 5,
+      "iteration": 20825,
+      "file": "teacher/20825_top5.pt",
+      "sha256": "0a01363d13e4e68b54d9a2aded0e0215cf4da7a9216b2591a6052333ed3e5054",
+      "online_score": 0.8649028935484132,
+      "mean_terrain_level": 9.278688524590164,
+      "gap_clean_crossing_rate": 0.9308673469387756,
+      "gap_crossing_rate": 1,
+      "base_contact_rate": 0,
+      "platform_gap_termination_rate": 0,
+      "stairs_termination_rate": 0,
+      "platform_gap_samples": 67
+    }
+  ],
+  "deployment_note": "Training checkpoints only; no ONNX/TorchScript or robot-control validation is included."
+}
