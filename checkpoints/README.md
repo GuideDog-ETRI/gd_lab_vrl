@@ -2,7 +2,9 @@
 
 현재 계보의 묶음만 둔다. 일반적으로 메타데이터(README, `params/`, `SHA256SUMS.txt`, `metadata.json`, leaderboard)는 git에 있고,
 가중치(`*.pt`, `*.onnx`)는 git 밖이다(.gitignore). 받은 가중치는 같은 경로에 두고 `sha256sum -c SHA256SUMS.txt`로 확인한다.
-예외적으로 GAST v2.1 교사 Top-5 묶음은 사용자 요청에 따라 다섯 `.pt` 가중치도 git에 포함했다.
+예외(2026-10-14, 사용자 요청): 배포 기준 GAST v2.1 교사 두 개의 가중치만 git에 포함한다 —
+`teachers/gast/gast_v21_2000_20261007/teacher/model_2000.pt`(SHA `db500e96…`)와
+`teachers/gast/gast_v21_top5_20261013/teacher/26123_top1.pt`(SHA `113c2b88…`). Top-5의 나머지 네 개는 git 밖이다.
 
 | 묶음 | 역할 |
 |---|---|
@@ -10,7 +12,8 @@
 | `teachers/bivt/ray_gap_clean_vendor_new_top1_21068_20261005` | BIVT-Ray Clean 21068 (vendor_new). GAST v2.1 교사의 출발점, 현재 학생들의 교사 |
 | `students/rvld/bivt_ray21068_student19008_20261006` | RVLD 학생 19008 (교사 21068) |
 | `students/gavd/bivt_ray21068_student19008_20261007` | GAVD 학생 19008 (교사 21068) |
-| `teachers/gast/gast_v21_top5_20261013` | GAST GapClean v2.1 교사 Top-5 (30,000 iteration 완료 run; 가중치 포함) |
+| `teachers/gast/gast_v21_2000_20261007` | GAST v2.1 교사 2000 (21068 웜스타트). LiDAR → v2.5 OR 처리기 경로의 기준 교사; 가중치 포함 |
+| `teachers/gast/gast_v21_top5_20261013` | GAST GapClean v2.1 교사 Top-5 (30,000 iteration 완료 run). Top-1 26123 가중치만 포함 |
 
 GAST 학생 19840 묶음은 확정되면 같은 형식으로 추가한다.
 계보에서 빠진 예전 묶음(CVTT, BAVRL용 DWB-38000, BIVT-Ray 4500/7986/12123, Render v1, GAST 7901 등)은 10/07에 git에서 뺐다.
