@@ -1,0 +1,8 @@
+{
+  "completed_updates": 5000,
+  "wall_seconds": 70068.85243715998,
+  "checkpoint": "/data/users/bsseo/gd_lab_vrl_worktrees/gast-rayir-20261014/gast/logs/gast/arm4/2026-10-14_21-43-28_gast_rayir_from2000_1024x100_5000_irbag/model_4999.pt",
+  "num_envs_per_rank0": 1024,
+  "total_envs": 1024,
+  "horizon": 100
+}

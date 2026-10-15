@@ -1,0 +1,8 @@
+{
+  "completed_updates": 5000,
+  "wall_seconds": 59482.642548135016,
+  "checkpoint": "/home/user/gd_project/archive/aux_worktrees/update135_gap50/gast/logs/gast/arm4/2026-10-15_07-54-02_gast_rayir_gap50_26123_1024x100_5000/model_4999.pt",
+  "num_envs_per_rank0": 1024,
+  "total_envs": 1024,
+  "horizon": 100
+}

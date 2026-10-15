@@ -1,0 +1,8 @@
+{
+  "completed_updates": 5000,
+  "wall_seconds": 58995.87740487419,
+  "checkpoint": "/home/onvlm/gd_project/gd_lab_vrl_worktrees/gast-rayir-gap50-20261015/gast/logs/gast/arm4/2026-10-15_07-54-02_gast_rayir_gap50_dwb38000_1024x100_5000/model_4999.pt",
+  "num_envs_per_rank0": 1024,
+  "total_envs": 1024,
+  "horizon": 100
+}

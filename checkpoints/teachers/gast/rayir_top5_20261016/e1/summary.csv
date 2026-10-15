@@ -1,0 +1,313 @@
+teacher,path,ir,terrain,seed,ok,reached,approaches,foot_drop,contact,init,teacher_sha
+2769,G,IR native,gap,42,21,21,34,0,0,83a2b6ba,65da772b
+2769,G,IR native,gap,43,20,20,33,0,0,ff11ac6e,65da772b
+2769,G,IR native,gap,44,19,19,34,0,0,1055752f,65da772b
+2769,G,IR native,gap,45,16,16,32,0,0,9432d885,65da772b
+2836,G,IR native,gap,42,22,27,46,5,0,83a2b6ba,d40c79e8
+2836,G,IR native,gap,43,19,20,37,1,0,ff11ac6e,d40c79e8
+2836,G,IR native,gap,44,17,21,37,4,0,1055752f,d40c79e8
+2836,G,IR native,gap,45,21,24,44,2,0,9432d885,d40c79e8
+3906,G,IR native,gap,42,22,22,35,0,0,83a2b6ba,f3e7afe5
+3906,G,IR native,gap,43,26,26,35,0,0,ff11ac6e,f3e7afe5
+3906,G,IR native,gap,44,22,22,35,0,0,1055752f,f3e7afe5
+3906,G,IR native,gap,45,21,22,36,1,0,9432d885,f3e7afe5
+2769,G,IR native,stdown,42,41,42,42,0,0,de2c6f6a,65da772b
+2769,G,IR native,stdown,43,42,42,42,0,0,183f00e3,65da772b
+2769,G,IR native,stdown,44,41,42,42,0,0,37a48186,65da772b
+2769,G,IR native,stdown,45,41,43,44,0,2,151bfb92,65da772b
+2836,G,IR native,stdown,42,42,42,42,0,0,de2c6f6a,d40c79e8
+2836,G,IR native,stdown,43,41,43,44,0,2,183f00e3,d40c79e8
+2836,G,IR native,stdown,44,42,42,44,0,2,37a48186,d40c79e8
+2836,G,IR native,stdown,45,41,43,44,0,2,151bfb92,d40c79e8
+3906,G,IR native,stdown,42,42,42,42,0,0,de2c6f6a,f3e7afe5
+3906,G,IR native,stdown,43,42,42,42,0,0,183f00e3,f3e7afe5
+3906,G,IR native,stdown,44,40,41,42,0,0,37a48186,f3e7afe5
+3906,G,IR native,stdown,45,40,40,44,0,2,151bfb92,f3e7afe5
+2769,G,IR native,stup,42,44,44,53,0,9,e540f052,65da772b
+2769,G,IR native,stup,43,44,44,51,0,6,0a768cd0,65da772b
+2769,G,IR native,stup,44,44,44,54,0,9,a00ccb11,65da772b
+2769,G,IR native,stup,45,44,44,52,0,7,c787be44,65da772b
+2836,G,IR native,stup,42,44,44,53,0,9,e540f052,d40c79e8
+2836,G,IR native,stup,43,44,45,53,0,8,0a768cd0,d40c79e8
+2836,G,IR native,stup,44,44,44,54,0,9,a00ccb11,d40c79e8
+2836,G,IR native,stup,45,44,44,52,0,7,c787be44,d40c79e8
+3906,G,IR native,stup,42,44,44,53,0,9,e540f052,f3e7afe5
+3906,G,IR native,stup,43,44,44,51,0,6,0a768cd0,f3e7afe5
+3906,G,IR native,stup,44,44,44,54,0,9,a00ccb11,f3e7afe5
+3906,G,IR native,stup,45,44,44,52,0,7,c787be44,f3e7afe5
+2769,GV,IR native,gap,42,26,26,34,0,0,83a2b6ba,65da772b
+2769,GV,IR native,gap,43,20,20,37,0,0,ff11ac6e,65da772b
+2769,GV,IR native,gap,44,25,25,32,0,0,1055752f,65da772b
+2769,GV,IR native,gap,45,20,20,31,0,0,9432d885,65da772b
+2836,GV,IR native,gap,42,22,22,33,0,0,83a2b6ba,d40c79e8
+2836,GV,IR native,gap,43,22,22,33,0,0,ff11ac6e,d40c79e8
+2836,GV,IR native,gap,44,23,23,36,0,0,1055752f,d40c79e8
+2836,GV,IR native,gap,45,18,18,32,0,0,9432d885,d40c79e8
+3906,GV,IR native,gap,42,20,20,36,0,0,83a2b6ba,f3e7afe5
+3906,GV,IR native,gap,43,19,19,32,0,0,ff11ac6e,f3e7afe5
+3906,GV,IR native,gap,44,21,21,32,0,0,1055752f,f3e7afe5
+3906,GV,IR native,gap,45,22,22,33,0,0,9432d885,f3e7afe5
+2769,GV,IR native,stdown,42,42,42,42,0,0,de2c6f6a,65da772b
+2769,GV,IR native,stdown,43,41,43,44,0,2,183f00e3,65da772b
+2769,GV,IR native,stdown,44,41,43,43,0,0,37a48186,65da772b
+2769,GV,IR native,stdown,45,41,43,44,0,2,151bfb92,65da772b
+2836,GV,IR native,stdown,42,40,42,42,0,0,de2c6f6a,d40c79e8
+2836,GV,IR native,stdown,43,42,43,43,0,0,183f00e3,d40c79e8
+2836,GV,IR native,stdown,44,41,42,42,0,0,37a48186,d40c79e8
+2836,GV,IR native,stdown,45,41,42,42,0,0,151bfb92,d40c79e8
+3906,GV,IR native,stdown,42,43,43,44,0,2,de2c6f6a,f3e7afe5
+3906,GV,IR native,stdown,43,40,41,42,0,0,183f00e3,f3e7afe5
+3906,GV,IR native,stdown,44,41,41,42,0,0,37a48186,f3e7afe5
+3906,GV,IR native,stdown,45,41,41,42,0,0,151bfb92,f3e7afe5
+2769,GV,IR native,stup,42,44,44,53,0,9,e540f052,65da772b
+2769,GV,IR native,stup,43,44,44,51,0,6,0a768cd0,65da772b
+2769,GV,IR native,stup,44,44,44,54,0,9,a00ccb11,65da772b
+2769,GV,IR native,stup,45,44,44,52,0,7,c787be44,65da772b
+2836,GV,IR native,stup,42,44,44,53,0,9,e540f052,d40c79e8
+2836,GV,IR native,stup,43,44,44,52,0,8,0a768cd0,d40c79e8
+2836,GV,IR native,stup,44,44,44,54,0,9,a00ccb11,d40c79e8
+2836,GV,IR native,stup,45,44,44,52,0,7,c787be44,d40c79e8
+3906,GV,IR native,stup,42,44,44,53,0,9,e540f052,f3e7afe5
+3906,GV,IR native,stup,43,44,44,51,0,6,0a768cd0,f3e7afe5
+3906,GV,IR native,stup,44,44,44,54,0,9,a00ccb11,f3e7afe5
+3906,GV,IR native,stup,45,44,44,52,0,7,c787be44,f3e7afe5
+2769,LiDAR v25or,IR native,gap,42,23,23,35,0,0,83a2b6ba,65da772b
+2769,LiDAR v25or,IR native,gap,43,24,25,35,1,0,ff11ac6e,65da772b
+2769,LiDAR v25or,IR native,gap,44,26,26,37,0,0,1055752f,65da772b
+2769,LiDAR v25or,IR native,gap,45,23,23,43,0,0,9432d885,65da772b
+2836,LiDAR v25or,IR native,gap,42,20,22,41,2,0,83a2b6ba,d40c79e8
+2836,LiDAR v25or,IR native,gap,43,21,22,33,1,0,ff11ac6e,d40c79e8
+2836,LiDAR v25or,IR native,gap,44,19,24,37,5,0,1055752f,d40c79e8
+2836,LiDAR v25or,IR native,gap,45,15,18,35,3,0,9432d885,d40c79e8
+3906,LiDAR v25or,IR native,gap,42,23,23,34,0,0,83a2b6ba,f3e7afe5
+3906,LiDAR v25or,IR native,gap,43,24,24,37,0,0,ff11ac6e,f3e7afe5
+3906,LiDAR v25or,IR native,gap,44,23,25,40,2,0,1055752f,f3e7afe5
+3906,LiDAR v25or,IR native,gap,45,20,21,36,1,0,9432d885,f3e7afe5
+2769,LiDAR v25or,IR native,stdown,42,42,42,42,0,0,de2c6f6a,65da772b
+2769,LiDAR v25or,IR native,stdown,43,42,42,42,0,0,183f00e3,65da772b
+2769,LiDAR v25or,IR native,stdown,44,41,41,42,0,0,37a48186,65da772b
+2769,LiDAR v25or,IR native,stdown,45,41,43,44,0,2,151bfb92,65da772b
+2836,LiDAR v25or,IR native,stdown,42,42,42,42,0,0,de2c6f6a,d40c79e8
+2836,LiDAR v25or,IR native,stdown,43,41,42,42,0,0,183f00e3,d40c79e8
+2836,LiDAR v25or,IR native,stdown,44,42,43,44,0,2,37a48186,d40c79e8
+2836,LiDAR v25or,IR native,stdown,45,41,42,44,0,2,151bfb92,d40c79e8
+3906,LiDAR v25or,IR native,stdown,42,42,42,42,0,0,de2c6f6a,f3e7afe5
+3906,LiDAR v25or,IR native,stdown,43,42,42,42,0,0,183f00e3,f3e7afe5
+3906,LiDAR v25or,IR native,stdown,44,41,41,42,0,0,37a48186,f3e7afe5
+3906,LiDAR v25or,IR native,stdown,45,38,38,44,0,2,151bfb92,f3e7afe5
+2769,LiDAR v25or,IR native,stup,42,44,44,53,0,9,e540f052,65da772b
+2769,LiDAR v25or,IR native,stup,43,44,44,51,0,6,0a768cd0,65da772b
+2769,LiDAR v25or,IR native,stup,44,44,44,54,0,9,a00ccb11,65da772b
+2769,LiDAR v25or,IR native,stup,45,44,44,52,0,7,c787be44,65da772b
+2836,LiDAR v25or,IR native,stup,42,44,45,54,0,9,e540f052,d40c79e8
+2836,LiDAR v25or,IR native,stup,43,44,44,51,0,6,0a768cd0,d40c79e8
+2836,LiDAR v25or,IR native,stup,44,44,44,54,0,9,a00ccb11,d40c79e8
+2836,LiDAR v25or,IR native,stup,45,44,44,52,0,7,c787be44,d40c79e8
+3906,LiDAR v25or,IR native,stup,42,44,44,53,0,9,e540f052,f3e7afe5
+3906,LiDAR v25or,IR native,stup,43,44,44,51,0,6,0a768cd0,f3e7afe5
+3906,LiDAR v25or,IR native,stup,44,44,44,54,0,9,a00ccb11,f3e7afe5
+3906,LiDAR v25or,IR native,stup,45,44,44,52,0,7,c787be44,f3e7afe5
+2769,camera v25or (no filter),IR native,gap,42,8,42,96,34,0,83a2b6ba,65da772b
+2769,camera v25or (no filter),IR native,gap,43,8,41,87,32,0,ff11ac6e,65da772b
+2769,camera v25or (no filter),IR native,gap,44,9,41,102,32,0,1055752f,65da772b
+2769,camera v25or (no filter),IR native,gap,45,16,37,91,21,0,9432d885,65da772b
+2769,camera v25or (no filter),IR native,stdown,42,40,44,54,0,14,de2c6f6a,65da772b
+2769,camera v25or (no filter),IR native,stdown,43,42,42,44,0,2,183f00e3,65da772b
+2769,camera v25or (no filter),IR native,stdown,44,41,42,46,0,4,37a48186,65da772b
+2769,camera v25or (no filter),IR native,stdown,45,39,42,46,0,4,151bfb92,65da772b
+2769,camera v25or (no filter),IR native,stup,42,45,46,57,0,11,e540f052,65da772b
+2769,camera v25or (no filter),IR native,stup,43,43,47,57,0,12,0a768cd0,65da772b
+2769,camera v25or (no filter),IR native,stup,44,44,45,56,0,11,a00ccb11,65da772b
+2769,camera v25or (no filter),IR native,stup,45,44,44,52,0,7,c787be44,65da772b
+2769,camera+filter v25or,IR native,gap,42,22,24,37,2,0,83a2b6ba,65da772b
+2769,camera+filter v25or,IR native,gap,43,22,22,31,0,0,ff11ac6e,65da772b
+2769,camera+filter v25or,IR native,gap,44,22,24,38,2,0,1055752f,65da772b
+2769,camera+filter v25or,IR native,gap,45,15,16,32,1,0,9432d885,65da772b
+2836,camera+filter v25or,IR native,gap,42,16,23,42,6,0,83a2b6ba,d40c79e8
+2836,camera+filter v25or,IR native,gap,43,23,26,37,3,0,ff11ac6e,d40c79e8
+2836,camera+filter v25or,IR native,gap,44,22,24,43,2,0,1055752f,d40c79e8
+2836,camera+filter v25or,IR native,gap,45,19,19,29,0,0,9432d885,d40c79e8
+3906,camera+filter v25or,IR native,gap,42,20,22,34,1,0,83a2b6ba,f3e7afe5
+3906,camera+filter v25or,IR native,gap,43,20,20,35,0,0,ff11ac6e,f3e7afe5
+3906,camera+filter v25or,IR native,gap,44,21,21,34,0,0,1055752f,f3e7afe5
+3906,camera+filter v25or,IR native,gap,45,15,16,33,1,0,9432d885,f3e7afe5
+2769,camera+filter v25or,IR native,stdown,42,42,43,43,0,0,de2c6f6a,65da772b
+2769,camera+filter v25or,IR native,stdown,43,41,43,43,0,0,183f00e3,65da772b
+2769,camera+filter v25or,IR native,stdown,44,41,42,43,0,2,37a48186,65da772b
+2769,camera+filter v25or,IR native,stdown,45,41,42,42,0,0,151bfb92,65da772b
+2836,camera+filter v25or,IR native,stdown,42,42,42,42,0,0,de2c6f6a,d40c79e8
+2836,camera+filter v25or,IR native,stdown,43,42,42,42,0,0,183f00e3,d40c79e8
+2836,camera+filter v25or,IR native,stdown,44,42,42,44,0,2,37a48186,d40c79e8
+2836,camera+filter v25or,IR native,stdown,45,40,41,42,0,0,151bfb92,d40c79e8
+3906,camera+filter v25or,IR native,stdown,42,42,42,44,0,2,de2c6f6a,f3e7afe5
+3906,camera+filter v25or,IR native,stdown,43,42,42,42,0,0,183f00e3,f3e7afe5
+3906,camera+filter v25or,IR native,stdown,44,41,41,42,0,0,37a48186,f3e7afe5
+3906,camera+filter v25or,IR native,stdown,45,40,40,42,0,0,151bfb92,f3e7afe5
+2769,camera+filter v25or,IR native,stup,42,44,44,53,0,9,e540f052,65da772b
+2769,camera+filter v25or,IR native,stup,43,44,44,51,0,6,0a768cd0,65da772b
+2769,camera+filter v25or,IR native,stup,44,44,44,54,0,9,a00ccb11,65da772b
+2769,camera+filter v25or,IR native,stup,45,44,44,52,0,7,c787be44,65da772b
+2836,camera+filter v25or,IR native,stup,42,44,44,53,0,9,e540f052,d40c79e8
+2836,camera+filter v25or,IR native,stup,43,44,44,51,0,6,0a768cd0,d40c79e8
+2836,camera+filter v25or,IR native,stup,44,44,44,54,0,9,a00ccb11,d40c79e8
+2836,camera+filter v25or,IR native,stup,45,44,44,52,0,7,c787be44,d40c79e8
+3906,camera+filter v25or,IR native,stup,42,44,44,53,0,9,e540f052,f3e7afe5
+3906,camera+filter v25or,IR native,stup,43,44,44,51,0,6,0a768cd0,f3e7afe5
+3906,camera+filter v25or,IR native,stup,44,44,44,54,0,9,a00ccb11,f3e7afe5
+3906,camera+filter v25or,IR native,stup,45,44,44,52,0,7,c787be44,f3e7afe5
+2769,G,IR = 0 at inference,gap,42,21,22,36,1,0,83a2b6ba,65da772b
+2769,G,IR = 0 at inference,gap,43,19,20,32,1,0,ff11ac6e,65da772b
+2769,G,IR = 0 at inference,gap,44,19,19,34,0,0,1055752f,65da772b
+2769,G,IR = 0 at inference,gap,45,16,16,32,0,0,9432d885,65da772b
+2836,G,IR = 0 at inference,gap,42,20,21,40,1,0,83a2b6ba,d40c79e8
+2836,G,IR = 0 at inference,gap,43,22,27,40,5,0,ff11ac6e,d40c79e8
+2836,G,IR = 0 at inference,gap,44,21,22,34,1,0,1055752f,d40c79e8
+2836,G,IR = 0 at inference,gap,45,19,24,43,4,0,9432d885,d40c79e8
+3906,G,IR = 0 at inference,gap,42,24,24,38,0,0,83a2b6ba,f3e7afe5
+3906,G,IR = 0 at inference,gap,43,21,21,34,0,0,ff11ac6e,f3e7afe5
+3906,G,IR = 0 at inference,gap,44,24,24,33,0,0,1055752f,f3e7afe5
+3906,G,IR = 0 at inference,gap,45,20,21,34,1,0,9432d885,f3e7afe5
+2769,G,IR = 0 at inference,stdown,42,42,42,42,0,0,de2c6f6a,65da772b
+2769,G,IR = 0 at inference,stdown,43,42,42,42,0,0,183f00e3,65da772b
+2769,G,IR = 0 at inference,stdown,44,41,42,42,0,0,37a48186,65da772b
+2769,G,IR = 0 at inference,stdown,45,41,42,42,0,0,151bfb92,65da772b
+2836,G,IR = 0 at inference,stdown,42,42,42,42,0,0,de2c6f6a,d40c79e8
+2836,G,IR = 0 at inference,stdown,43,42,42,42,0,0,183f00e3,d40c79e8
+2836,G,IR = 0 at inference,stdown,44,42,43,44,0,2,37a48186,d40c79e8
+2836,G,IR = 0 at inference,stdown,45,40,42,42,0,0,151bfb92,d40c79e8
+3906,G,IR = 0 at inference,stdown,42,42,43,44,0,2,de2c6f6a,f3e7afe5
+3906,G,IR = 0 at inference,stdown,43,42,43,45,0,4,183f00e3,f3e7afe5
+3906,G,IR = 0 at inference,stdown,44,40,40,42,0,0,37a48186,f3e7afe5
+3906,G,IR = 0 at inference,stdown,45,40,40,42,0,0,151bfb92,f3e7afe5
+2769,G,IR = 0 at inference,stup,42,44,44,53,0,9,e540f052,65da772b
+2769,G,IR = 0 at inference,stup,43,44,44,51,0,6,0a768cd0,65da772b
+2769,G,IR = 0 at inference,stup,44,44,44,54,0,9,a00ccb11,65da772b
+2769,G,IR = 0 at inference,stup,45,44,44,52,0,7,c787be44,65da772b
+2836,G,IR = 0 at inference,stup,42,44,44,53,0,9,e540f052,d40c79e8
+2836,G,IR = 0 at inference,stup,43,44,44,51,0,6,0a768cd0,d40c79e8
+2836,G,IR = 0 at inference,stup,44,44,44,54,0,9,a00ccb11,d40c79e8
+2836,G,IR = 0 at inference,stup,45,44,44,52,0,7,c787be44,d40c79e8
+3906,G,IR = 0 at inference,stup,42,44,44,53,0,9,e540f052,f3e7afe5
+3906,G,IR = 0 at inference,stup,43,44,44,51,0,6,0a768cd0,f3e7afe5
+3906,G,IR = 0 at inference,stup,44,44,44,54,0,9,a00ccb11,f3e7afe5
+3906,G,IR = 0 at inference,stup,45,44,44,52,0,7,c787be44,f3e7afe5
+2769,GV,IR = 0 at inference,gap,42,22,22,32,0,0,83a2b6ba,65da772b
+2769,GV,IR = 0 at inference,gap,43,21,21,37,0,0,ff11ac6e,65da772b
+2769,GV,IR = 0 at inference,gap,44,22,22,37,0,0,1055752f,65da772b
+2769,GV,IR = 0 at inference,gap,45,20,20,31,0,0,9432d885,65da772b
+2836,GV,IR = 0 at inference,gap,42,27,27,37,0,0,83a2b6ba,d40c79e8
+2836,GV,IR = 0 at inference,gap,43,25,25,35,0,0,ff11ac6e,d40c79e8
+2836,GV,IR = 0 at inference,gap,44,22,22,35,0,0,1055752f,d40c79e8
+2836,GV,IR = 0 at inference,gap,45,17,17,34,0,0,9432d885,d40c79e8
+3906,GV,IR = 0 at inference,gap,42,27,28,39,1,0,83a2b6ba,f3e7afe5
+3906,GV,IR = 0 at inference,gap,43,23,24,32,1,0,ff11ac6e,f3e7afe5
+3906,GV,IR = 0 at inference,gap,44,24,24,35,0,0,1055752f,f3e7afe5
+3906,GV,IR = 0 at inference,gap,45,15,16,35,1,0,9432d885,f3e7afe5
+2769,GV,IR = 0 at inference,stdown,42,42,42,42,0,0,de2c6f6a,65da772b
+2769,GV,IR = 0 at inference,stdown,43,42,44,48,0,6,183f00e3,65da772b
+2769,GV,IR = 0 at inference,stdown,44,41,41,42,0,0,37a48186,65da772b
+2769,GV,IR = 0 at inference,stdown,45,41,42,44,0,2,151bfb92,65da772b
+2836,GV,IR = 0 at inference,stdown,42,42,42,42,0,0,de2c6f6a,d40c79e8
+2836,GV,IR = 0 at inference,stdown,43,40,42,42,0,0,183f00e3,d40c79e8
+2836,GV,IR = 0 at inference,stdown,44,41,42,42,0,0,37a48186,d40c79e8
+2836,GV,IR = 0 at inference,stdown,45,39,41,42,0,0,151bfb92,d40c79e8
+3906,GV,IR = 0 at inference,stdown,42,42,42,42,0,0,de2c6f6a,f3e7afe5
+3906,GV,IR = 0 at inference,stdown,43,42,42,42,0,0,183f00e3,f3e7afe5
+3906,GV,IR = 0 at inference,stdown,44,41,41,42,0,0,37a48186,f3e7afe5
+3906,GV,IR = 0 at inference,stdown,45,41,41,42,0,0,151bfb92,f3e7afe5
+2769,GV,IR = 0 at inference,stup,42,44,44,53,0,9,e540f052,65da772b
+2769,GV,IR = 0 at inference,stup,43,44,44,51,0,6,0a768cd0,65da772b
+2769,GV,IR = 0 at inference,stup,44,44,44,54,0,9,a00ccb11,65da772b
+2769,GV,IR = 0 at inference,stup,45,44,44,52,0,7,c787be44,65da772b
+2836,GV,IR = 0 at inference,stup,42,44,44,53,0,9,e540f052,d40c79e8
+2836,GV,IR = 0 at inference,stup,43,44,44,51,0,6,0a768cd0,d40c79e8
+2836,GV,IR = 0 at inference,stup,44,44,44,54,0,9,a00ccb11,d40c79e8
+2836,GV,IR = 0 at inference,stup,45,44,44,52,0,7,c787be44,d40c79e8
+3906,GV,IR = 0 at inference,stup,42,44,44,53,0,9,e540f052,f3e7afe5
+3906,GV,IR = 0 at inference,stup,43,44,44,51,0,6,0a768cd0,f3e7afe5
+3906,GV,IR = 0 at inference,stup,44,44,45,56,0,11,a00ccb11,f3e7afe5
+3906,GV,IR = 0 at inference,stup,45,44,44,52,0,7,c787be44,f3e7afe5
+2769,LiDAR v25or,IR = 0 at inference,gap,42,24,24,38,0,0,83a2b6ba,65da772b
+2769,LiDAR v25or,IR = 0 at inference,gap,43,19,19,30,0,0,ff11ac6e,65da772b
+2769,LiDAR v25or,IR = 0 at inference,gap,44,25,25,37,0,0,1055752f,65da772b
+2769,LiDAR v25or,IR = 0 at inference,gap,45,25,27,44,1,0,9432d885,65da772b
+2836,LiDAR v25or,IR = 0 at inference,gap,42,21,23,38,2,0,83a2b6ba,d40c79e8
+2836,LiDAR v25or,IR = 0 at inference,gap,43,25,25,38,0,0,ff11ac6e,d40c79e8
+2836,LiDAR v25or,IR = 0 at inference,gap,44,25,28,40,3,0,1055752f,d40c79e8
+2836,LiDAR v25or,IR = 0 at inference,gap,45,19,22,37,3,0,9432d885,d40c79e8
+3906,LiDAR v25or,IR = 0 at inference,gap,42,17,19,38,2,0,83a2b6ba,f3e7afe5
+3906,LiDAR v25or,IR = 0 at inference,gap,43,22,23,35,1,0,ff11ac6e,f3e7afe5
+3906,LiDAR v25or,IR = 0 at inference,gap,44,27,28,39,1,0,1055752f,f3e7afe5
+3906,LiDAR v25or,IR = 0 at inference,gap,45,19,21,38,2,0,9432d885,f3e7afe5
+2769,LiDAR v25or,IR = 0 at inference,stdown,42,42,42,42,0,0,de2c6f6a,65da772b
+2769,LiDAR v25or,IR = 0 at inference,stdown,43,42,42,42,0,0,183f00e3,65da772b
+2769,LiDAR v25or,IR = 0 at inference,stdown,44,42,42,44,0,2,37a48186,65da772b
+2769,LiDAR v25or,IR = 0 at inference,stdown,45,41,42,43,0,2,151bfb92,65da772b
+2836,LiDAR v25or,IR = 0 at inference,stdown,42,42,42,42,0,0,de2c6f6a,d40c79e8
+2836,LiDAR v25or,IR = 0 at inference,stdown,43,42,43,44,0,2,183f00e3,d40c79e8
+2836,LiDAR v25or,IR = 0 at inference,stdown,44,42,43,44,0,2,37a48186,d40c79e8
+2836,LiDAR v25or,IR = 0 at inference,stdown,45,41,42,42,0,0,151bfb92,d40c79e8
+3906,LiDAR v25or,IR = 0 at inference,stdown,42,41,42,42,0,0,de2c6f6a,f3e7afe5
+3906,LiDAR v25or,IR = 0 at inference,stdown,43,41,43,44,0,2,183f00e3,f3e7afe5
+3906,LiDAR v25or,IR = 0 at inference,stdown,44,41,41,42,0,0,37a48186,f3e7afe5
+3906,LiDAR v25or,IR = 0 at inference,stdown,45,39,41,45,0,2,151bfb92,f3e7afe5
+2769,LiDAR v25or,IR = 0 at inference,stup,42,44,44,53,0,9,e540f052,65da772b
+2769,LiDAR v25or,IR = 0 at inference,stup,43,44,44,51,0,6,0a768cd0,65da772b
+2769,LiDAR v25or,IR = 0 at inference,stup,44,44,44,54,0,9,a00ccb11,65da772b
+2769,LiDAR v25or,IR = 0 at inference,stup,45,44,44,52,0,7,c787be44,65da772b
+2836,LiDAR v25or,IR = 0 at inference,stup,42,44,44,53,0,9,e540f052,d40c79e8
+2836,LiDAR v25or,IR = 0 at inference,stup,43,44,44,51,0,6,0a768cd0,d40c79e8
+2836,LiDAR v25or,IR = 0 at inference,stup,44,44,44,54,0,9,a00ccb11,d40c79e8
+2836,LiDAR v25or,IR = 0 at inference,stup,45,44,44,52,0,7,c787be44,d40c79e8
+3906,LiDAR v25or,IR = 0 at inference,stup,42,44,44,53,0,9,e540f052,f3e7afe5
+3906,LiDAR v25or,IR = 0 at inference,stup,43,44,44,51,0,6,0a768cd0,f3e7afe5
+3906,LiDAR v25or,IR = 0 at inference,stup,44,44,44,54,0,9,a00ccb11,f3e7afe5
+3906,LiDAR v25or,IR = 0 at inference,stup,45,44,44,52,0,7,c787be44,f3e7afe5
+2769,camera v25or (no filter),IR = 0 at inference,gap,42,9,40,87,31,0,83a2b6ba,65da772b
+2769,camera v25or (no filter),IR = 0 at inference,gap,43,10,39,90,29,0,ff11ac6e,65da772b
+2769,camera v25or (no filter),IR = 0 at inference,gap,44,7,46,104,39,0,1055752f,65da772b
+2769,camera v25or (no filter),IR = 0 at inference,gap,45,8,40,101,32,0,9432d885,65da772b
+2769,camera v25or (no filter),IR = 0 at inference,stdown,42,41,42,46,0,2,de2c6f6a,65da772b
+2769,camera v25or (no filter),IR = 0 at inference,stdown,43,41,43,46,0,4,183f00e3,65da772b
+2769,camera v25or (no filter),IR = 0 at inference,stdown,44,40,43,46,0,4,37a48186,65da772b
+2769,camera v25or (no filter),IR = 0 at inference,stdown,45,40,41,49,0,6,151bfb92,65da772b
+2769,camera v25or (no filter),IR = 0 at inference,stup,42,46,47,59,0,15,e540f052,65da772b
+2769,camera v25or (no filter),IR = 0 at inference,stup,43,46,46,56,0,12,0a768cd0,65da772b
+2769,camera v25or (no filter),IR = 0 at inference,stup,44,44,46,58,0,13,a00ccb11,65da772b
+2769,camera v25or (no filter),IR = 0 at inference,stup,45,45,45,54,0,9,c787be44,65da772b
+2769,camera+filter v25or,IR = 0 at inference,gap,42,20,23,32,3,0,83a2b6ba,65da772b
+2769,camera+filter v25or,IR = 0 at inference,gap,43,20,20,33,0,0,ff11ac6e,65da772b
+2769,camera+filter v25or,IR = 0 at inference,gap,44,17,19,34,2,0,1055752f,65da772b
+2769,camera+filter v25or,IR = 0 at inference,gap,45,21,23,38,2,0,9432d885,65da772b
+2836,camera+filter v25or,IR = 0 at inference,gap,42,27,31,49,4,0,83a2b6ba,d40c79e8
+2836,camera+filter v25or,IR = 0 at inference,gap,43,20,20,37,0,0,ff11ac6e,d40c79e8
+2836,camera+filter v25or,IR = 0 at inference,gap,44,22,22,35,0,0,1055752f,d40c79e8
+2836,camera+filter v25or,IR = 0 at inference,gap,45,16,19,41,3,0,9432d885,d40c79e8
+3906,camera+filter v25or,IR = 0 at inference,gap,42,22,22,35,0,0,83a2b6ba,f3e7afe5
+3906,camera+filter v25or,IR = 0 at inference,gap,43,23,23,35,0,0,ff11ac6e,f3e7afe5
+3906,camera+filter v25or,IR = 0 at inference,gap,44,20,23,36,3,0,1055752f,f3e7afe5
+3906,camera+filter v25or,IR = 0 at inference,gap,45,17,19,37,2,0,9432d885,f3e7afe5
+2769,camera+filter v25or,IR = 0 at inference,stdown,42,42,42,42,0,0,de2c6f6a,65da772b
+2769,camera+filter v25or,IR = 0 at inference,stdown,43,42,43,44,0,2,183f00e3,65da772b
+2769,camera+filter v25or,IR = 0 at inference,stdown,44,41,43,44,0,2,37a48186,65da772b
+2769,camera+filter v25or,IR = 0 at inference,stdown,45,41,42,44,0,2,151bfb92,65da772b
+2836,camera+filter v25or,IR = 0 at inference,stdown,42,42,42,42,0,0,de2c6f6a,d40c79e8
+2836,camera+filter v25or,IR = 0 at inference,stdown,43,41,43,44,0,2,183f00e3,d40c79e8
+2836,camera+filter v25or,IR = 0 at inference,stdown,44,42,42,44,0,2,37a48186,d40c79e8
+2836,camera+filter v25or,IR = 0 at inference,stdown,45,41,43,44,0,2,151bfb92,d40c79e8
+3906,camera+filter v25or,IR = 0 at inference,stdown,42,41,42,42,0,0,de2c6f6a,f3e7afe5
+3906,camera+filter v25or,IR = 0 at inference,stdown,43,42,42,43,0,2,183f00e3,f3e7afe5
+3906,camera+filter v25or,IR = 0 at inference,stdown,44,40,42,44,0,2,37a48186,f3e7afe5
+3906,camera+filter v25or,IR = 0 at inference,stdown,45,40,40,42,0,0,151bfb92,f3e7afe5
+2769,camera+filter v25or,IR = 0 at inference,stup,42,44,44,53,0,9,e540f052,65da772b
+2769,camera+filter v25or,IR = 0 at inference,stup,43,44,44,51,0,6,0a768cd0,65da772b
+2769,camera+filter v25or,IR = 0 at inference,stup,44,44,44,54,0,9,a00ccb11,65da772b
+2769,camera+filter v25or,IR = 0 at inference,stup,45,45,45,54,0,9,c787be44,65da772b
+2836,camera+filter v25or,IR = 0 at inference,stup,42,44,44,53,0,9,e540f052,d40c79e8
+2836,camera+filter v25or,IR = 0 at inference,stup,43,44,44,51,0,6,0a768cd0,d40c79e8
+2836,camera+filter v25or,IR = 0 at inference,stup,44,44,44,54,0,9,a00ccb11,d40c79e8
+2836,camera+filter v25or,IR = 0 at inference,stup,45,44,44,52,0,7,c787be44,d40c79e8
+3906,camera+filter v25or,IR = 0 at inference,stup,42,44,44,53,0,9,e540f052,f3e7afe5
+3906,camera+filter v25or,IR = 0 at inference,stup,43,44,44,51,0,6,0a768cd0,f3e7afe5
+3906,camera+filter v25or,IR = 0 at inference,stup,44,44,45,56,0,11,a00ccb11,f3e7afe5
+3906,camera+filter v25or,IR = 0 at inference,stup,45,44,44,52,0,7,c787be44,f3e7afe5
