@@ -155,6 +155,31 @@ class GastScratchV21TeacherCfg(GastScratchV2TeacherCfg):
         apply_v21_after_v2(self)
 
 
+@configclass
+class GastRayIrV21TeacherCfg(GastGapCleanV21TeacherCfg):
+    """UPDATE134B: GAST v2.1 teacher (same rewards/terrain/disturbance) whose terrain input is raycast
+    camera-visible cells (hidden = unknown) + NoisyTerrain noise, with an IR channel in the history."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        from gd_lab.gast.rayir import RaycastIrTerrain
+        self.observations.terrain.camera_visible = ObservationTermCfg(func=RaycastIrTerrain)
+
+
+@configclass
+class GastRayIrV21Gap50TeacherCfg(GastRayIrV21TeacherCfg):
+    """UPDATE135: Ray+IR teacher with half of the terrain columns on boarding gaps.
+
+    20 columns = the 10 other families x 1 + platform_gap x 10 (was 15 = 10 + 5, i.e. 50% instead of 33%).
+    """
+
+    def __post_init__(self):
+        super().__post_init__()
+        gen = self.scene.terrain.terrain_generator
+        gen.num_cols = 20
+        gen.sub_terrains["platform_gap"].proportion = 10.0
+
+
 registry.register_task(task='Gast', robot='Rbq10', method='Dreamwaq',
     env_cfg='gd_lab.gast.tasks:GastTeacherCfg', agent_cfg='gd_lab.gast.teacher:GastRunnerCfg')
 registry.register_task(task='GastGapClean', robot='Rbq10', method='Dreamwaq',
@@ -169,3 +194,7 @@ registry.register_task(task='GastScratchV21', robot='Rbq10', method='Dreamwaq',
     env_cfg='gd_lab.gast.tasks:GastScratchV21TeacherCfg', agent_cfg='gd_lab.gast.teacher:GastRunnerCfg')
 registry.register_task(task='Gast', robot='Rbq10', method='Dreamwaq', mode='Vision',
     env_cfg='gd_lab.gast.tasks:GastStudentCfg', agent_cfg='gd_lab.gast.teacher:GastRunnerCfg')
+registry.register_task(task='GastRayIrV21', robot='Rbq10', method='Dreamwaq',
+    env_cfg='gd_lab.gast.tasks:GastRayIrV21TeacherCfg', agent_cfg='gd_lab.gast.teacher:GastRayIrRunnerCfg')
+registry.register_task(task='GastRayIrV21Gap50', robot='Rbq10', method='Dreamwaq',
+    env_cfg='gd_lab.gast.tasks:GastRayIrV21Gap50TeacherCfg', agent_cfg='gd_lab.gast.teacher:GastRayIrRunnerCfg')
