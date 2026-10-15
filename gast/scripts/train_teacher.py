@@ -30,6 +30,12 @@ parser.add_argument("--video_interval", type=int, default=2000, help="Interval b
 parser.add_argument("--warm_start_bivt", type=str, default=None,
                     help="BIVT-Ray teacher checkpoint: copy its DreamWaQ backbone (actor/critic/normalizers/CENet) into "
                          "a fresh GAST terrain encoder (gd_lab.gast.warm_start). Starts a new run at iteration 0.")
+parser.add_argument("--warm_start_gast", type=str, default=None,
+                    help="UPDATE134B: GAST v2.1 teacher checkpoint copied whole into the Ray+IR teacher (first Conv "
+                         "widened with zero IR columns). Starts a new run at iteration 0.")
+parser.add_argument("--warm_start_dwb", type=str, default=None,
+                    help="UPDATE135: blind DreamWaQ checkpoint as the backbone of a fresh Ray+IR GAST teacher "
+                         "(actor latent columns and latent head zero). Starts a new run at iteration 0.")
 parser.add_argument("--warm_start_sha256", type=str, default=None,
                     help="Expected sha256 of --warm_start_bivt; the 3-GPU launcher requires it for train runs.")
 parser.add_argument("--policy_lr", type=float, default=None, help="Fixed PPO lr of the backbone group (with --terrain_lr).")
@@ -39,6 +45,18 @@ AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
 if (args_cli.policy_lr is None) != (args_cli.terrain_lr is None):
     parser.error("--policy_lr and --terrain_lr go together")
+if sum(x is not None for x in (args_cli.warm_start_bivt, args_cli.warm_start_gast, args_cli.warm_start_dwb)) > 1:
+    parser.error("choose one of --warm_start_bivt / --warm_start_gast / --warm_start_dwb")
+if args_cli.warm_start_dwb is not None:
+    if args_cli.policy_lr is None or args_cli.warm_start_sha256 is None:
+        parser.error("--warm_start_dwb needs --policy_lr, --terrain_lr and --warm_start_sha256")
+    if not os.path.isfile(args_cli.warm_start_dwb):
+        parser.error(f"--warm_start_dwb not found: {args_cli.warm_start_dwb}")
+if args_cli.warm_start_gast is not None:
+    if args_cli.policy_lr is None:
+        parser.error("--warm_start_gast needs --policy_lr and --terrain_lr")
+    if not os.path.isfile(args_cli.warm_start_gast):
+        parser.error(f"--warm_start_gast not found: {args_cli.warm_start_gast}")
 if args_cli.warm_start_bivt is not None:
     if args_cli.policy_lr is None:
         parser.error("--warm_start_bivt needs --policy_lr and --terrain_lr")
@@ -170,10 +188,18 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     runner.add_git_repo_to_log(__file__)
     warm_start = None
     if args_cli.policy_lr is not None:
-        from gd_lab.gast.warm_start import build_grouped_optimizer, warm_start_from_bivt
-        if args_cli.warm_start_bivt is not None:
-            warm_start = warm_start_from_bivt(runner.alg, args_cli.warm_start_bivt, args_cli.policy_lr,
-                                              args_cli.terrain_lr, expected_sha256=args_cli.warm_start_sha256)
+        from gd_lab.gast.warm_start import (build_grouped_optimizer, warm_start_from_bivt, warm_start_from_dwb,
+                                            warm_start_from_gast)
+        if any(x is not None for x in (args_cli.warm_start_bivt, args_cli.warm_start_gast, args_cli.warm_start_dwb)):
+            if args_cli.warm_start_dwb is not None:
+                warm_start = warm_start_from_dwb(runner.alg, args_cli.warm_start_dwb, args_cli.policy_lr,
+                                                 args_cli.terrain_lr, expected_sha256=args_cli.warm_start_sha256)
+            elif args_cli.warm_start_gast is not None:
+                warm_start = warm_start_from_gast(runner.alg, args_cli.warm_start_gast, args_cli.policy_lr,
+                                                  args_cli.terrain_lr, expected_sha256=args_cli.warm_start_sha256)
+            else:
+                warm_start = warm_start_from_bivt(runner.alg, args_cli.warm_start_bivt, args_cli.policy_lr,
+                                                  args_cli.terrain_lr, expected_sha256=args_cli.warm_start_sha256)
             means = warm_start.get("terrain_level_means_by_family") or {}
             family_columns = getattr(runner, "_top5_family_columns", None)
             if means and family_columns:

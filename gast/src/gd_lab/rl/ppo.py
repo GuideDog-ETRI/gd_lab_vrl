@@ -117,12 +117,11 @@ class DreamwaqPPO(PPO):
             saved_params = [p.detach().clone() for p in params]
             saved_state = copy.deepcopy(optimizer.state_dict())
             out = original(*args, **kwargs)
-            std = getattr(self.policy, "std", None)
-            if isinstance(std, torch.nn.Parameter) and getattr(self.policy, "noise_std_type", "scalar") == "scalar":
-                with torch.no_grad():
-                    std.clamp_(min=self.min_action_std)
             bad_param = any(not bool(torch.isfinite(p).all()) for p in params)
-            if any_rank(bad_param, self.device):
+            # Adam moments can go non-finite before the parameters do.
+            bad_state = any(torch.is_tensor(v) and v.is_floating_point() and not bool(torch.isfinite(v).all())
+                            for state in optimizer.state.values() for v in state.values())
+            if any_rank(bad_param or bad_state, self.device):
                 with torch.no_grad():
                     for p, saved in zip(params, saved_params):
                         p.copy_(saved)
@@ -131,9 +130,14 @@ class DreamwaqPPO(PPO):
                 self._guard_consecutive += 1
                 if self._guard_consecutive > self.max_consecutive_guard_skips:
                     raise RuntimeError(f"{self._guard_consecutive} consecutive non-finite PPO steps; stopping")
-                print(f"[GUARD] rolled back PPO optimizer step (non-finite parameters), total "
+                print(f"[GUARD] rolled back optimizer step (non-finite parameters/state), total "
                       f"{self._guard_rolled_back}", flush=True)
                 return None
+            # Clamp only after the finite check, so a -inf std is caught rather than hidden.
+            std = getattr(self.policy, "std", None)
+            if isinstance(std, torch.nn.Parameter) and getattr(self.policy, "noise_std_type", "scalar") == "scalar":
+                with torch.no_grad():
+                    std.clamp_(min=self.min_action_std)
             self._guard_consecutive = 0
             return out
 
