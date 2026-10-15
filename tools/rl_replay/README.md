@@ -183,3 +183,20 @@ G^k_t = r^k_t + \gamma\,(1-d_t)\,G^k_{t+1}, \qquad G^k_T = 0
 - CPU 검증 명령:
   `python -B -m unittest discover -s tools/rl_replay -p 'test_*.py' -v`
   `node tools/rl_replay/test_viewer.cjs`
+
+## 지배 보상 항 (2026-10-16)
+
+어떤 행동에서 어떤 보상 항이 지배적인지 보는 기능입니다.
+- **뷰어 패널 "지배 보상 항"**: 항목별 advantage 몫 a_k(t)를 씁니다. a_k(t)는 critic을 뺀 GAE를 항목별로 나눈 값이고, 이 값이 평소 값에서 벗어난 정도를 히트맵으로 보여 줍니다. 파랑은 그 행동을 부추기는 쪽, 빨강은 벌주는 쪽입니다.
+  - 속도 추종처럼 항상 큰 항은 특정 행동의 원인으로 보지 않습니다. 평소보다 얼마나 벗어났는지를 기준으로 판단합니다.
+  - 변동이 큰 10개 항만 표시합니다.
+  - 사건 줄에는 앞발·뒷발 들기/딛기와 발 빠짐·높이 차기·뒷발 동시 뜀·넘어짐을 표시합니다.
+  - 아래 글상자에는 지금 스텝의 지배 항과, 근처 사건의 결정 시점(접지 변화 0.05 s 전, 나쁜 행동은 0.2 s 전) 기준 상위 항이 나옵니다.
+- **기록 파일**: `record_rollout.py`가 env마다 `term_adv`와 `events`를 함께 저장합니다(`behavior_events.annotate`). 예전 기록은 뷰어가 `term_adv`를 직접 계산하고, 사건 표시는 생략합니다.
+- **`behavior_events.py`**: 행동 사건 4종(앞발·뒷발 들기/딛기)을 추가했습니다. 표는 행동별로, 그 행동을 벌주는 항과 부추기는 항을 보여 줍니다.
+- **`--terrain_input lidar_v25or`** (GAST 교사 전용): 교사의 지형 입력을 E1 v25or와 같은 LiDAR 지도로 바꿉니다.
+  - LiDAR 10 Hz → 전송 100 ms / 0–150 ms / 5% drop → L0S + DUAL2 + DDEEP 0.7
+  - Ray+IR 교사는 IR 채널이 0입니다.
+  - 보상 계산은 그대로입니다.
+  - 기록 패널에서는 "교사 지형 입력"으로 고릅니다.
+- **Ray+IR 교사 task**: `Gd-GastRayIrV21[Gap50]`를 기록 목록에 추가했습니다. 3채널(IR) 지형 이력도 기록합니다(`terrain_ir`).

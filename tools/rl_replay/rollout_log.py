@@ -41,7 +41,9 @@ def json_text(value):
 def policy_terrain_input(obs, n, device, source):
     """Driver explicitly names the actual teacher input, never infer by key priority."""
     if source == "gast_history":
-        return obs[source].reshape(n, 8, 375)[:, -1, :374]
+        # Frame = [height 187, valid 187, (IR 187 for the Ray+IR teachers), age 1]: 375 or 562 wide.
+        history = obs[source]
+        return history.reshape(n, 8, history.shape[-1] // 8)[:, -1, :374]
     if source == "terrain":
         return obs[source]
     if source == "none":
@@ -135,6 +137,8 @@ class RolloutLog:
                          ("action", action), ("value", value), ("latent", latent),
                          ("terrain_obs", policy_terrain_input(obs, n, dev, self.terrain_source))):
             self._add(key, val)
+        if self.terrain_source == "gast_history" and obs["gast_history"].shape[-1] == 8 * (3 * 187 + 1):
+            self._add("terrain_ir", obs["gast_history"].reshape(n, 8, -1)[:, -1, 374:561])  # Ray+IR teachers: newest IR frame
         self._add("scan", self.scanner.data.ray_hits_w if self.scanner is not None else torch.zeros(n, 0, 3, device=dev))
         self._add("scan_z", self.scanner.data.pos_w[:, 2] if self.scanner is not None else torch.zeros(n, device=dev))
         if self.scanner is not None:
@@ -158,7 +162,8 @@ class RolloutLog:
             self._add("terrain_capture_step", self._terrain_stamp)
         self._add("foot_contact", self._foot_contact(dev))
         if self.terrain_source == "gast_history" and self.terrain_history:
-            self._add("terrain_history", obs["gast_history"].reshape(n, 8, 375))
+            history = obs["gast_history"]
+            self._add("terrain_history", history.reshape(n, 8, history.shape[-1] // 8))
         for key, val in (extra or {}).items():
             self._add(key, val)
         if self.student_view is not None:
@@ -235,6 +240,16 @@ class RolloutLog:
             if self.clouds and e < len(self.clouds[0]):
                 env_out["cloud"] = [c[e] for c in self.clouds]
             result["envs"].append(env_out)
+        # Reward dominance (viewer): per-term advantage share a_k(t) and behavior/action events (behavior_events.py).
+        try:
+            import behavior_events
+            for env_out in result["envs"]:
+                env_out.update(behavior_events.annotate(env_out, meta))
+            meta["notes"]["term_adv"] = ("per-term GAE share without the critic, a_k(t) = r_k(t) + gamma*lam*a_k(t+1); "
+                                         "dominant term = largest |a_k(t) - mean_k|")
+            meta["notes"]["events"] = "behavior_events.detect: bad behaviors + foot liftoff/touchdown, [start, end) steps"
+        except Exception as exc:  # never lose a recording over the annotation
+            print(f"[WARN] reward dominance annotation skipped: {exc!r}", flush=True)
         Path(out).parent.mkdir(parents=True, exist_ok=True)
         if Path(out).exists():
             raise FileExistsError(out)

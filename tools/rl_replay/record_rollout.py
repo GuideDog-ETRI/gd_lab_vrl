@@ -47,6 +47,10 @@ parser.add_argument("--cloud_envs", type=int, default=2, help="envs that keep ca
 parser.add_argument("--cloud_stride", type=int, default=4, help="keep every n-th depth pixel per axis")
 parser.add_argument("--terrain_history", action="store_true", help="opt in to full 8-frame GAST history (large)")
 parser.add_argument("--live", default=None, help="also stream each step as an NDJSON line to this file")
+parser.add_argument("--terrain_input", choices=("train", "lidar_v25or"), default="train",
+                    help="train: the task's own terrain observation; lidar_v25or: GAST teachers see the deployed LiDAR "
+                         "map instead (front LiDAR 10 Hz -> 100 ms / 0-150 ms / 5%% drop transport -> L0S + DUAL2 + "
+                         "DDEEP.7, as E1 v25or), IR channel = 0 for Ray+IR teachers. Rewards are unchanged.")
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
 if args_cli.student_view or "Raycast" in args_cli.task or "Vision" in args_cli.task:
@@ -55,6 +59,8 @@ try:
     if not os.environ.get("TRAIN_ARM"):
         raise ValueError("TRAIN_ARM must be explicitly set")
     validate_window(args_cli.num_envs, args_cli.seconds, args_cli.warmup_seconds, args_cli.vx)
+    if args_cli.terrain_input != "train" and not args_cli.task.startswith("Gd-Gast"):
+        raise ValueError("--terrain_input lidar_v25or needs a GAST teacher task")
     if args_cli.cloud_stride < 1 or not 0 <= args_cli.cloud_envs <= args_cli.num_envs:
         raise ValueError("invalid cloud_envs/cloud_stride")
     arm_overrides = training_arm_overrides(os.environ["TRAIN_ARM"], play=False)
@@ -82,6 +88,65 @@ from gd_lab.managers.action_history import ensure_prev_prev_action_tracking
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from rollout_log import RolloutLog  # noqa: E402
+
+
+class LidarV25orInput:
+    """E1 v25or terrain input for a GAST teacher: the policy's terrain obs and 8-frame history come from the LiDAR map."""
+
+    def __init__(self, base, policy, seed):
+        for key, value in (("U130_DUAL", "2"), ("U130_DDEEP", "0.7"), ("U127_SENSOR_COUNT", "1")):
+            os.environ.setdefault(key, value)  # read at import by lidar126 / structure130
+        from lidar126 import Lidar, Maps
+        from gd_lab.core.camera_transport import CameraTransport, CameraTransportConfig, delivery_mask
+        from gd_lab.gast.observations import TerrainHistory
+        self.base, self.n, self.device, self.delivery_mask = base, base.num_envs, base.device, delivery_mask
+        self.rayir = getattr(policy.terrain_encoder, "channels", 2) == 3
+        if self.rayir:
+            from rayir_e1 import RayIrHistory
+            self.history = RayIrHistory(base)
+        else:
+            self.history = TerrainHistory(base)
+        self.sensor, self.maps = Lidar(base), Maps(self.n, "L0S")
+        self.transport = CameraTransport(CameraTransportConfig((100.0, 100.0), (0.0, 150.0), 0.05), base.step_dt, seed)
+        self.episodes = torch.zeros(self.n, dtype=torch.long, device=self.device)
+        self.last = torch.full_like(self.episodes, -1)
+        self.next_capture = self.transport.next_capture(base.common_step_counter)
+        base._vrl_camera_capture_step = self.next_capture
+
+    def view(self, obs):
+        from gd_lab.gast.observations import pose_xyyaw
+        dt = self.base.step_dt
+        poses = pose_xyyaw(self.base).cpu().numpy()
+        scanner_z = self.base.scene["height_scanner"].data.pos_w[:, 2].cpu().numpy()
+        terrain = torch.as_tensor(self.maps.sample(poses, scanner_z, int(self.base.common_step_counter) * dt),
+                                  device=self.device, dtype=torch.float32)
+        frames = torch.cat((terrain, torch.zeros_like(terrain[:, :187])), -1) if self.rayir else terrain
+        view = obs.copy()
+        view["gast_history"] = self.history.update(self.base, frames)
+        if "terrain" in view.keys() and view["terrain"].shape[-1] == 374:
+            view["terrain"] = terrain
+        return view
+
+    def after_step(self, done):
+        dt = self.base.step_dt
+        reset = done.reshape(-1).bool()
+        self.episodes += reset.long()
+        ids = reset.nonzero().flatten()
+        self.history.reset(ids)
+        self.maps.reset(ids.tolist())
+        step = int(self.base.common_step_counter)
+        if step == self.next_capture:
+            packet = self.sensor.capture(self.episodes.cpu().numpy(), step)
+            self.transport.capture(step, (packet, self.episodes.clone()))
+            self.next_capture = self.transport.next_capture(step)
+            self.base._vrl_camera_capture_step = self.next_capture
+        for delivery in self.transport.receive(step):
+            packet, captured = delivery.payload
+            mask = self.delivery_mask(delivery.capture_step, captured, self.episodes, self.last)
+            ids = mask.nonzero().flatten()
+            if len(ids):
+                self.maps.integrate(ids.tolist(), packet, delivery.capture_step * dt, step * dt)
+                self.last[ids] = delivery.capture_step
 
 
 def _resolve(path: str):
@@ -124,9 +189,13 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     dt, n = base.step_dt, base.num_envs
 
     obs, _ = env.reset()
+    lidar = LidarV25orInput(base, policy, args_cli.seed) if args_cli.terrain_input == "lidar_v25or" else None
+    see = (lambda o: lidar.view(o)) if lidar is not None else (lambda o: o)
     with torch.inference_mode():
         for _ in range(int(round(args_cli.warmup_seconds / dt))):
-            obs, _, _, _ = env.step(policy.act_inference(obs))
+            obs, _, done, _ = env.step(policy.act_inference(see(obs)))
+            if lidar is not None:
+                lidar.after_step(done)
 
     log = RolloutLog(base, task=args_cli.task, checkpoint=args_cli.checkpoint,
                      gamma=float(agent_cfg.algorithm.gamma), lam=float(agent_cfg.algorithm.lam),
@@ -134,19 +203,23 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                      live=args_cli.live, student_view=args_cli.student_view and args_cli.enable_cameras,
                      camera_profile=getattr(env_cfg, "camera_profile", None),
                      cloud_envs=args_cli.cloud_envs, cloud_stride=args_cli.cloud_stride,
-                     extra_meta={"driver": "teacher", **environment_metadata(base)},
+                     extra_meta={"driver": "teacher", "terrain_input": args_cli.terrain_input,
+                                 **environment_metadata(base)},
                      terrain_source="gast_history" if args_cli.task.startswith("Gd-Gast") else "terrain",
                      capture_current_camera=args_cli.student_view, terrain_history=args_cli.terrain_history)
     with torch.inference_mode():
         while not log.full():
-            mean = policy.act_inference(obs)
-            action = policy.act(obs) if args_cli.stochastic else mean
-            latent = policy.terrain_latent(obs) if hasattr(policy, "terrain_latent") else torch.zeros(n, 0, device=mean.device)
-            log.before_step(obs, mean=mean, std=action_std(policy, mean), action=action,
+            seen = see(obs)  # what the actor's terrain encoder gets (the LiDAR map with --terrain_input lidar_v25or)
+            mean = policy.act_inference(seen)
+            action = policy.act(seen) if args_cli.stochastic else mean
+            latent = policy.terrain_latent(seen) if hasattr(policy, "terrain_latent") else torch.zeros(n, 0, device=mean.device)
+            log.before_step(seen, mean=mean, std=action_std(policy, mean), action=action,
                             value=policy.evaluate(obs).squeeze(-1), latent=latent,
                             command=base.command_manager.get_command("base_velocity"))
             obs, reward, done, _ = env.step(action)
             log.after_step(reward, done)
+            if lidar is not None:
+                lidar.after_step(done)
         log.finish(policy.evaluate(obs).squeeze(-1), args_cli.out)
     env.close()
 

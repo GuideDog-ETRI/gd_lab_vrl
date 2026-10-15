@@ -29,6 +29,8 @@ RECORDINGS = REPO / "logs" / "rl_replay"
 SIF = os.environ.get("GD_LAB_SIF", str(Path.home() / "workspace/gd_lab_isaaclab.sif"))
 PYTHON = os.environ.get("GD_LAB_PYTHON", str(Path.home() / "workspace/venv_apptainer/bin/python"))
 TASKS = [  # policy family -> the task it was trained on
+    ("Ray+IR teacher (2769)", "Gd-GastRayIrV21-Rbq10-Dreamwaq-v0"),
+    ("Ray+IR teacher gap50 (2836, 3906)", "Gd-GastRayIrV21Gap50-Rbq10-Dreamwaq-v0"),
     ("GAST teacher v2.1", "Gd-GastGapCleanV21-Rbq10-Dreamwaq-v0"),
     ("GAST teacher v2", "Gd-GastGapCleanV2-Rbq10-Dreamwaq-v0"),
     ("BIVT-Ray Clean v2.1", "Gd-VrlGapFinetuneCleanV21Raycast-Rbq10-Dreamwaq-v0"),
@@ -170,6 +172,11 @@ def start(req):
             cmd.append("--student_view")
         if req.get("terrain_history"):
             cmd.append("--terrain_history")
+        terrain_input = req.get("terrain_input") or "train"
+        if terrain_input not in ("train", "lidar_v25or") or (terrain_input != "train" and not task.startswith("Gd-Gast")):
+            return 400, {"error": "terrain_input must be train, or lidar_v25or for a GAST teacher"}
+        if terrain_input != "train":
+            cmd += ["--terrain_input", terrain_input]
         live = None
         if req.get("live", True):
             live = out.with_name(out.stem + ".live.ndjson")

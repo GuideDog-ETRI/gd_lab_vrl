@@ -73,6 +73,7 @@ header label{color:var(--quiet)}
     <label>환경 수 <input id="recEnvs" type="number" value="8" min="1" max="64"></label>
     <label>기록 길이(초) <input id="recSeconds" type="number" value="4" min="1" max="20" step="0.5"></label>
     <label>전진 명령 vx (비우면 학습 명령) <input id="recVx" type="number" step="0.1" placeholder="예: 0.8"></label>
+    <label>교사 지형 입력 <select id="recTerrain"><option value="train" selected>학습 입력 (Ray+IR: 카메라 가시 칸 + IR)</option><option value="lidar_v25or">LiDAR만 (v25or 지도, IR = 0, E1과 같은 처리기·전송 지연)</option></select></label>
     <label><input id="recStoch" type="checkbox"> 행동 샘플 (학습처럼)</label>
     <label>파일 이름 <input id="recName" placeholder="비우면 자동"></label>
     <label><input id="recForce" type="checkbox" disabled> GPU 점유 시 기록 금지 (우회 불가)</label>
@@ -96,6 +97,7 @@ header label{color:var(--quiet)}
     <div class="card"><h3>미래 보상 G<sub>t</sub> = Σ γ<sup>i</sup> r<sub>t+i</sub> 의 항목별 몫</h3><canvas id="future"></canvas></div>
   </div>
   <div class="card full"><h3>타임라인: 가치 V(s), 실제 미래 보상 G<sub>t</sub>, advantage A<sub>t</sub>, 보상 r<sub>t</sub></h3><canvas id="timeline"></canvas></div>
+  <div class="card full"><h3>지배 보상 항 — 이 행동이 어떤 보상 때문인가 (항목별 advantage 몫 a<sub>k</sub>(t) − 평소 값; 파랑 = 부추김, 빨강 = 벌줌)</h3><canvas id="dominance"></canvas><div id="domInfo" class="why"></div></div>
   <div class="card full"><h3>행동 (관절별 정책 평균 ± std, 실제 출력 ●, 학생 기록이면 교사 행동 ━)</h3><canvas id="actions"></canvas></div>
 </main>
 <script src="vendor/three.min.js"></script>
@@ -308,11 +310,64 @@ function drawInfo(){
   $("info").append(table);
   $("clock").textContent=`t=${(t*D.meta.dt).toFixed(2)} s`;
 }
+// ---------- reward dominance: which term drives the decision at each step ----------
+// a_k(t) = r_k(t) + gamma*lam*(1-done_t)*a_k(t+1): the per-term share of GAE without the critic (behavior_events.py).
+// An always-large term (velocity tracking) does not explain one action; the deviation a_k(t) - mean_k does.
+const EVENT_KO={foot_drop:"발 빠짐",high_lift:"높이 차기",hind_hop:"뒷발 동시 뜀",fall:"넘어짐",liftoff_front:"앞발 들기",touchdown_front:"앞발 딛기",liftoff_hind:"뒷발 들기",touchdown_hind:"뒷발 딛기"};
+const EVENT_COLOR={foot_drop:"--neg",high_lift:"--warn",hind_hop:"--warn",fall:"--neg",liftoff_front:"--accent",touchdown_front:"--pos",liftoff_hind:"--accent",touchdown_hind:"--pos"};
+const EVENT_LEAD={foot_drop:20,high_lift:20,hind_hop:20,fall:20}; // others: 5 steps (0.05 s)
+let domCache=null;
+function domData(){
+  if(domCache&&domCache.E===E&&domCache.n===E.terms.length) return domCache;
+  const T=E.terms.length, K=D.meta.term_names.length, kgl=(D.meta.gamma??0.99)*(D.meta.lam??0.95);
+  let a=E.term_adv;
+  if(!a||a.length!==T){ a=new Array(T); let nxt=new Array(K).fill(0);
+    for(let i=T-1;i>=0;i--){ const alive=E.done[i]?0:1; nxt=E.terms[i].map((r,k)=>(finiteNumber(r)?r:0)+kgl*alive*nxt[k]); a[i]=nxt } }
+  const mean=new Array(K).fill(0); a.forEach(row=>row.forEach((v,k)=>mean[k]+=v/T));
+  const dev=a.map(row=>row.map((v,k)=>v-mean[k]));
+  const spread=mean.map((_,k)=>dev.reduce((s,row)=>s+Math.abs(row[k]),0)/T);
+  const rows=spread.map((v,k)=>[k,v]).sort((x,y)=>y[1]-x[1]).slice(0,10).map(x=>x[0]);
+  const mags=dev.flatMap(row=>rows.map(k=>Math.abs(row[k]))).sort((x,y)=>x-y);
+  const scale=Math.max(1e-9,mags[Math.floor(mags.length*0.97)]||0);
+  return domCache={E,n:T,dev,rows,scale,events:E.events||null};
+}
+function topTerms(row,n){ const names=D.meta.term_names;
+  const order=row.map((v,k)=>[k,v]).sort((x,y)=>Math.abs(y[1])-Math.abs(x[1]));
+  return {all:order.slice(0,n), pos:order.filter(x=>x[1]>0).slice(0,n), neg:order.filter(x=>x[1]<0).slice(0,n), names} }
+function drawDominance(){
+  const c=domData(), names=D.meta.term_names, T=c.n, rowH=15, evH=c.events?22:0, lab=170;
+  const [g,w,h]=fit($("dominance"),c.rows.length*rowH+evH+26); const X=i=>lab+i/Math.max(1,T-1)*(w-lab-8);
+  const pos=css("--accent"), neg=css("--neg"); g.font="11px system-ui"; g.textBaseline="middle";
+  const cw=Math.max(1,(w-lab-8)/T+0.5);
+  c.rows.forEach((k,r)=>{ const y=r*rowH;
+    for(let i=0;i<T;i++){ const v=c.dev[i][k], m=Math.min(1,Math.abs(v)/c.scale); if(m<0.04)continue;
+      g.globalAlpha=0.15+0.85*m; g.fillStyle=v>0?pos:neg; g.fillRect(X(i),y+1,cw,rowH-2) }
+    g.globalAlpha=1; g.fillStyle=css("--ink"); g.textAlign="right"; const nm=names[k]; g.fillText(nm.length>26?nm.slice(0,25)+"…":nm,lab-6,y+rowH/2) });
+  if(c.events){ const y0=c.rows.length*rowH+4; let lane=0;
+    for(const [name,spans] of Object.entries(c.events)){ if(!spans.length)continue; g.fillStyle=css(EVENT_COLOR[name]||"--quiet");
+      const yy=y0+(lane%2)*9; spans.forEach(([s,e])=>g.fillRect(X(s),yy,Math.max(2,X(e)-X(s)),7)); lane++ }
+    g.fillStyle=css("--quiet"); g.textAlign="right"; g.fillText("행동·사건",lab-6,y0+8) }
+  g.fillStyle=css("--quiet"); g.textAlign="left"; g.fillText(`색 진하기 = |a_k(t) − 평소| / ${c.scale.toPrecision(2)} (상위 3% 기준), 변동이 큰 10개 항목`,lab,h-8);
+  g.strokeStyle=css("--ink"); g.lineWidth=1; g.setLineDash([4,3]); g.beginPath(); g.moveTo(X(t),0); g.lineTo(X(t),h-18); g.stroke(); g.setLineDash([]);
+  // text: the dominant term now, and the events around now with the terms behind them at their decision step
+  const fmtT=(list)=>list.map(([k,v])=>`${names[k]} (${v>=0?"+":""}${v.toFixed(4)})`).join(", ")||"—";
+  const now=topTerms(c.dev[t],3), [dk,dv]=now.all[0];
+  const lines=[`<b>지금(스텝 ${t}) 지배 항목:</b> ${names[dk]} — ${dv>=0?"이 행동을 부추김":"이 행동을 벌줌"} (${dv.toFixed(4)})`,
+    `부추김 상위: ${fmtT(now.pos)} · 벌줌 상위: ${fmtT(now.neg)}`];
+  if(c.events){ const near=[];
+    for(const [name,spans] of Object.entries(c.events)) for(const [s,e] of spans) if(t>=s-30&&t<=e+10) near.push([name,s,e]);
+    near.sort((x,y)=>Math.abs(x[1]-t)-Math.abs(y[1]-t)).slice(0,4).forEach(([name,s,e])=>{
+      const d=Math.max(0,s-(EVENT_LEAD[name]??5)), tt=topTerms(c.dev[d],2);
+      lines.push(`<b>${EVENT_KO[name]||name}</b> 스텝 ${s}–${e-1} (결정 시점 ${d}): 벌줌 ${fmtT(tt.neg)} · 부추김 ${fmtT(tt.pos)}`) });
+    if(!near.length) lines.push("근처(−0.3 s ~ +0.1 s)에 행동·사건 없음"); }
+  else lines.push("이 기록에는 사건 정보가 없습니다 (behavior_events.py로 만들거나 새로 기록하세요).");
+  const box=$("domInfo"); box.replaceChildren(); lines.forEach(html=>{const div=document.createElement("div"); div.innerHTML=html; box.append(div)});
+}
 function draw(){ if(!E)return; $("slider").value=t; drawInfo();
   const valid=["base_pos","base_quat","base_lin_vel_b","command","bodies","joint_pos","action_mean","action_std","action","value","reward","terms","return","advantage","delta","term_returns"]
     .every(key=>[E[key]&&E[key][t]].flat(Infinity).every(finiteNumber));
   if(!valid){$("viewtitle").textContent="비유한/미확인 수치 — 이 스텝의 시각화를 생략합니다";return}
-  if(R3) update3D(); else drawView(); drawNow(); drawFuture(); drawTimeline(); drawActions(); }
+  if(R3) update3D(); else drawView(); drawNow(); drawFuture(); drawTimeline(); drawDominance(); drawActions(); }
 // ---------- menus: record (through server.py) and open ----------
 const API=location.protocol.startsWith("http");
 function showPanel(id){ for(const p of ["recordPanel","openPanel"]) $(p).hidden = p!==id || !$(p).hidden; if(id==="openPanel"&&!$(id).hidden) listRecordings(); if(id==="recordPanel"&&!$(id).hidden) loadSources() }
@@ -328,7 +383,7 @@ async function loadSources(){
 $("recStart").onclick=async()=>{
   const body={task:$("recTask").value,checkpoint:$("recCkpt").value,num_envs:+$("recEnvs").value,seconds:+$("recSeconds").value,
     vx:$("recVx").value,stochastic:$("recStoch").checked,name:$("recName").value,force:$("recForce").checked,
-    live:$("recLive").checked,student_view:$("recStudent").checked};
+    live:$("recLive").checked,student_view:$("recStudent").checked,terrain_input:$("recTerrain").value};
   const r=await fetch("/api/record",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}); const j=await r.json();
   $("recState").textContent=j.error?("거부: "+j.error+(j.busy?" ("+j.busy.join("; ")+")":"")):"기록 중…"; if(!j.error){ pollRecord(); if(j.live) startLive(j.live) }
 };
