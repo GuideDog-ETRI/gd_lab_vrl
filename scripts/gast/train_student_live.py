@@ -135,7 +135,7 @@ parser.add_argument('--v3_size', choices=('small','large'), default='small')
 parser.add_argument('--v3_resume', default=None)
 parser.add_argument('--v3_round', type=int, default=0)
 parser.add_argument("--b3", action="store_true", help="UPDATE37 sampling and original-student action preservation")
-parser.add_argument("--e1_condition", choices=("a_student_gate","b_student_gate1","c_teacher_full","d_teacher_early","e_teacher_late","f_teacher_student_gate"), default=None, help="Frozen closed-loop E1; compact per-approach metrics instead of RolloutLog")
+parser.add_argument("--e1_condition", choices=("p_teacher_packet","a_student_gate","b_student_gate1","c_teacher_full","d_teacher_early","e_teacher_late","f_teacher_student_gate"), default=None, help="Frozen closed-loop E1; compact per-approach metrics instead of RolloutLog")
 parser.add_argument("--replay_out", default=None,
                     help="Analysis replay (tools/rl_replay): load --student_resume frozen, let the student drive, "
                          "record --replay_seconds of every step to this JSON and exit. Nothing is trained or saved.")
@@ -193,7 +193,7 @@ if args_cli.replay_out:
             lock_path=Path(__file__).resolve().parents[2] / "outputs/e1.lock" if args_cli.e1_condition else None)
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
-    if not args_cli.student_resume:
+    if not args_cli.student_resume and os.environ.get("U117") != "1":
         parser.error("--replay_out needs --student_resume (the student to replay)")
     # Student always drives, never learns, never saves; the run stops when the recording is full.
     args_cli.student_warmup, args_cli.student_ramp = 0, 1
@@ -362,8 +362,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     if args_cli.gap_terrain_columns:
         cols = set_gap_terrain_columns(env_cfg, args_cli.gap_terrain_columns)
         print(f"[INFO] Gap-focused terrain: platform_gap {args_cli.gap_terrain_columns}/{cols} columns", flush=True)
-    if args_cli.e1_condition or args_cli.b2_out:
-        from e1_runner import configure
+    if args_cli.e1_condition:
+        from e1_heightmap116 import configure
         configure(env_cfg)
     configure_vrl_cameras(env_cfg)
     if args_cli.student_v3:
@@ -380,8 +380,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     ensure_prev_prev_action_tracking(env.unwrapped)
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
-    if args_cli.e1_condition or args_cli.b2_out:
-        from e1_runner import load_teacher
+    if args_cli.e1_condition:
+        from e1_heightmap116 import load_teacher
         teacher = load_teacher(env, agent_cfg.to_dict(), checkpoint_path, agent_cfg.device)
     else:
         runner_class = _resolve(agent_cfg.class_name)
@@ -411,6 +411,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     print(f"[INFO] Nominal camera contract: {camera_steps} env steps ({cam_period}s), step_dt={dt}s")
     print(f"[INFO] Camera transport: {transport_config.manifest(dt)}; interval_steps={transport.interval}, delay_steps={transport.delay}")
 
+    if os.environ.get("U117") == "1":
+        from e1_heightmap117 import run
+        try:
+            run(env, teacher, None, None, transport, args_cli, agent_cfg, env_cfg, checkpoint_path, None)
+        finally:
+            env.close()
+        return
+
     student = GastStudent(env_cfg.camera_profile).to(device)
     from gd_lab.gast.p3 import configure_train_parts, restore_optimizer, balanced_latent_loss
     trainable_parameters = configure_train_parts(student, args_cli.train_parts)
@@ -425,7 +433,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     print(f"[INFO] Near-gap sample loss weight: {args_cli.gap_loss_weight}", flush=True)
     print(f"[INFO] Seen-cell supervision window: {args_cli.seen_supervision_seconds} s (0 = teacher-visible only)", flush=True)
     print(f"[INFO] Gap-observed (free-space) gap-channel supervision: {args_cli.gap_observed_supervision}", flush=True)
-    optimizer = None if (args_cli.replay_out or args_cli.b2_out) else torch.optim.Adam(trainable_parameters, lr=args_cli.lr)
+    optimizer = None if args_cli.replay_out else torch.optim.Adam(trainable_parameters, lr=args_cli.lr)
     start_iteration = 0
     if args_cli.student_resume:
         saved = torch.load(args_cli.student_resume, map_location=device, weights_only=False)
@@ -475,7 +483,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     if args_cli.replay_out:
         sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "rl_replay"))
         if args_cli.e1_condition:
-            from e1_runner import run as run_replay
+            from e1_heightmap116 import run as run_replay
         else:
             from student_replay import run as run_replay
         try:
