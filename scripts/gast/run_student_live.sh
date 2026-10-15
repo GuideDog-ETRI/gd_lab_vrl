@@ -2,6 +2,7 @@
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
+if [[ -f "$root/STOP_E0_AT_NEXT_START" ]]; then echo "UPDATE110 cooperative boundary stop for gain repair"; exit 77; fi
 mode=${1:?Usage: run_student_live.sh student [arguments]}
 shift
 case "$mode" in teacher|student) ;; *) exit 2 ;; esac

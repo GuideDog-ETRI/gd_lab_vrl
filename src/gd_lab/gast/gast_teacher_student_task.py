@@ -37,7 +37,9 @@ class GastTeacherView:
 
     def _teacher_obs(self, obs):
         view = obs.copy()
-        view["terrain"] = obs["gast_history"].reshape(obs.batch_size[0], 8, 375)[:, -1, :374]
+        # UPDATE136: frame width 375 (2 channels) or 562 (Ray+IR); [height, valid] lead both.
+        history = obs["gast_history"]
+        view["terrain"] = history.reshape(obs.batch_size[0], 8, history.shape[-1] // 8)[:, -1, :374]
         return view
 
     def terrain_latent(self, obs):
