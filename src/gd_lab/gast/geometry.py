@@ -213,6 +213,6 @@ def warp_memory(memory, previous_pose, current_pose, mode="bilinear"):
     ca, sa = angle.cos()[:, None, None], angle.sin()[:, None, None]
     gx = (ca*x - sa*y + tx[:, None, None]) / .8
     gy = (sa*x + ca*y + ty[:, None, None]) / .5
-    grid = torch.stack((gx, gy), -1)
+    grid = torch.stack((gx, gy), -1).to(memory.dtype)
     old = memory.transpose(1, 2).reshape(-1, memory.shape[-1], 11, 17)
     return F.grid_sample(old, grid, mode=mode, align_corners=True).flatten(2).transpose(1, 2)

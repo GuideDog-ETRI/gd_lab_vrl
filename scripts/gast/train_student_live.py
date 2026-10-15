@@ -130,6 +130,10 @@ parser.add_argument("--resume_lr", type=float, default=None,
 parser.add_argument("--b2_trainable", choices=("memory_head", "all_but_quality"), default=None)
 parser.add_argument("--b2_group_weight", choices=("equal3", "prep4"), default=None)
 parser.add_argument("--b2_out", default=None, help="UPDATE31 isolated training output directory")
+parser.add_argument('--student_v3', action='store_true')
+parser.add_argument('--v3_size', choices=('small','large'), default='small')
+parser.add_argument('--v3_resume', default=None)
+parser.add_argument('--v3_round', type=int, default=0)
 parser.add_argument("--b3", action="store_true", help="UPDATE37 sampling and original-student action preservation")
 parser.add_argument("--e1_condition", choices=("a_student_gate","b_student_gate1","c_teacher_full","d_teacher_early","e_teacher_late","f_teacher_student_gate"), default=None, help="Frozen closed-loop E1; compact per-approach metrics instead of RolloutLog")
 parser.add_argument("--replay_out", default=None,
@@ -148,6 +152,8 @@ parser.add_argument("--replay_decoder_out", default=None,
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
+if args_cli.student_v3 and not args_cli.b3:
+    parser.error('student_v3 requires the B3 contract flags')
 if args_cli.b3 and (not args_cli.b2_out or args_cli.b2_trainable!='memory_head' or args_cli.b2_group_weight!='prep4'):
     parser.error('B3 requires b2_out, memory_head and prep4')
 if args_cli.b2_out:
@@ -360,7 +366,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         from e1_runner import configure
         configure(env_cfg)
     configure_vrl_cameras(env_cfg)
-    if args_cli.b3:
+    if args_cli.student_v3:
+        from v3_sampling import configure as configure_v3
+        configure_v3(env_cfg)
+    elif args_cli.b3:
         from b3_sampling import configure as configure_b3
         configure_b3(env_cfg)
     # A capture may fall on any policy tick. Render at policy boundaries so
@@ -450,7 +459,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
               'physics, curriculum, hidden state and transport reset; optimizer status reported above', flush=True)
 
     if args_cli.b2_out:
-        if args_cli.b3:
+        if args_cli.student_v3:
+            from v3_runner import run as run_b2
+        elif args_cli.b3:
             from b3_runner import run as run_b2
         else:
             from b2_runner import run as run_b2
