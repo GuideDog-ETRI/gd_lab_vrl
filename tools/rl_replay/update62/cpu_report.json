@@ -1,0 +1,19 @@
+{
+  "status": "PASS",
+  "device": "cpu",
+  "ticks": 48,
+  "batch": 2,
+  "fixture_strict_load": true,
+  "actor": "actual frozen 34624/B3 teacher actor",
+  "max_latent_error": 0.0,
+  "max_action_error": 0.0,
+  "checks": [
+    "arrival delivery",
+    "out of order rejection",
+    "reset epoch rejection",
+    "300ms stale gate",
+    "4-view enforcement",
+    "executed clipped previous action",
+    "GPU fixture rejection"
+  ]
+}

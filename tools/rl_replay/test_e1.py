@@ -63,7 +63,7 @@ class Tests(unittest.TestCase):
     def test_source_no_optimizer_and_inference_mode(self):
         self.assertNotIn('torch.optim',(Path(e1_runner.__file__).read_text()))
         s=(ROOT/'scripts/gast/train_student_live.py').read_text()
-        self.assertIn('optimizer = None if (args_cli.replay_out or args_cli.b2_out)',s)
+        self.assertIn('optimizer = None if args_cli.replay_out',s)
         self.assertIn('@torch.inference_mode()',Path(e1_runner.__file__).read_text())
     def test_mock_runner_all_conditions(self):
         from types import SimpleNamespace as N

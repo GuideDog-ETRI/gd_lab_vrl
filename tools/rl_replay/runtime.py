@@ -14,7 +14,7 @@ def task_source(root, task):
 
 
 def validate_window(num_envs, seconds, warmup, vx):
-    if type(num_envs) is not int or not 1 <= num_envs <= 128:
+    if type(num_envs) is not int or not 1 <= num_envs <= (512 if (os.environ.get("U117") == "1" or os.environ.get("U118") == "1") else 128):
         raise ValueError("num_envs must be an integer in [1, 128]")
     for name, value, lo, hi in (("seconds", seconds, .01, 60), ("warmup", warmup, 0, 60)):
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not lo <= value <= hi:
@@ -25,7 +25,8 @@ def validate_window(num_envs, seconds, warmup, vx):
 
 def reserve_recording(out, live=None, lock_path=None):
     """Shared CLI/server/worktree lock. Hold fd until process exit."""
-    fd = os.open(lock_path or f"/tmp/gd_lab_rl_replay_{os.getuid()}.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    # UPDATE136: GD_LAB_REPLAY_LOCK gives each parallel E1 slot its own lock (one replay per slot).
+    fd = os.open(lock_path or os.environ.get("GD_LAB_REPLAY_LOCK") or f"/tmp/gd_lab_rl_replay_{os.getuid()}.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         for value in (out, live):
