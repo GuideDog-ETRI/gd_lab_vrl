@@ -141,3 +141,54 @@ def warp_mesh_cast(mesh) -> CastFn:
         return distance[0]
 
     return cast
+
+
+def raycast_freespace_points(points_w, camera_pos, camera_quat_ros, intrinsic, image_hw, depth_clip,
+                             cast: CastFn, occluders=None, body_occluders=None) -> torch.Tensor:
+    """N,P world points that ONE camera looks THROUGH: in frame, within the depth clip, and nothing (terrain or
+    robot) in front of them on any of the four neighbouring pixel rays -- the rays reach the point and go on.
+
+    Used for gap cells lifted to deck height: the camera never sees the pit floor, but its rays pass the
+    deck level there and land farther away (the pit's far wall or floor). That depth pattern is the gap cue.
+    """
+    h, w = image_hw
+    rotation = camera_rotation_matrix(camera_quat_ros)
+    camera_points = (points_w - camera_pos[:, None]) @ rotation
+    z = camera_points[..., 2]
+    k = intrinsic if intrinsic.dim() == 3 else intrinsic.expand(points_w.shape[0], 3, 3)
+    uv = (camera_points @ k.transpose(1, 2))[..., :2] / z.clamp_min(1e-6)[..., None]
+    x0, y0 = torch.nan_to_num(uv, nan=-1.0, posinf=-1.0, neginf=-1.0).floor().long().unbind(-1)
+    lo, hi = depth_clip
+    free = ((x0 >= 0) & (x0 + 1 < w) & (y0 >= 0) & (y0 + 1 < h)
+            & torch.isfinite(points_w).all(-1) & (z >= lo) & (z < hi))
+    candidates = free.nonzero(as_tuple=True)
+    if not candidates[0].numel():
+        return free
+    env_ids = candidates[0]
+    target_z = z[candidates]
+    tolerance = 0.015 + 0.005 * target_z.abs()
+    k_inv = torch.linalg.inv(k[env_ids])
+    world_from_camera = rotation[env_ids]
+    clear = torch.ones_like(target_z, dtype=torch.bool)
+    for dx, dy in ((0, 0), (1, 0), (0, 1), (1, 1)):
+        pixel = torch.stack(((x0[candidates] + dx).float(), (y0[candidates] + dy).float(),
+                             torch.ones_like(target_z)), -1)
+        ray_camera = (k_inv @ pixel[..., None])[..., 0]
+        length = ray_camera.norm(dim=-1)
+        direction = (world_from_camera @ (ray_camera / length[:, None])[..., None])[..., 0]
+        depth = cast(camera_pos[env_ids].contiguous(), direction.contiguous(), float(hi) * 2.0) / length
+        # +inf (no return) counts as passing through; NaN is no evidence -> not free (fail closed)
+        clear &= ~torch.isnan(depth) & ~(depth < target_z - tolerance)
+        if occluders is not None:
+            seg_a, seg_b, radius = occluders
+            clear &= ~ray_hits_capsules(camera_pos[env_ids], direction, target_z * length,
+                                        seg_a[env_ids], seg_b[env_ids], radius)
+        if body_occluders is not None:
+            center, body_rotation, half_size, feet, foot_radius = body_occluders
+            near_length = lo * length
+            starts = camera_pos[env_ids] + direction * near_length[:, None]
+            lengths = (target_z * length - near_length).clamp_min(0)
+            clear &= ~ray_hits_box(starts, direction, lengths, center[env_ids], body_rotation[env_ids], half_size)
+            clear &= ~ray_hits_spheres(starts, direction, lengths, feet[env_ids], foot_radius)
+    free[candidates] = clear
+    return free

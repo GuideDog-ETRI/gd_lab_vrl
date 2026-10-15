@@ -47,6 +47,7 @@ class DreamwaqActorCritic(ActorCritic):
         adaboot_enabled: bool = True,
         adaboot_min_updates: int = 10,
         adaboot_ema: float = 0.8,
+        inference_only: bool = False,
         **kwargs: Any,
     ) -> None:
         if len(obs_groups["policy"]) != 1 or len(obs_groups["critic"]) != 1:
@@ -100,6 +101,7 @@ class DreamwaqActorCritic(ActorCritic):
             adaboot_enabled=adaboot_enabled,
             adaboot_min_updates=adaboot_min_updates,
             adaboot_ema=adaboot_ema,
+            inference_only=inference_only,
         )
 
         # Replace the base class's actor (its input was the full history).

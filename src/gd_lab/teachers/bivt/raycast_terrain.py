@@ -15,7 +15,7 @@ from gd_lab.core.camera_geometry import mounted_camera_world_poses
 from gd_lab.core.camera_timing import camera_period_steps, camera_refresh_mask
 from gd_lab.core.camera_transport import CameraTransport, CameraTransportConfig, delivery_mask
 
-from .raycast_visibility import contract_intrinsic, raycast_visible_points, warp_mesh_cast
+from .raycast_visibility import contract_intrinsic, raycast_freespace_points, raycast_visible_points, warp_mesh_cast
 from .terrain_dropout import SCAN_CELLS, _schedule
 
 LEGS = ("FL", "FR", "RL", "RR")
@@ -35,6 +35,48 @@ def leg_capsules(robot):
     ends = [index(leg, part) for leg in LEGS for part in ("calf", "foot")]
     radius = pos.new_tensor([THIGH_RADIUS, CALF_RADIUS] * len(LEGS))
     return pos[:, starts], pos[:, ends], radius
+
+
+def _camera_occluders(env, contract, enhanced=True):
+    robot = env.scene["robot"]
+    occluders = leg_capsules(robot)
+    trunk = robot.body_names.index("trunk")
+    body_occluders = None
+    if enhanced:
+        from isaaclab.utils.math import matrix_from_quat
+        foot_ids = [robot.body_names.index(f'{leg}_foot') for leg in LEGS]
+        body_occluders = (robot.data.body_pos_w[:,trunk],
+                          matrix_from_quat(robot.data.body_quat_w[:,trunk]),
+                          robot.data.body_pos_w.new_tensor([.4,.10,.06]),
+                          robot.data.body_pos_w[:,foot_ids], .03)
+    positions, rotations = mounted_camera_world_poses(
+        robot.data.body_pos_w[:, trunk], robot.data.body_quat_w[:, trunk], contract)
+    return occluders, body_occluders, positions, rotations
+
+
+def gap_observed_mask(env, contract, intrinsic, cast, deck_drop=0.3) -> torch.Tensor:
+    """N,187: clean gap cells (gap family, finite hit deeper than ``deck_drop`` below the terrain origin -- the
+    same test as ``gast.observations.clean_terrain``) whose deck-height point some camera looks through
+    (``raycast_freespace_points``). The deck height is the lower adjacent lip in the same row
+    (``gap_lift_heights``). A geometric free-space label from the privileged mesh, NOT proof that the student's
+    image shows the gap; label-side only, never a policy input."""
+    from gd_lab.gast.geometry import gap_lift_heights
+    from gd_lab.mdp.terrain_families import terrain_family_gate
+    points = env.scene["height_scanner"].data.ray_hits_w
+    z = points[..., 2]
+    finite = torch.isfinite(z)
+    family = terrain_family_gate(env, ("platform_gap", "gap_field")) == 0
+    gap = family[:, None] & finite & (z < env.scene.env_origins[:, 2, None] - deck_drop)
+    lift = gap_lift_heights(z, gap, finite & ~gap)
+    usable = gap & torch.isfinite(lift)
+    lifted = torch.stack((points[..., 0], points[..., 1], torch.where(usable, lift, 0.)), -1)
+    occluders, body_occluders, positions, rotations = _camera_occluders(env, contract)
+    through = torch.zeros(points.shape[:2], dtype=torch.bool, device=points.device)
+    for camera in range(positions.shape[1]):
+        through |= raycast_freespace_points(lifted, positions[:, camera], rotations[:, camera], intrinsic,
+                                            (contract.height, contract.width), contract.depth_clip, cast,
+                                            occluders=occluders, body_occluders=body_occluders)
+    return through & usable
 
 
 def raycast_visible_mask(env, contract, intrinsic, cast, enhanced=True) -> torch.Tensor:
@@ -111,6 +153,9 @@ class RaycastVisibleTerrainDropout(ManagerTermBase):
             env._vrl_teacher_ray_snapshot = output.clone()
             env._vrl_teacher_ray_visible = output[:, SCAN_CELLS:].bool().clone()
             env._vrl_teacher_ray_contract = self.contract.manifest()
+            if getattr(env, "_vrl_want_gap_observed", False):
+                env._vrl_gap_observed = gap_observed_mask(env, self.contract, self.intrinsic, self.cast)
+                env._vrl_gap_observed_step = step
             env._vrl_teacher_terrain_capture_steps = self.last_step.clone()
             env._vrl_teacher_terrain_snapshot = output.clone()
             env._vrl_teacher_terrain_contract = self.contract.manifest()
