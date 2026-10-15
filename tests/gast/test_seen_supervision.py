@@ -65,7 +65,7 @@ def step(s, visible, p, t, received=True):
 
 
 def test_single_cell_survives_sub_cell_steps_and_moves_with_the_body():
-    s = SeenCells(1, "cpu", window_s=2.0)
+    s = SeenCells(1, "cpu", window_s=2.0, min_capture_period_s=0.08)
     none = torch.zeros(1, 187, dtype=torch.bool)
     assert step(s, cell(5, 16), pose(), 0.0)[5, 16]
     for i in range(1, 7):                                   # six 0.05 m steps = 0.3 m
@@ -76,7 +76,7 @@ def test_single_cell_survives_sub_cell_steps_and_moves_with_the_body():
 
 
 def test_rotation_out_of_range_expiry_and_reset():
-    s = SeenCells(1, "cpu", window_s=2.0)
+    s = SeenCells(1, "cpu", window_s=2.0, min_capture_period_s=0.08)
     none = torch.zeros(1, 187, dtype=torch.bool)
     step(s, cell(5, 13), pose(), 0.0)                       # 0.5 m ahead
     g = step(s, none, pose(yaw=torch.pi / 2), 0.1)          # turn left 90 deg: now on the right
@@ -88,7 +88,7 @@ def test_rotation_out_of_range_expiry_and_reset():
 
 
 def test_frames_the_student_did_not_get_are_not_recorded():
-    s = SeenCells(2, "cpu", window_s=2.0)
+    s = SeenCells(2, "cpu", window_s=2.0, min_capture_period_s=0.08)
     vis = torch.zeros(2, 187, dtype=torch.bool); vis[:, 100] = True
     out = s.update(torch.tensor([0, 1]), vis, torch.zeros(2, 3), torch.tensor([0., 0.]), torch.tensor([True, False]))
     assert out[0, 100] and not out[1].any()
@@ -100,3 +100,78 @@ def test_nearest_mode_keeps_the_default_warp_unchanged():
     m = torch.rand(3, 187, 32)
     a, b = torch.rand(3, 3), torch.rand(3, 3)
     assert torch.equal(geometry.warp_memory(m, a, b), geometry.warp_memory(m, a, b, mode="bilinear"))
+
+
+def test_small_move_and_turn_keeps_a_single_cell_codex_case():
+    """Codex 2nd review: backward nearest lookup lost this centre cell (1 -> 0) although it stays in the grid."""
+    s = SeenCells(1, "cpu", window_s=2.0, min_capture_period_s=0.08)
+    none = torch.zeros(1, 187, dtype=torch.bool)
+    step(s, cell(5, 8), pose(), 0.0)
+    g = step(s, none, pose(-0.0725515, 0.0204573, 0.4284343), 0.1)
+    assert g.sum() >= 1 and g[5, 9]                        # new body coordinates ~(0.0575, -0.0487) m
+
+
+def test_random_small_moves_never_lose_a_cell_inside_the_grid():
+    gen = torch.Generator().manual_seed(1)
+    n = 4000
+    s = SeenCells(n, "cpu", window_s=2.0, min_capture_period_s=0.08)
+    rows = torch.arange(n)
+    rc = torch.stack((torch.randint(1, 10, (n,), generator=gen), torch.randint(1, 16, (n,), generator=gen)), 1)
+    vis = torch.zeros(n, 11, 17, dtype=torch.bool); vis[rows, rc[:, 0], rc[:, 1]] = True
+    s.update(rows, vis.flatten(1), torch.zeros(n, 3), torch.zeros(n))
+    p = torch.cat((torch.rand(n, 2, generator=gen) * .16 - .08, torch.rand(n, 1, generator=gen) * 1.2 - .6), 1)
+    out = s.update(rows, torch.zeros(n, 187, dtype=torch.bool), p, torch.full((n,), .1), torch.zeros(n, dtype=torch.bool))
+    # the cell centre in the new body frame
+    qx, qy = (rc[:, 1] * .1 - .8).float(), (rc[:, 0] * .1 - .5).float()
+    c, si = p[:, 2].cos(), p[:, 2].sin()
+    nx, ny = c * (qx - p[:, 0]) + si * (qy - p[:, 1]), -si * (qx - p[:, 0]) + c * (qy - p[:, 1])
+    inside = (nx.abs() <= .85) & (ny.abs() <= .55)
+    assert inside.sum() > n * .9
+    assert out[inside].any(1).all()
+
+
+def test_rotated_area_has_no_holes():
+    s = SeenCells(1, "cpu", window_s=2.0, min_capture_period_s=0.08)
+    step(s, torch.ones(1, 187, dtype=torch.bool), pose(), 0.0)
+    g = step(s, torch.zeros(1, 187, dtype=torch.bool), pose(yaw=0.3), 0.1)
+    assert g[3:8, 5:12].all()                               # interior of the rotated full grid stays covered
+
+
+def keep_first_snapshot(period, write_every):
+    s = SeenCells(1, "cpu", window_s=2.0, min_capture_period_s=period)
+    none = torch.zeros(1, 187, dtype=torch.bool)
+    step(s, cell(5, 8), pose(), 0.0)
+    t, ok = 0.0, True
+    for i in range(1, 400):
+        t = round(i * write_every, 6)
+        if t >= 2.0:
+            break
+        ok &= bool(step(s, none, pose(), t)[5, 8])
+    expired = not step(s, none, pose(), 2.0)[5, 8]
+    return ok, expired
+
+
+def test_ring_capacity_follows_the_capture_interval():
+    # default transport 70-100 ms at 20 ms policy steps -> 80 ms minimum spacing
+    assert keep_first_snapshot(0.08, 0.08) == (True, True)
+    assert keep_first_snapshot(0.08, 0.1) == (True, True)
+    # Codex case: 10 ms captures; a 70 ms-sized ring overwrote the first snapshot at 0.31 s
+    assert keep_first_snapshot(0.01, 0.01) == (True, True)
+    s = SeenCells(1, "cpu", window_s=2.0, min_capture_period_s=0.01)
+    assert s.stamps.shape[1] >= 201
+    # a ring sized for a longer period than the real one grows instead of overwriting a live snapshot
+    assert keep_first_snapshot(0.1, 0.01) == (True, True)
+
+
+def test_splat_inverts_the_backward_lookup_on_whole_cell_moves():
+    m = torch.zeros(2, 187, dtype=torch.bool); m[:, 5 * 17 + 8] = True; m[:, 2 * 17 + 3] = True
+    a = torch.tensor([[1., 2., .7], [0., 0., 0.]])
+    b = a.clone(); b[0, :2] += torch.tensor([math.cos(.7), math.sin(.7)]) * .2; b[1, 1] += .1   # 2 cells ahead, 1 left
+    back = geometry.warp_memory(m[..., None].float(), a, b, mode="nearest")[..., 0] > .5
+    assert torch.equal(geometry.splat_cells(m, a, b), back)
+
+
+def test_seen_requires_the_capture_period():
+    import pytest
+    with pytest.raises(ValueError):
+        SeenCells(1, "cpu", window_s=2.0, min_capture_period_s=0)

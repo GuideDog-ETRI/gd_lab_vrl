@@ -56,6 +56,7 @@ class CENet(nn.Module):
         adaboot_enabled: bool = False,
         adaboot_min_updates: int = 10,
         adaboot_ema: float = 0.8,
+        inference_only: bool = False,
     ) -> None:
         super().__init__()
         self.input_dim = int(input_dim)
@@ -104,7 +105,7 @@ class CENet(nn.Module):
         # 7e3 / 5.7e4 / 2.2e4 / 3.2e4. 50 is 100x normal and still 140x below the
         # smallest blow-up.
         self.loss_skip_threshold = float(loss_skip_threshold)
-        self.optimizer = optim.Adam(self.parameters(), lr=learning_rate)
+        self.optimizer = None if inference_only else optim.Adam(self.parameters(), lr=learning_rate)
 
     def forward(self, obs_history: torch.Tensor, deterministic: bool = False) -> CENetOut:
         """``deterministic`` affects the latent only; the velocity head is always deterministic."""
