@@ -1,4 +1,6 @@
 """Unchanged CENet + terrain denoising autoencoder and PPO."""
+import math
+import os
 import torch
 from torch import nn
 from isaaclab.utils import configclass
@@ -56,9 +58,12 @@ def mirror_gast(obs=None, actions=None, env=None):
     if obs is not None:
         clean = obs['gast_clean']
         augmented['gast_clean'] = torch.cat((clean, clean.reshape(-1, 4, 11, 17).flip(-2).reshape_as(clean)), 0)
-        history = obs['gast_history'].reshape(-1, 8, 375)
+        frame = obs['gast_history'].shape[-1] // 8
+        channels = (frame - 1) // 187
+        history = obs['gast_history'].reshape(-1, 8, frame)
         mirrored = history.clone()
-        mirrored[..., :374] = history[..., :374].reshape(-1, 8, 2, 11, 17).flip(-2).reshape(-1, 8, 374)
+        mirrored[..., :frame - 1] = history[..., :frame - 1].reshape(-1, 8, channels, 11, 17).flip(-2).reshape(
+            -1, 8, frame - 1)
         augmented['gast_history'] = torch.cat((history.flatten(1), mirrored.flatten(1)), 0)
     return augmented, action_aug
 
@@ -105,6 +110,32 @@ class GastPPO(DreamwaqPPO):
     # Non-consecutive skips are capped too: a periodic NaN source must not be
     # silently skipped forever.
     max_nonfinite_skips_per_1000 = 10
+    # Aux-only failure budget, separate from the full-update rollback (8016/8148 deaths were aux grad_norm=inf).
+    max_consecutive_aux_skips = 50
+
+    def _diagnose_aux(self, terrain, clean, pred, reason):
+        if os.getenv('GAST_NAN_DIAG', '0') != '1':
+            return
+        from gd_lab.gast.nan_debug import replay_aux
+        # Called only after a rank-wide decision; the replay has no collectives.
+        try:
+            replay_aux(self.policy, terrain, clean, pred)
+        except Exception as exc:
+            print(f'[NAN_REPLAY_ABORT] {type(exc).__name__}: {exc}', flush=True)
+        raise RuntimeError(f'[GAST_NAN_DIAG] aux diagnosis complete ({reason}); no aux optimizer step taken')
+
+    def _skip_aux(self, metrics, reason):
+        # Keep the successful PPO/CENet update; drop only the auxiliary step.
+        self.optimizer.zero_grad(set_to_none=True)
+        self._aux_skips = getattr(self, '_aux_skips', 0) + 1
+        self._aux_consecutive = getattr(self, '_aux_consecutive', 0) + 1
+        self._consecutive_nonfinite = 0
+        self._last_good = self._snapshot()
+        print(f'[GAST_AUX_SKIP] total={self._aux_skips} consecutive={self._aux_consecutive} reason={reason}',
+              flush=True)
+        if self._aux_consecutive > self.max_consecutive_aux_skips:
+            raise RuntimeError('[GAST_AUX_SKIP] persistent terrain aux failure; inspect diagnostics')
+        return {**metrics, 'gast_aux_skip': 1., 'gast_nonfinite_skip': 0.}
 
     def process_env_step(self, obs, rewards, dones, extras):
         # An env whose physics went non-finite is terminated (tasks.nonfinite_state)
@@ -190,7 +221,8 @@ class GastPPO(DreamwaqPPO):
             self._fail('rollout', storage_report)
             return {'gast_nonfinite_skip': 1.}
         metrics = super().update()
-        if any_rank(not _state_finite(self.policy.state_dict()), self.device):
+        if any_rank(not _state_finite(self.policy.state_dict()) or not _state_finite(self.optimizer.state_dict())
+                    or not _state_finite(self.policy.cenet.optimizer.state_dict()), self.device):
             self._fail('ppo_or_cenet', storage_report)
             return {**metrics, 'gast_nonfinite_skip': 1.}
         terrain = self.storage.observations['gast_history'].flatten(0, 1)
@@ -200,20 +232,56 @@ class GastPPO(DreamwaqPPO):
         encoded = self.policy.terrain_encoder(terrain[idx])
         pred = self.policy.terrain_decoder(encoded).reshape(-1, 187, 6)
         loss = reconstruction_loss(pred, clean[idx])
-        self.optimizer.zero_grad()
+        from gd_lab.gast.nan_debug import grad_report, clip_from_norm64
+        self.optimizer.zero_grad(set_to_none=True)
+        if any_rank(not bool(torch.isfinite(loss)), self.device):
+            self._diagnose_aux(terrain[idx], clean[idx], pred, 'nonfinite_loss')
+            return self._skip_aux(metrics, 'nonfinite_loss')
         (.1 * loss).backward()
-        average_gradients(self.policy.parameters())
-        norm = nn.utils.clip_grad_norm_(self.policy.parameters(), 1.)
-        if any_rank(not (torch.isfinite(loss) and torch.isfinite(norm)), self.device):
-            self._fail(f'terrain_aux(loss={loss.item():.4g},grad_norm={norm.item():.4g},'
-                       f'pred_nonfinite={int((~torch.isfinite(pred)).sum())})', storage_report)
-            return {**metrics, 'gast_nonfinite_skip': 1.}
+        params = list(self.policy.parameters())
+        # Checked before reduction and clipping: tells a real inf gradient from an fp32 norm overflow.
+        local = grad_report(self.policy.named_parameters(), 'aux_pre_reduce')
+        bad_local = any_rank(not local['finite'], self.device)
+        if bad_local:
+            reduced = local  # do not spread a known local inf to the other ranks
+        else:
+            average_gradients(params)
+            reduced = grad_report(self.policy.named_parameters(), 'aux_post_reduce')
+        bad = any_rank(bad_local or not reduced['finite'] or not math.isfinite(reduced['norm64']), self.device)
+        suspect = any_rank(bad or not math.isfinite(local['norm32']) or not math.isfinite(reduced['norm32']),
+                           self.device)
+        if suspect:
+            self._diagnose_aux(terrain[idx], clean[idx], pred, 'suspect_gradient')
+        if bad:
+            return self._skip_aux(metrics, 'nonfinite_gradient_or_reduction')
+        clip_from_norm64(params, reduced['norm64'], 1.)
+        aux_before = self._snapshot()
+        guard_before = (getattr(self, '_guard_skipped', 0), getattr(self, '_guard_rolled_back', 0))
         self.optimizer.step()
+        if any_rank(not _state_finite(self.policy.state_dict()) or not _state_finite(self.optimizer.state_dict()),
+                    self.device):
+            self._restore(aux_before)
+            return self._skip_aux(metrics, 'nonfinite_aux_step')
+        # The shared optimizer's step guard may have skipped or rolled back this aux step: still a failure.
+        guard_failed = guard_before != (getattr(self, '_guard_skipped', 0), getattr(self, '_guard_rolled_back', 0))
+        if any_rank(guard_failed, self.device):
+            self._restore(aux_before)
+            return self._skip_aux(metrics, 'aux_step_guard')
+        self._aux_consecutive = 0
         self._consecutive_nonfinite = 0
         self._last_good = self._snapshot()
         metrics['gast_reconstruction'] = loss.item()
         metrics['gast_nonfinite_skip'] = 0.
+        metrics['gast_aux_skip'] = 0.
         return metrics
+
+
+class GastRayIrActorCritic(GastActorCritic):
+    """UPDATE134B: same GAST teacher, terrain history frames carry [height, valid, IR]."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.terrain_encoder = TemporalTerrainEncoder(channels=3)
 
 
 @configclass
@@ -227,9 +295,8 @@ class GastRunnerCfg(DreamwaqVrlRunnerCfg):
         self.experiment_name = 'gast/arm4'
 
 
-class GastRayIrActorCritic(GastActorCritic):
-    """UPDATE136 (E1 only): the UPDATE134B Ray+IR teacher; history frames carry [height, valid, IR]."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.terrain_encoder = TemporalTerrainEncoder(channels=3)
+@configclass
+class GastRayIrRunnerCfg(GastRunnerCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        self.policy.class_name = 'gd_lab.gast.teacher:GastRayIrActorCritic'
