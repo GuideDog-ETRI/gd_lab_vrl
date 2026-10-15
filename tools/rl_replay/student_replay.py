@@ -6,6 +6,39 @@ from rollout_log import RolloutLog
 from runtime import fix_velocity, environment_metadata
 
 
+class SupervisionCoverage:
+    """P2: of the real gap cells (semantic gap & known), how many does the student's spatial loss supervise
+    (gap & known & teacher-visible & valid, geometry.targets mask), counted at every capture like training."""
+
+    def __init__(self):
+        self.c = {k: 0 for k in ("captures", "rows", "near_gap_rows", "gap_cells", "gap_supervised",
+                                 "gap_cells_ahead", "gap_supervised_ahead", "gap_height_supervised")}
+
+    def add(self, clean, teacher_terrain):
+        from gd_lab.gast.geometry import near_gap_rows, targets
+        _, mask = targets(clean, teacher_terrain)                     # [B, 187, 6]
+        _, _, gap, known = clean.reshape(-1, 4, 11, 17).unbind(1)
+        real = ((gap > .5) & known.bool()).flatten(1)                # [B, 187]
+        sup = mask[..., 2].bool() & real
+        ahead = torch.zeros(11, 17, dtype=torch.bool, device=clean.device); ahead[:, 9:] = True
+        ahead = ahead.flatten()[None]
+        c = self.c
+        c["captures"] += 1; c["rows"] += clean.shape[0]; c["near_gap_rows"] += int(near_gap_rows(clean).sum())
+        c["gap_cells"] += int(real.sum()); c["gap_supervised"] += int(sup.sum())
+        c["gap_cells_ahead"] += int((real & ahead).sum()); c["gap_supervised_ahead"] += int((sup & ahead).sum())
+        c["gap_height_supervised"] += int((mask[..., 0].bool() & real).sum())
+
+    def report(self):
+        c = self.c
+        ratio = lambda a, b: (a / b) if b else None
+        return {**c, "gap_coverage": ratio(c["gap_supervised"], c["gap_cells"]),
+                "gap_coverage_ahead": ratio(c["gap_supervised_ahead"], c["gap_cells_ahead"]),
+                "gap_height_coverage": ratio(c["gap_height_supervised"], c["gap_cells"]),
+                "near_gap_row_fraction": ratio(c["near_gap_rows"], c["rows"]),
+                "definition": "coverage = sum(gap & known & supervised) / sum(gap & known); "
+                              "supervised = geometry.targets mask (teacher-visible & scan-valid & finite)"}
+
+
 @torch.no_grad()
 def run(env, teacher, student, attention, transport, args, agent_cfg, env_cfg, teacher_path, iteration):
     base = env.unwrapped
@@ -18,6 +51,7 @@ def run(env, teacher, student, attention, transport, args, agent_cfg, env_cfg, t
     last = torch.full_like(episodes, -1)
     skip = round(args.replay_warmup_seconds / dt)
     log = None
+    coverage = SupervisionCoverage() if getattr(args, "replay_supervision_out", None) else None
     from gd_lab.core.camera_transport import delivery_mask
     while True:
         capture_step = transport.next_capture(base.common_step_counter)
@@ -54,6 +88,10 @@ def run(env, teacher, student, attention, transport, args, agent_cfg, env_cfg, t
                 log.after_step(reward, done)
                 if log.full():
                     log.finish(teacher.evaluate(obs).reshape(-1), args.replay_out)
+                    if coverage is not None:
+                        import json
+                        Path(args.replay_supervision_out).write_text(json.dumps(coverage.report(), indent=1))
+                        print(f"[INFO] supervision coverage: {coverage.report()}", flush=True)
                     return
             reset = done.reshape(-1).bool()
             hidden[reset] = 0
@@ -64,6 +102,8 @@ def run(env, teacher, student, attention, transport, args, agent_cfg, env_cfg, t
                 snapshot = base._vrl_camera_snapshot
                 extra = attention.capture(obs, teacher.act_inference(obs))
                 transport.capture(step, (snapshot[0].clone(), episodes.clone(), extra))
+                if coverage is not None:
+                    coverage.add(extra[1], extra[2])
             for packet in transport.receive(step):
                 frames, captured_episodes, extra = packet.payload
                 valid = delivery_mask(packet.capture_step, captured_episodes, episodes, last)
