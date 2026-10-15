@@ -1,0 +1,97 @@
+{
+  "update": "128",
+  "seed": 42,
+  "num_envs": 32,
+  "seconds": 30,
+  "arms": [
+    "L2x2"
+  ],
+  "smoke": {
+    "arm": "L2x2",
+    "seconds": 2,
+    "max_runs": 1
+  },
+  "teacher": "gast_v21_2000",
+  "teacher_sha_prefix": "db500e96",
+  "student": null,
+  "mount_trunk_xyz_m": [
+    [
+      0.33,
+      0.08,
+      -0.06
+    ],
+    [
+      0.33,
+      -0.08,
+      -0.06
+    ]
+  ],
+  "center_below_horizontal_deg": 50,
+  "elevation_bin_edges_deg": [
+    20,
+    80
+  ],
+  "azimuth_bin_edges_deg": [
+    -22.5,
+    22.5
+  ],
+  "beam_shape_elevation_azimuth": [
+    120,
+    90
+  ],
+  "angular_step_deg": 0.5,
+  "range_noise_sigma_m": 0.01,
+  "random_return_drop": 0.01,
+  "range_m": [
+    0.1,
+    10
+  ],
+  "transport": {
+    "capture_ms": 100,
+    "delay_ms": [
+      0,
+      150
+    ],
+    "packet_drop": 0.05
+  },
+  "mapper": {
+    "base": "unchanged heightmap119z.FastMap h0 + BatchMap sample",
+    "resolution_m": 0.05,
+    "ttl_s": 2,
+    "history": "unchanged TerrainHistory 11x17x8"
+  },
+  "carving": {
+    "below_support_m": 0.05,
+    "neighbor_radius_m": 0.35,
+    "min_points": 6,
+    "min_xy_span_m": 0.1,
+    "max_rms_m": 0.02,
+    "max_slope": 0.75,
+    "max_prediction_sigma_m": 0.02,
+    "range_clearance_m": 0.03,
+    "method": "exact 2D voxel traversal, minimum beam height in segment, no missing-return carving, no GT plane",
+    "direct_priority": "current direct hit invalidates carving; fresh h0 direct wins; TTL 2s"
+  },
+  "semantic_gates": {
+    "flat_valid_return_fraction_gt": 0.8,
+    "gap_direct_or_carving_gt": 0,
+    "nan": false
+  },
+  "stopping_rule": "CPU or single smoke or semantic gate failure stops without correction/retry",
+  "reference_reruns": [],
+  "yaw_deg": [
+    18,
+    -18
+  ],
+  "sensors_per_packet": 2,
+  "foot_lane_definition": "Every 0.1s on enabled E1 gap env policy grid: x in [live same-side front-foot x, +0.4m], |y| in [0.12,0.26]; yaw-aligned base coordinates; numerator valid, denominator all selected cells including unknown.",
+  "l2_value": 5.0,
+  "deep_threshold": 4.999,
+  "false_positive_edge_bins_m": [
+    0.05,
+    0.1,
+    0.2,
+    0.35
+  ],
+  "foot_group_note": "Exact whole-approach groups only available for L2; comparable first-swing dip proxy all arms"
+}
