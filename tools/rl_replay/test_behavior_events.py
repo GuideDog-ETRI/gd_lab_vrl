@@ -46,7 +46,7 @@ class BehaviorEvents(unittest.TestCase):
         self.assertEqual(ev["foot_drop"]["occurrences"][0]["start"], 140)
         self.assertEqual(ev["hind_hop"]["count"], 1)
         self.assertEqual(ev["high_lift"]["count"], 1)
-        self.assertEqual(ev["fall"]["count"], 1)
+        self.assertEqual(ev["fall"]["count"], 0)              # done at level stance (t=290) = time-out, not a fall
         self.assertEqual(ev["foot_drop"]["terms"][0]["term"], "drop_penalty")   # most negative first
         self.assertEqual(ev["hind_hop"]["terms"][-1]["term"], "hop_bonus")      # most positive last
         self.assertIn("발 빠짐", be.markdown(report, "synthetic"))
@@ -62,3 +62,54 @@ class BehaviorEvents(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ActionEventTests(unittest.TestCase):
+    """UPDATE138 review: liftoff/touchdown never link two episodes, both feet at once count once, chatter ignored."""
+
+    def setUp(self):
+        self.rec = recording()
+        self.env, self.meta = self.rec["envs"][0], self.rec["meta"]
+
+    def test_hind_liftoff_once_for_both_feet_and_touchdown_matches(self):
+        ev = be.detect(self.env, self.meta)
+        self.assertEqual(ev["liftoff_hind"], [(94, 95)])      # before-contact row 94 -> row 95 airborne (no 'after' field)
+        self.assertEqual(ev["touchdown_hind"], [(104, 105)])
+
+    def test_after_contact_is_used_and_reset_does_not_create_events(self):
+        env = dict(self.env)
+        contact = np.array(env["foot_contact"])
+        contact[291:, 0] = 0                                   # new episode after done at 290 starts with FR in the air
+        env["foot_contact"] = contact.tolist()
+        after = contact.copy(); after[:-1] = contact[1:]; after[290] = contact[290]   # pre-reset 'after' row
+        env["foot_contact_after"] = after.tolist()
+        ev = be.detect(env, self.meta)
+        self.assertFalse(any(s == 290 for s, _ in ev["liftoff_front"]))
+
+    def test_chatter_is_ignored(self):
+        env = dict(self.env)
+        contact = np.array(env["foot_contact"]); contact[50, 0] = 0   # one-row flicker
+        env["foot_contact"] = contact.tolist()
+        ev = be.detect(env, self.meta)
+        self.assertNotIn((49, 50), ev["liftoff_front"])
+
+    def test_unknown_foot_names_are_refused(self):
+        meta = dict(self.meta, foot_names=["LF_foot", "RF_foot", "LH_foot", "RH_foot"])
+        with self.assertRaises(ValueError):
+            be.detect(self.env, meta)
+
+    def test_dominance_is_per_episode_and_mean_free(self):
+        share = be.advantage_share(self.env, self.meta)
+        dev, dom = be.dominance(share, self.env["done"])
+        self.assertLess(abs(dev[:291].mean(0)).max(), 1e-12)
+        self.assertLess(abs(dev[291:].mean(0)).max(), 1e-12)
+        self.assertEqual(dom[150], 1)                          # inside the drop_penalty window
+
+
+class FallTests(unittest.TestCase):
+    def test_tilted_done_is_a_fall(self):
+        rec = recording(); env = rec["envs"][0]
+        q = math.radians(40) / 2
+        env["base_quat"] = [list(x) for x in env["base_quat"]]
+        env["base_quat"][290] = [math.cos(q), math.sin(q), 0, 0]   # 40 deg roll at the done
+        self.assertEqual(len(be.detect(env, rec["meta"])["fall"]), 1)

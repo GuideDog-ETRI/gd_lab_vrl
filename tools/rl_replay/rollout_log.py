@@ -38,12 +38,22 @@ def json_text(value):
     return json.dumps(finite_json(value), allow_nan=False, separators=(",", ":"))
 
 
+HISTORY_FRAME_WIDTHS = (2 * 187 + 1, 3 * 187 + 1)  # GAST v2.1, Ray+IR
+
+
+def history_frame_width(history):
+    width, rest = divmod(history.shape[-1], 8)
+    if rest or width not in HISTORY_FRAME_WIDTHS:
+        raise ValueError(f"unexpected gast_history width {history.shape[-1]} (8 x {HISTORY_FRAME_WIDTHS})")
+    return width
+
+
 def policy_terrain_input(obs, n, device, source):
     """Driver explicitly names the actual teacher input, never infer by key priority."""
     if source == "gast_history":
         # Frame = [height 187, valid 187, (IR 187 for the Ray+IR teachers), age 1]: 375 or 562 wide.
         history = obs[source]
-        return history.reshape(n, 8, history.shape[-1] // 8)[:, -1, :374]
+        return history.reshape(n, 8, history_frame_width(history))[:, -1, :374]
     if source == "terrain":
         return obs[source]
     if source == "none":
@@ -137,7 +147,7 @@ class RolloutLog:
                          ("action", action), ("value", value), ("latent", latent),
                          ("terrain_obs", policy_terrain_input(obs, n, dev, self.terrain_source))):
             self._add(key, val)
-        if self.terrain_source == "gast_history" and obs["gast_history"].shape[-1] == 8 * (3 * 187 + 1):
+        if self.terrain_source == "gast_history" and history_frame_width(obs["gast_history"]) == 3 * 187 + 1:
             self._add("terrain_ir", obs["gast_history"].reshape(n, 8, -1)[:, -1, 374:561])  # Ray+IR teachers: newest IR frame
         self._add("scan", self.scanner.data.ray_hits_w if self.scanner is not None else torch.zeros(n, 0, 3, device=dev))
         self._add("scan_z", self.scanner.data.pos_w[:, 2] if self.scanner is not None else torch.zeros(n, device=dev))
@@ -163,7 +173,7 @@ class RolloutLog:
         self._add("foot_contact", self._foot_contact(dev))
         if self.terrain_source == "gast_history" and self.terrain_history:
             history = obs["gast_history"]
-            self._add("terrain_history", history.reshape(n, 8, history.shape[-1] // 8))
+            self._add("terrain_history", history.reshape(n, 8, history_frame_width(history)))
         for key, val in (extra or {}).items():
             self._add(key, val)
         if self.student_view is not None:
@@ -240,16 +250,26 @@ class RolloutLog:
             if self.clouds and e < len(self.clouds[0]):
                 env_out["cloud"] = [c[e] for c in self.clouds]
             result["envs"].append(env_out)
-        # Reward dominance (viewer): per-term advantage share a_k(t) and behavior/action events (behavior_events.py).
+        # Reward dominance (viewer): per-term discounted share a_k(t) from the UNROUNDED terms + behavior/action events.
+        status = []
         try:
             import behavior_events
-            for env_out in result["envs"]:
-                env_out.update(behavior_events.annotate(env_out, meta))
-            meta["notes"]["term_adv"] = ("per-term GAE share without the critic, a_k(t) = r_k(t) + gamma*lam*a_k(t+1); "
-                                         "dominant term = largest |a_k(t) - mean_k|")
-            meta["notes"]["events"] = "behavior_events.detect: bad behaviors + foot liftoff/touchdown, [start, end) steps"
+            for e, env_out in enumerate(result["envs"]):
+                try:
+                    raw = dict(env_out, terms=stacked["terms"][e].double().cpu().numpy())
+                    env_out.update(behavior_events.annotate(raw, meta)); status.append("ok")
+                except Exception as exc:
+                    status.append(f"failed: {exc!r}")
         except Exception as exc:  # never lose a recording over the annotation
-            print(f"[WARN] reward dominance annotation skipped: {exc!r}", flush=True)
+            status = [f"failed: {exc!r}"] * self.n
+        meta["annotation_status"] = status
+        meta["notes"]["term_adv"] = ("critic-free discounted share per term, a_k(t) = r_k(t) + gamma*lam*(1-done)*a_k(t+1), "
+                                     "from unrounded terms; not the GAE. Censored at the recording end and at every done.")
+        meta["notes"]["events"] = ("behavior_events.detect, [start, end) rows: bad-behavior proxies (foot_drop, high_lift, "
+                                   "hind_hop, fall) and liftoff/touchdown (contact before vs after the same step, deduplicated per group)")
+        meta["notes"]["done"] = ("every done is treated as terminal (value bootstrap 0); time-outs are not separated, "
+                                 "so G/A at a time-out are biased low. Pre-existing limitation.")
+        meta["notes"]["terrain_capture_step"] = "GAST: the current sample tick, not the sensor capture time or map-cell age"
         Path(out).parent.mkdir(parents=True, exist_ok=True)
         if Path(out).exists():
             raise FileExistsError(out)
