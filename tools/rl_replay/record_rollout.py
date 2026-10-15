@@ -93,25 +93,49 @@ from rollout_log import RolloutLog  # noqa: E402
 class LidarV25orInput:
     """E1 v25or terrain input for a GAST teacher: the policy's terrain obs and 8-frame history come from the LiDAR map."""
 
+    REQUIRED_ENV = {"U130_DUAL": "2", "U130_DDEEP": "0.7", "U127_SENSOR_COUNT": "1"}
+
     def __init__(self, base, policy, seed):
-        for key, value in (("U130_DUAL", "2"), ("U130_DDEEP", "0.7"), ("U127_SENSOR_COUNT", "1")):
-            os.environ.setdefault(key, value)  # read at import by lidar126 / structure130
+        # lidar126 / structure130 read these at import: fix them first and refuse a conflicting value.
+        for key, value in self.REQUIRED_ENV.items():
+            if os.environ.get(key, value) != value:
+                raise ValueError(f"--terrain_input lidar_v25or needs {key}={value}, got {os.environ[key]}")
+            os.environ[key] = value
+        if "structure130" in sys.modules or "lidar126" in sys.modules:
+            raise RuntimeError("lidar126/structure130 imported before the v25or settings were fixed")
+        import lidar126, structure130
         from lidar126 import Lidar, Maps
+        assert structure130.S["dual_or"] and abs(structure130.S["d_deep"] - .7) < 1e-9 and lidar126.SENSOR_COUNT == 1
         from gd_lab.core.camera_transport import CameraTransport, CameraTransportConfig, delivery_mask
         from gd_lab.gast.observations import TerrainHistory
         self.base, self.n, self.device, self.delivery_mask = base, base.num_envs, base.device, delivery_mask
-        self.rayir = getattr(policy.terrain_encoder, "channels", 2) == 3
+        channels = getattr(policy.terrain_encoder, "channels", None)
+        if channels not in (2, 3):
+            raise ValueError(f"unknown GAST terrain encoder channels: {channels}")
+        self.rayir = channels == 3
         if self.rayir:
             from rayir_e1 import RayIrHistory
             self.history = RayIrHistory(base)
         else:
             self.history = TerrainHistory(base)
         self.sensor, self.maps = Lidar(base), Maps(self.n, "L0S")
-        self.transport = CameraTransport(CameraTransportConfig((100.0, 100.0), (0.0, 150.0), 0.05), base.step_dt, seed)
+        config = CameraTransportConfig((100.0, 100.0), (0.0, 150.0), 0.05)
+        self.transport = CameraTransport(config, base.step_dt, seed)
         self.episodes = torch.zeros(self.n, dtype=torch.long, device=self.device)
         self.last = torch.full_like(self.episodes, -1)
         self.next_capture = self.transport.next_capture(base.common_step_counter)
         base._vrl_camera_capture_step = self.next_capture
+        here = Path(__file__).resolve().parent
+        digest = lambda p: __import__("hashlib").sha256(p.read_bytes()).hexdigest()
+        self.manifest = {
+            "mapper": "L0S (h0d 5 cm world map + structure130 GAP/pending overlay)", "sensor_count": lidar126.SENSOR_COUNT,
+            "structure130": {k: structure130.S[k] for k in ("dual_or", "d_deep", "step_max", "gap_depth", "gap_max_age")},
+            "transport": config.manifest(base.step_dt), "transport_seed": seed, "lidar_noise_seed": 42,
+            "ir_channel": "zero" if self.rayir else None, "terrain_channels": channels,
+            "latent_gate": "map: terrain obs replaced by the current LiDAR map, so a map with no valid cell gives latent 0 "
+                           "(E1 v25or kept the task terrain obs for the gate)",
+            "source_sha256": {f: digest(here / f) for f in ("lidar126.py", "structure130.py", "heightmap116.py",
+                                                            "heightmap119z.py", "rayir_e1.py")}}
 
     def view(self, obs):
         from gd_lab.gast.observations import pose_xyyaw
@@ -123,8 +147,9 @@ class LidarV25orInput:
         frames = torch.cat((terrain, torch.zeros_like(terrain[:, :187])), -1) if self.rayir else terrain
         view = obs.copy()
         view["gast_history"] = self.history.update(self.base, frames)
-        if "terrain" in view.keys() and view["terrain"].shape[-1] == 374:
-            view["terrain"] = terrain
+        if "terrain" not in view.keys() or view["terrain"].shape[-1] != 374:
+            raise ValueError("GAST teacher obs has no 374-wide 'terrain' group to replace")
+        view["terrain"] = terrain
         return view
 
     def after_step(self, done):
@@ -204,6 +229,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                      camera_profile=getattr(env_cfg, "camera_profile", None),
                      cloud_envs=args_cli.cloud_envs, cloud_stride=args_cli.cloud_stride,
                      extra_meta={"driver": "teacher", "terrain_input": args_cli.terrain_input,
+                                 "lidar_v25or": lidar.manifest if lidar is not None else None,
                                  **environment_metadata(base)},
                      terrain_source="gast_history" if args_cli.task.startswith("Gd-Gast") else "terrain",
                      capture_current_camera=args_cli.student_view, terrain_history=args_cli.terrain_history)
