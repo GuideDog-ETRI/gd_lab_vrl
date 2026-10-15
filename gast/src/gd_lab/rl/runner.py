@@ -113,6 +113,16 @@ class DreamwaqRunner(OnPolicyRunner):
                 result.update(gast_blackout_fraction=(counts[0]/counts[1].clamp_min(1)).item(),
                               gast_valid_cell_fraction=(counts[2]/counts[3].clamp_min(1)).item(),
                               gast_noise_strength=(counts[4]/counts[1].clamp_min(1)).item())
+            if terrain_term is not None and hasattr(terrain_term, 'ir_counts'):
+                # UPDATE134B capture-time stats: [visible, cells, IR available, IR sum, dark-material visible]
+                ir = terrain_term.ir_counts.clone()
+                terrain_term.ir_counts.zero_()
+                if self.is_distributed:
+                    dist.all_reduce(ir)
+                result.update(gast_ray_visible_fraction=(ir[0]/ir[1].clamp_min(1)).item(),
+                              gast_ir_available_fraction=(ir[2]/ir[1].clamp_min(1)).item(),
+                              gast_ir_mean_encoded=(ir[3]/ir[2].clamp_min(1)).item(),
+                              gast_ir_dark_material_fraction=(ir[4]/ir[0].clamp_min(1)).item())
             from .distributed import assert_synchronized, any_rank
             interval = int(os.environ.get('GAST_VERIFY_SYNC_EVERY', '100'))
             if interval > 0 and next_iteration % interval == 0:

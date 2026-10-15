@@ -148,3 +148,98 @@ def warm_start_from_bivt(alg, checkpoint_path: str, policy_lr: float, terrain_lr
             "cenet_optimizer_restored": cenet_state is not None, "latent_head_zeroed": True,
             "learning_rates": group_learning_rates(alg.optimizer), **report,
             "terrain_level_means_by_family": extra.get("terrain_level_means_by_family")}
+
+
+# UPDATE134B: continue a trained GAST v2.1 teacher as the Ray+IR teacher (3-channel history frames).
+EXPECTED_GAST_SOURCE_TASK = "Gd-GastGapCleanV21-Rbq10-Dreamwaq-v0"
+FIRST_CONV = "terrain_encoder.cnn.0.weight"
+
+
+def gast_to_rayir_state_dict(source: dict, target: dict) -> tuple[dict, dict]:
+    """Every target tensor from the GAST teacher; the first Conv gains zero IR input columns.
+
+    Strict both ways: no target-only and no source-only keys, no other shape change.
+    """
+    missing = sorted(set(target) - set(source))
+    extra = sorted(set(source) - set(target))
+    if missing or extra:
+        raise ValueError(f"GAST -> Ray+IR key mismatch: target-only {missing}, source-only {extra}")
+    merged, widened = {}, []
+    for name, value in target.items():
+        src = source[name].to(dtype=value.dtype)
+        if name == FIRST_CONV and tuple(src.shape) != tuple(value.shape):
+            out_ch, in_ch, kh, kw = src.shape
+            if tuple(value.shape[:1] + value.shape[2:]) != (out_ch, kh, kw) or value.shape[1] <= in_ch:
+                raise ValueError(f"{name}: cannot widen {tuple(src.shape)} to {tuple(value.shape)}")
+            grown = torch.zeros_like(value)
+            grown[:, :in_ch] = src
+            merged[name] = grown
+            widened.append(f"{name}: {tuple(src.shape)} -> {tuple(value.shape)} (new input channels zero)")
+            continue
+        if tuple(src.shape) != tuple(value.shape):
+            raise ValueError(f"{name}: GAST {tuple(src.shape)} != Ray+IR {tuple(value.shape)}")
+        merged[name] = src
+    return merged, {"copied": len(merged), "widened": widened}
+
+
+def warm_start_from_gast(alg, checkpoint_path: str, policy_lr: float, terrain_lr: float,
+                         expected_sha256: str | None = None) -> dict:
+    """Load a GAST v2.1 teacher into the Ray+IR policy; new PPO optimizer with two groups (iteration 0)."""
+    if getattr(alg, "schedule", None) != "fixed":
+        raise ValueError(f"per-group learning rates need agent.algorithm.schedule=fixed, got {alg.schedule!r}")
+    with open(checkpoint_path, "rb") as handle:
+        digest = hashlib.sha256(handle.read()).hexdigest()
+    if expected_sha256 is not None and digest != expected_sha256.strip().lower():
+        raise ValueError(f"GAST teacher sha256 {digest} != expected {expected_sha256}")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    extra = (checkpoint.get("infos") or {}).get("gd_lab") or {}
+    record = extra.get("gast_warm_start") or {}
+    # A resumed GAST run (e.g. 26123, resumed from 8400) keeps the task under its warm-start origin.
+    source_task = record.get("task") or (record.get("origin") or {}).get("task")
+    if source_task != EXPECTED_GAST_SOURCE_TASK:
+        raise ValueError(f"GAST source task {source_task!r} != {EXPECTED_GAST_SOURCE_TASK!r}")
+    policy = alg.policy
+    merged, report = gast_to_rayir_state_dict(checkpoint["model_state_dict"], policy.state_dict())
+    policy.load_state_dict(merged, strict=True)
+    cenet_state = extra.get("cenet_optimizer_state_dict")
+    if cenet_state is not None:
+        policy.cenet.optimizer.load_state_dict(cenet_state)
+    alg.optimizer = build_grouped_optimizer(policy, policy_lr, terrain_lr, alg.optimizer)
+    alg.learning_rate = float(policy_lr)
+    return {"source": checkpoint_path, "source_sha256": digest, "source_sha256_expected": expected_sha256,
+            "source_iteration": int(checkpoint.get("iter", -1)), "source_task": source_task,
+            "source_kind": "gast_v21", "cenet_optimizer_restored": cenet_state is not None,
+            "latent_head_zeroed": False, "ppo_optimizer": "new",
+            "learning_rates": group_learning_rates(alg.optimizer), **report,
+            "terrain_level_means_by_family": extra.get("terrain_level_means_by_family")}
+
+
+# UPDATE135: a blind DreamWaQ teacher (DWB-38000) as the backbone of a fresh Ray+IR GAST teacher.
+def warm_start_from_dwb(alg, checkpoint_path: str, policy_lr: float, terrain_lr: float,
+                        expected_sha256: str | None = None) -> dict:
+    """Copy the blind actor/critic/normalizers/std/CENet (actor terrain-latent columns zero); fresh terrain
+    encoder/decoder with a zero latent head; new PPO and CENet optimizers (the blind loader restores none)."""
+    from gd_lab.teachers.bivt.blind_init import blind_to_vrl_state_dict
+
+    if getattr(alg, "schedule", None) != "fixed":
+        raise ValueError(f"per-group learning rates need agent.algorithm.schedule=fixed, got {alg.schedule!r}")
+    with open(checkpoint_path, "rb") as handle:
+        digest = hashlib.sha256(handle.read()).hexdigest()
+    if expected_sha256 is None or digest != expected_sha256.strip().lower():
+        raise ValueError(f"blind teacher sha256 {digest} != expected {expected_sha256}")
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    source = checkpoint["model_state_dict"]
+    policy = alg.policy
+    target = policy.state_dict()
+    target_only = sorted(name for name in set(target) - set(source) if not is_terrain(name))
+    if target_only:
+        raise ValueError(f"Ray+IR tensors the blind teacher cannot fill: {target_only}")
+    policy.load_state_dict(blind_to_vrl_state_dict(source, target), strict=True)
+    zero_latent_head(policy)
+    alg.optimizer = build_grouped_optimizer(policy, policy_lr, terrain_lr, alg.optimizer)
+    alg.learning_rate = float(policy_lr)
+    return {"source": checkpoint_path, "source_sha256": digest, "source_sha256_expected": expected_sha256,
+            "source_iteration": int(checkpoint.get("iter", -1)), "source_kind": "blind_dreamwaq",
+            "copied": len(source), "fresh_terrain": sum(is_terrain(name) for name in target),
+            "cenet_optimizer_restored": False, "latent_head_zeroed": True, "ppo_optimizer": "new",
+            "learning_rates": group_learning_rates(alg.optimizer), "terrain_level_means_by_family": None}
