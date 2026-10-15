@@ -35,8 +35,13 @@ import numpy as np
 LEAD = 20          # decision step: 0.2 s before onset at 100 Hz
 GUARD = 50         # baseline excludes +-0.5 s around events
 DROP_M, LIFT_M, TILT_DEG, HOP_STEPS, DECK_R, MERGE = 0.03, 0.20, 60.0, 5, 0.25, 2
-EVENTS = ("foot_drop", "high_lift", "hind_hop", "fall")
-NAMES_KO = {"foot_drop": "발 빠짐", "high_lift": "높이 차기", "hind_hop": "뒷발 동시 뜀", "fall": "넘어짐"}
+BAD_EVENTS = ("foot_drop", "high_lift", "hind_hop", "fall")
+# Actions the policy takes every stride: a foot group leaving or touching the ground (contact transitions).
+ACTION_EVENTS = ("liftoff_front", "touchdown_front", "liftoff_hind", "touchdown_hind")
+EVENTS = BAD_EVENTS + ACTION_EVENTS
+NAMES_KO = {"foot_drop": "발 빠짐", "high_lift": "높이 차기", "hind_hop": "뒷발 동시 뜀", "fall": "넘어짐",
+            "liftoff_front": "앞발 들기", "touchdown_front": "앞발 딛기", "liftoff_hind": "뒷발 들기", "touchdown_hind": "뒷발 딛기"}
+ACTION_LEAD = 5    # action events: the decision 0.05 s before the contact change
 
 
 def tilt_deg(quat_wxyz):
@@ -99,7 +104,23 @@ def detect(env, meta):
     done = np.array(env["done"], dtype=bool)
     tilt = tilt_deg(np.array(env["base_quat"], dtype=float))
     events["fall"] = runs(done | (tilt > TILT_DEG))
+    for group, idx in (("front", [i for i in range(4) if i not in hind]), ("hind", hind)):
+        for f in idx:
+            c = contact[:, f]
+            for kind, edge in (("liftoff", c[:-1] & ~c[1:]), ("touchdown", ~c[:-1] & c[1:])):
+                events.setdefault(f"{kind}_{group}", []).extend((int(t) + 1, int(t) + 2) for t in np.flatnonzero(edge))
+    for name in ACTION_EVENTS:
+        events[name] = sorted(events.get(name, []))
     return events
+
+
+def dominance(share):
+    """Per step, how far each term's advantage share is from its own mean over the recording ([T, K]).
+
+    A term that is always large (velocity tracking) is not "dominant" for one action; what moves the PPO advantage
+    is the deviation. dominant(t) = argmax_k |share_k(t) - mean_k|, with its sign (+ rewards, - penalizes)."""
+    dev = share - share.mean(0, keepdims=True)
+    return dev, np.abs(dev).argmax(1)
 
 
 def advantage_share(env, meta):
@@ -127,9 +148,10 @@ def analyze(rec):
         T = len(share)
         for name, spans in ev.items():
             busy = np.zeros(T, bool)
+            lead = ACTION_LEAD if name in ACTION_EVENTS else LEAD
             for s, e in spans:
-                busy[max(0, s - GUARD):min(T, e + GUARD)] = True
-                t = max(0, s - LEAD)
+                busy[max(0, s - GUARD if name in BAD_EVENTS else s - 1):min(T, e + (GUARD if name in BAD_EVENTS else 1))] = True
+                t = max(0, s - lead)
                 decision[name].append(share[t])
                 found[name].append({"env": idx, "start": s, "end": e, "decision_step": t,
                                     "advantage": env["advantage"][t] if env.get("advantage") else None})
@@ -137,7 +159,8 @@ def analyze(rec):
     report = {"meta": {"task": meta.get("task"), "checkpoint": meta.get("checkpoint"), "driver": meta.get("driver"),
                        "num_envs": meta.get("num_envs"), "steps": meta.get("steps"), "dt": meta.get("dt")},
               "definitions": {"foot_drop_m": DROP_M, "high_lift_m": LIFT_M, "tilt_deg": TILT_DEG,
-                              "hind_hop_steps": HOP_STEPS, "lead_steps": LEAD, "guard_steps": GUARD},
+                              "hind_hop_steps": HOP_STEPS, "lead_steps": LEAD, "guard_steps": GUARD,
+                              "action_lead_steps": ACTION_LEAD},
               "events": {}}
     for name in EVENTS:
         base = np.concatenate(baseline[name]) if baseline[name] else np.zeros((0, K))
@@ -151,11 +174,21 @@ def analyze(rec):
     return report
 
 
+def annotate(env, meta):
+    """Per-env fields the viewer shows: term_adv [T,K], events {name: [[start, end], ...]}."""
+    share = advantage_share(env, meta)
+    return {"term_adv": np.round(share, 5).tolist(),
+            "events": {k: [list(map(int, r)) for r in v] for k, v in detect(env, meta).items()}}
+
+
 def markdown(report, label):
     lines = [f"### {label}: 나쁜 행동과 보상 항목", "",
              "결정 시점(사건 0.2초 전)의 항목별 advantage 몫 − 평소 값. 음수 = 그 행동을 벌줌, 양수 = 부추김.", "",
              "| 행동 | 횟수 | 가장 벌주는 항목 (음수) | 부추기는 항목 (양수) |", "|---|---|---|---|"]
     for name in EVENTS:
+        if name == ACTION_EVENTS[0]:
+            lines += ["", "결정 시점(접지 변화 0.05초 전)의 항목별 advantage 몫 − 평소 값 (보폭마다 반복되는 행동).", "",
+                      "| 행동 | 횟수 | 가장 벌주는 항목 (음수) | 부추기는 항목 (양수) |", "|---|---|---|---|"]
         e = report["events"][name]
         neg = [t for t in e["terms"] if t["share_minus_baseline"] < 0][:3]
         pos = [t for t in reversed(e["terms"]) if t["share_minus_baseline"] > 0][:3]
