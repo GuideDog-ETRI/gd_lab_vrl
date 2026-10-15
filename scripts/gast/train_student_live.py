@@ -6,6 +6,7 @@ packet loss. Targets use capture time; only student weights receive gradients.
 
 import argparse
 import hashlib
+import math
 import os
 import re
 import sys
@@ -95,8 +96,24 @@ parser.add_argument("--v21_env", action="store_true", default=False,
 parser.add_argument("--v2_env", action="store_true", default=False,
                     help="Distill a v2 teacher in its own env: 26 cm gaps and the stair hip-handle disturbance "
                          "(full force from the first step).")
+parser.add_argument("--train_parts", choices=('all', 'head', 'head+gate'), default='all')
+parser.add_argument("--group_balanced_latent", action='store_true')
+parser.add_argument("--actor_jacobian_latent_weight", type=float, default=0.,
+                    help='Reserved for UPDATE10A; nonzero is currently rejected.')
 parser.add_argument("--gap_loss_weight", type=float, default=1.0,
                     help="Loss weight for samples whose 11x17 body grid contains a known gap cell (1 = off).")
+parser.add_argument("--gap_ghost_probability", type=float, default=0.25,
+                    help="Platform-gap depth-ghost probability; 0 disables only ghosts "
+                         "while retaining generic camera noise.")
+parser.add_argument("--hidden_gap_latent_weight", type=float, default=1.0,
+                    help="Absolute latent row-weight floor for a known teacher-hidden "
+                         "ahead corridor gap; max(existing gap weight, this value).")
+parser.add_argument("--ahead_gap_latent_weight", type=float, default=1.0,
+                    help="Absolute latent row-weight floor for a known ahead-corridor gap, visible or hidden; "
+                         "max(existing row weight, this value).")
+parser.add_argument("--gap_action_weight", type=float, default=1.0,
+                    help="Absolute near-gap action row-weight floor; "
+                         "max(existing gap weight, this value).")
 parser.add_argument("--gap_terrain_columns", type=int, default=0,
                     help="Platform-gap terrain columns next to one column per other family (0 = task default). "
                          "E.g. 20 gives 20/30 gap columns instead of 5/15.")
@@ -105,8 +122,20 @@ parser.add_argument("--gap_top5_min_rows", type=int, default=64,
 parser.add_argument("--seen_supervision_seconds", type=float, default=0.0,
                     help="Also supervise height/gap on cells a camera saw within this many seconds (warped by body "
                          "motion), not only the currently teacher-visible cells. 0 = original supervision.")
+parser.add_argument("--gap_observed_supervision", action="store_true",
+                    help="Also supervise the semantic gap channel on gap cells the cameras look through at deck height "
+                         "(free-space test on the privileged mesh), not only where the pit floor is teacher-visible.")
 parser.add_argument("--resume_lr", type=float, default=None,
                     help="With --student_resume: set this learning rate instead of the checkpoint optimizer's.")
+parser.add_argument("--b2_trainable", choices=("memory_head", "all_but_quality"), default=None)
+parser.add_argument("--b2_group_weight", choices=("equal3", "prep4"), default=None)
+parser.add_argument("--b2_out", default=None, help="UPDATE31 isolated training output directory")
+parser.add_argument('--student_v3', action='store_true')
+parser.add_argument('--v3_size', choices=('small','large'), default='small')
+parser.add_argument('--v3_resume', default=None)
+parser.add_argument('--v3_round', type=int, default=0)
+parser.add_argument("--b3", action="store_true", help="UPDATE37 sampling and original-student action preservation")
+parser.add_argument("--e1_condition", choices=("a_student_gate","b_student_gate1","c_teacher_full","d_teacher_early","e_teacher_late","f_teacher_student_gate"), default=None, help="Frozen closed-loop E1; compact per-approach metrics instead of RolloutLog")
 parser.add_argument("--replay_out", default=None,
                     help="Analysis replay (tools/rl_replay): load --student_resume frozen, let the student drive, "
                          "record --replay_seconds of every step to this JSON and exit. Nothing is trained or saved.")
@@ -118,9 +147,35 @@ parser.add_argument("--replay_cloud_envs", type=int, default=2)
 parser.add_argument("--replay_terrain_history", action="store_true", help="opt in to full GAST history in replay")
 parser.add_argument("--replay_supervision_out", default=None,
                     help="with --replay_out: also write P2 gap-supervision coverage (JSON) counted at every capture")
+parser.add_argument("--replay_decoder_out", default=None,
+                    help="with --replay_out: also score the decoded gap channel against clean labels (JSON)")
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
+if args_cli.student_v3 and not args_cli.b3:
+    parser.error('student_v3 requires the B3 contract flags')
+if args_cli.b3 and (not args_cli.b2_out or args_cli.b2_trainable!='memory_head' or args_cli.b2_group_weight!='prep4'):
+    parser.error('B3 requires b2_out, memory_head and prep4')
+if args_cli.b2_out:
+    if args_cli.replay_out or args_cli.e1_condition or not args_cli.b2_trainable or not args_cli.b2_group_weight:
+        parser.error("B2 requires both unresolved choices explicitly; do not combine with replay")
+    if args_cli.num_envs != 32 or not args_cli.student_resume or not args_cli.v21_env or args_cli.gap_terrain_columns != 20:
+        parser.error("B2 requires 32 envs, --student_resume, --v21_env, --gap_terrain_columns 20")
+    if tuple(args_cli.camera_interval_ms)!=(70.,100.) or tuple(args_cli.camera_delay_ms)!=(0.,150.) or args_cli.camera_drop_prob!=.05:
+        parser.error("B2 requires interval70–100/delay0–150/drop.05")
+    target=Path(args_cli.b2_out).resolve()
+    if not target.is_relative_to(Path(__file__).resolve().parents[2]) or target.exists():
+        parser.error("B2 requires a new output directory inside this copy")
+    if not os.environ.get("TRAIN_ARM"):
+        parser.error("B2 requires TRAIN_ARM")
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools/rl_replay"))
+    args_cli.iterations=10**9
+elif args_cli.b2_trainable or args_cli.b2_group_weight:
+    parser.error("B2 options require --b2_out")
+if args_cli.e1_condition and (not args_cli.replay_out or args_cli.replay_warmup_seconds != 0 or args_cli.replay_vx is None or args_cli.replay_vx <= 0):
+    parser.error("E1 requires --replay_out, --replay_warmup_seconds 0 and positive --replay_vx")
+if args_cli.actor_jacobian_latent_weight != 0:
+    parser.error('actor Jacobian weighting awaits UPDATE10A; only 0 is supported')
 if args_cli.replay_out:
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "rl_replay"))
     from runtime import validate_window, reserve_recording
@@ -130,7 +185,12 @@ if args_cli.replay_out:
         validate_window(args_cli.num_envs, args_cli.replay_seconds, args_cli.replay_warmup_seconds, args_cli.replay_vx)
         if not 0 <= args_cli.replay_cloud_envs <= args_cli.num_envs:
             raise ValueError("invalid replay_cloud_envs")
-        replay_lock = reserve_recording(args_cli.replay_out, args_cli.replay_live)
+        if args_cli.e1_condition:
+            output = Path(args_cli.replay_out).resolve()
+            if not output.is_relative_to(Path(__file__).resolve().parents[2]):
+                raise ValueError("E1 output must be inside the authorized runtime copy")
+        replay_lock = reserve_recording(args_cli.replay_out, args_cli.replay_live,
+            lock_path=Path(__file__).resolve().parents[2] / "outputs/e1.lock" if args_cli.e1_condition else None)
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
     if not args_cli.student_resume:
@@ -150,6 +210,17 @@ if not (0 <= args_cli.seen_supervision_seconds < 60):  # also rejects NaN
     parser.error("seen_supervision_seconds must be finite and in [0, 60)")
 if args_cli.gap_loss_weight < 1 or args_cli.gap_terrain_columns < 0:
     parser.error("gap_loss_weight must be >= 1 and gap_terrain_columns >= 0")
+for option in (
+    "gap_loss_weight", "hidden_gap_latent_weight", "gap_action_weight", "ahead_gap_latent_weight"
+):
+    value = getattr(args_cli, option)
+    if not math.isfinite(value) or value < 1:
+        parser.error(f"{option} must be finite and >= 1")
+if (
+    not math.isfinite(args_cli.gap_ghost_probability)
+    or not 0 <= args_cli.gap_ghost_probability <= 1
+):
+    parser.error("gap_ghost_probability must be finite and in [0,1]")
 if args_cli.resume_lr is not None and (args_cli.resume_lr <= 0 or not args_cli.student_resume):
     parser.error("resume_lr must be positive and requires --student_resume")
 if args_cli.student_warmup < 0 or args_cli.student_ramp < 1:
@@ -291,7 +362,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     if args_cli.gap_terrain_columns:
         cols = set_gap_terrain_columns(env_cfg, args_cli.gap_terrain_columns)
         print(f"[INFO] Gap-focused terrain: platform_gap {args_cli.gap_terrain_columns}/{cols} columns", flush=True)
+    if args_cli.e1_condition or args_cli.b2_out:
+        from e1_runner import configure
+        configure(env_cfg)
     configure_vrl_cameras(env_cfg)
+    if args_cli.student_v3:
+        from v3_sampling import configure as configure_v3
+        configure_v3(env_cfg)
+    elif args_cli.b3:
+        from b3_sampling import configure as configure_b3
+        configure_b3(env_cfg)
     # A capture may fall on any policy tick. Render at policy boundaries so
     # scheduled camera reads are current, including asynchronous reset rows.
     env_cfg.sim.render_interval = env_cfg.decimation
@@ -300,10 +380,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     ensure_prev_prev_action_tracking(env.unwrapped)
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
-    runner_class = _resolve(agent_cfg.class_name)
-    runner = runner_class(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
-    runner.load(checkpoint_path, load_optimizer=False)
-    teacher = runner.alg.policy
+    if args_cli.e1_condition or args_cli.b2_out:
+        from e1_runner import load_teacher
+        teacher = load_teacher(env, agent_cfg.to_dict(), checkpoint_path, agent_cfg.device)
+    else:
+        runner_class = _resolve(agent_cfg.class_name)
+        runner = runner_class(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+        runner.load(checkpoint_path, load_optimizer=False)
+        teacher = runner.alg.policy
     if not isinstance(teacher, DreamwaqVrlActorCritic):
         raise TypeError(f"Stage-3 distillation requires a DreamwaqVrlActorCritic teacher, got {type(teacher)}")
     teacher.eval()
@@ -328,12 +412,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     print(f"[INFO] Camera transport: {transport_config.manifest(dt)}; interval_steps={transport.interval}, delay_steps={transport.delay}")
 
     student = GastStudent(env_cfg.camera_profile).to(device)
+    from gd_lab.gast.p3 import configure_train_parts, restore_optimizer, balanced_latent_loss
+    trainable_parameters = configure_train_parts(student, args_cli.train_parts)
     attention = GastDistillation(teacher, student, env.unwrapped, camera_contract,
                                 args_cli.student_warmup, args_cli.student_ramp, args_cli.gap_loss_weight,
-                                args_cli.seen_supervision_seconds)
+                                args_cli.seen_supervision_seconds, transport.interval[0] * dt,
+                                args_cli.gap_observed_supervision,
+                                hidden_gap_latent_weight=args_cli.hidden_gap_latent_weight,
+                                gap_action_weight=args_cli.gap_action_weight,
+                                ahead_gap_latent_weight=args_cli.ahead_gap_latent_weight,
+                                group_balanced_latent=args_cli.group_balanced_latent)
     print(f"[INFO] Near-gap sample loss weight: {args_cli.gap_loss_weight}", flush=True)
     print(f"[INFO] Seen-cell supervision window: {args_cli.seen_supervision_seconds} s (0 = teacher-visible only)", flush=True)
-    optimizer = None if args_cli.replay_out else torch.optim.Adam(student.parameters(), lr=args_cli.lr)
+    print(f"[INFO] Gap-observed (free-space) gap-channel supervision: {args_cli.gap_observed_supervision}", flush=True)
+    optimizer = None if (args_cli.replay_out or args_cli.b2_out) else torch.optim.Adam(trainable_parameters, lr=args_cli.lr)
     start_iteration = 0
     if args_cli.student_resume:
         saved = torch.load(args_cli.student_resume, map_location=device, weights_only=False)
@@ -347,7 +439,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             raise ValueError('Resume camera calibration/timing contract differs from this run') from exc
         student.load_state_dict(saved['model'], strict=True)
         if optimizer is not None:
-            optimizer.load_state_dict(saved['optimizer'])
+            restored_optimizer = restore_optimizer(optimizer, saved, args_cli.train_parts)
+            print(f'[INFO] train_parts={args_cli.train_parts}; optimizer restored={restored_optimizer}', flush=True)
         start_iteration = int(saved['iteration'])
         previous = saved.get('student_geometry_supervision', 'teacher_ray_visible_valid_cells_only')
         if previous != ('teacher_ray_visible_valid_cells_only' if not args_cli.seen_supervision_seconds
@@ -358,14 +451,33 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             for group in optimizer.param_groups:
                 group['lr'] = args_cli.resume_lr
             args_cli.lr = args_cli.resume_lr  # live-config baseline and checkpoint record follow the fine-tune lr
-            print(f'[INFO] Fine-tune learning rate {args_cli.resume_lr} (checkpoint optimizer state kept)', flush=True)
+            print(f'[INFO] Fine-tune learning rate {args_cli.resume_lr} (optimizer restored={restored_optimizer})', flush=True)
         if not 0 <= start_iteration < args_cli.iterations:
             raise ValueError('Resume iteration must be below total target')
-        print(f'[INFO] Student/optimizer resumed at {start_iteration}; physics, curriculum, hidden state and transport reset', flush=True)
+        # Keep the exact prefix: tools/camera_negative_smoke/run.sh greps for it.
+        print(f'[INFO] Student/optimizer resumed at {start_iteration}; train_parts={args_cli.train_parts}; '
+              'physics, curriculum, hidden state and transport reset; optimizer status reported above', flush=True)
+
+    if args_cli.b2_out:
+        if args_cli.student_v3:
+            from v3_runner import run as run_b2
+        elif args_cli.b3:
+            from b3_runner import run as run_b2
+        else:
+            from b2_runner import run as run_b2
+        try:
+            run_b2(env, teacher, student, attention, transport, args_cli, agent_cfg, env_cfg,
+                   checkpoint_path, start_iteration)
+        finally:
+            env.close()
+        return
 
     if args_cli.replay_out:
         sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "rl_replay"))
-        from student_replay import run as run_replay
+        if args_cli.e1_condition:
+            from e1_runner import run as run_replay
+        else:
+            from student_replay import run as run_replay
         try:
             run_replay(env, teacher, student, attention, transport, args_cli, agent_cfg, env_cfg,
                        checkpoint_path, start_iteration)
@@ -374,7 +486,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         return  # no live config, Top-5, TensorBoard, params YAML or checkpoint writes
 
     camera_noise_cfg = None if args_cli.no_camera_noise else CameraNoiseCfg()
-    gap_ghost = PlatformGapDepthGhost(PlatformGapDepthGhostCfg())
+    gap_ghost = PlatformGapDepthGhost(
+        PlatformGapDepthGhostCfg(probability=args_cli.gap_ghost_probability)
+    )
+    print(
+        f"[INFO] UPDATE7 ghost probability={args_cli.gap_ghost_probability}; "
+        f"hidden-gap latent floor={args_cli.hidden_gap_latent_weight}; "
+        f"near-gap action floor={args_cli.gap_action_weight}; "
+        f"ahead-gap latent floor={args_cli.ahead_gap_latent_weight}; "
+        "weight rule=max(existing row weight, objective-specific floor)",
+        flush=True,
+    )
     print(f"[INFO] Camera sensor-noise domain randomization: {'OFF' if camera_noise_cfg is None else camera_noise_cfg}")
     print("[WARN] IR channel is RGB luminance (ir_proxy), not a physical infrared sensor simulation.")
 
@@ -446,6 +568,20 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             "gast_contract": {"external_gap_signal": False, "pose": "xy_yaw_wxyz", "hidden_dim": student.gru_hidden_dim},
             "distillation_args": vars(args_cli), "camera_contract": camera_contract.manifest(),
             "camera_noise_enabled": camera_noise_cfg is not None,
+            "train_parts": args_cli.train_parts,
+            "group_balanced_latent": args_cli.group_balanced_latent,
+            "actor_jacobian_latent_weight": args_cli.actor_jacobian_latent_weight,
+            "update7_prescription": {
+                "gap_ghost_probability": args_cli.gap_ghost_probability,
+                "hidden_gap_latent_weight": args_cli.hidden_gap_latent_weight,
+                "gap_action_weight": args_cli.gap_action_weight,
+                "ahead_gap_latent_weight": args_cli.ahead_gap_latent_weight,
+                "weight_rule": "absolute_floor_max_with_existing_gap_weight",
+                "hidden_gap_selection": (
+                    "capture clean gap & known & ~teacher_visible; "
+                    "corridor rows 2:9, ahead columns 9:17; any cell"
+                ),
+            },
             "teacher_checkpoint": checkpoint_path, "teacher_sha256": teacher_sha256,
             "teacher_kind": "gast_clean_full_grid_memory" if type(teacher).__name__ == "GastTeacherView" else "bivt_ray",
             "camera_transport": transport_config.manifest(dt), "camera_transport_seed": agent_cfg.seed,
@@ -453,6 +589,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             "student_geometry_supervision": ("teacher_ray_visible_valid_cells_only" if not args_cli.seen_supervision_seconds
                                              else f"teacher_ray_visible_or_seen_within_{args_cli.seen_supervision_seconds:g}s_clean_labels"),
             "seen_supervision_seconds": args_cli.seen_supervision_seconds,
+            "gap_observed_supervision": bool(args_cli.gap_observed_supervision),
             "student_visibility_supervision": "teacher_ray_mask_all_cells",
             "teacher_behavior_target": "same_capture_step_teacher_action"}
         if top5_selection is not None: payload["student_top5_selection"] = top5_selection
@@ -546,7 +683,12 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                     supervised = hazard_supervised[rows]
                     row_weight = attention.row_weight
                     latent_loss = weighted_mean(
-                        (student_latent - teacher_latent[rows]*attention.target_gate).pow(2).mean(-1), row_weight)
+                        (student_latent - teacher_latent[rows]*attention.target_gate).pow(2).mean(-1),
+                        attention.latent_row_weight)
+                    if args_cli.group_balanced_latent:
+                        latent_loss = balanced_latent_loss(
+                            (student_latent - teacher_latent[rows]*attention.target_gate).pow(2).mean(-1),
+                            attention.p3_groups)
                     hazard_loss = (weighted_mean((hazard_pred[supervised] - hazard_label[rows][supervised]).pow(2),
                                                  row_weight[supervised])
                                    if supervised.any() else hazard_pred.sum() * 0.0)

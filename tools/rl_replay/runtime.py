@@ -23,9 +23,9 @@ def validate_window(num_envs, seconds, warmup, vx):
         raise ValueError("vx must be finite in [-2, 2]")
 
 
-def reserve_recording(out, live=None):
+def reserve_recording(out, live=None, lock_path=None):
     """Shared CLI/server/worktree lock. Hold fd until process exit."""
-    fd = os.open(f"/tmp/gd_lab_rl_replay_{os.getuid()}.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    fd = os.open(lock_path or f"/tmp/gd_lab_rl_replay_{os.getuid()}.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
         fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         for value in (out, live):

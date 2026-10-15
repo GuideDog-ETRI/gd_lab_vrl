@@ -1,4 +1,7 @@
 import torch
+from gd_lab.gast.update7_weights import (
+    objective_row_weights, validate_weight,
+)
 from torch.nn import functional as F
 from gd_lab.gast.geometry import SeenCells, near_gap_rows, reconstruction_loss, targets, weighted_mean
 from gd_lab.gast.targets import gated_teacher_action
@@ -38,11 +41,26 @@ def _validate_camera_capture(env, snapshot, contract):
 
 class GastDistillation:
     def __init__(self, teacher, student, env, camera_contract, warmup=1000, ramp=4000, gap_weight=1.0,
-                 seen_window_s=0.0):
+                 seen_window_s=0.0, seen_capture_period_s=None, gap_observed=False,
+                 hidden_gap_latent_weight=1.0, gap_action_weight=1.0, ahead_gap_latent_weight=1.0,
+                 group_balanced_latent=False):
+        self.p3_seen = (SeenCells(env.num_envs, env.device, 2., seen_capture_period_s)
+                        if group_balanced_latent else None)
+        self.p3_groups = None
+        self.hidden_gap_latent_weight = validate_weight(
+            hidden_gap_latent_weight, "hidden_gap_latent_weight"
+        )
+        self.gap_action_weight = validate_weight(
+            gap_action_weight, "gap_action_weight"
+        )
+        self.ahead_gap_latent_weight = validate_weight(ahead_gap_latent_weight, "ahead_gap_latent_weight")
+        gap_weight = validate_weight(gap_weight, "gap_weight")
         if gap_weight < 1:
             raise ValueError("gap_weight must be >= 1 (1 = no near-gap emphasis)")
         self.gap_weight = float(gap_weight)
         self.row_weight = None
+        self.latent_row_weight = None
+        self.action_row_weight = None
         self.teacher, self.student, self.env = teacher, student, env
         self.camera_contract = camera_contract
         self.ray_contract = load_camera_contract(env.cfg.camera_profile)
@@ -57,7 +75,16 @@ class GastDistillation:
         self.metrics = {}
         self.target_gate = None
         # 0 keeps the original supervision (teacher-visible cells only).
-        self.seen = SeenCells(env.num_envs, env.device, seen_window_s) if seen_window_s > 0 else None
+        # seen_capture_period_s: the transport's shortest capture spacing (sizes the snapshot ring).
+        if seen_window_s > 0 and not seen_capture_period_s:
+            raise ValueError("seen-cell supervision needs seen_capture_period_s (minimum camera capture interval)")
+        self.seen = (SeenCells(env.num_envs, env.device, seen_window_s, seen_capture_period_s)
+                     if seen_window_s > 0 else None)
+        # Also supervise the semantic gap channel on gap cells the cameras look through at deck height
+        # (env term RaycastVisibleTerrainDropout computes the mask at each student capture).
+        self.gap_observed = bool(gap_observed)
+        if self.gap_observed:
+            env._vrl_want_gap_observed = True
         # P2 gap-supervision counts: real gap cells and the supervised ones, per logging window and per run.
         self.gap_counts = {"window": [0, 0], "run": [0, 0]}
 
@@ -81,8 +108,13 @@ class GastDistillation:
         packed = self.teacher._actor_input(obs, inference=True)
         pose = torch.cat((pose_xyyaw(self.env), self.env.scene['robot'].data.root_quat_w), -1)
         stamp = torch.full_like(self.stamp, step * self.env.step_dt)
-        return (packed[:, :-32].clone(), obs['gast_clean'].clone(), obs['terrain'].clone(),
-                pose.clone(), stamp, teacher_action.clone(), packed[:, -32:].clone())
+        out = (packed[:, :-32].clone(), obs['gast_clean'].clone(), obs['terrain'].clone(),
+               pose.clone(), stamp, teacher_action.clone(), packed[:, -32:].clone())
+        if self.gap_observed:
+            if getattr(self.env, "_vrl_gap_observed_step", None) != step:
+                raise RuntimeError("gap-observed mask is stale relative to this student image capture")
+            out = (*out, self.env._vrl_gap_observed.clone())
+        return out
 
     @torch.no_grad()
     def actions(self, obs, iteration):
@@ -102,9 +134,12 @@ class GastDistillation:
         self.stamp[done] = -100
         if self.seen is not None:
             self.seen.reset(done)
+        if self.p3_seen is not None:
+            self.p3_seen.reset(done)
 
     def update(self, frames, hidden, rows, extra, age_seconds):
-        base, clean, teacher_terrain, pose, stamp, teacher_action, teacher_latent = (x[rows] for x in extra)
+        base, clean, teacher_terrain, pose, stamp, teacher_action, teacher_latent = (x[rows] for x in extra[:7])
+        gap_observed = extra[7][rows] if self.gap_observed else None
         frames = frames.clone()
         n = len(rows)
         missing = torch.rand(n, device=frames.device) < .1
@@ -130,17 +165,32 @@ class GastDistillation:
         near_gap = near_gap_rows(clean)
         weight = 1 + (self.gap_weight - 1) * near_gap.float()
         self.row_weight = weight
-        action_loss = (weighted_mean((actual[seen] - expected[seen]).pow(2).mean(-1), weight[seen]) if seen.any()
+        (
+            self.latent_row_weight,
+            self.action_row_weight,
+            hidden_gap,
+        ) = objective_row_weights(
+            weight, near_gap, clean, teacher_terrain,
+            self.hidden_gap_latent_weight, self.gap_action_weight, self.ahead_gap_latent_weight,
+        )
+        action_loss = (weighted_mean((actual[seen] - expected[seen]).pow(2).mean(-1), self.action_row_weight[seen]) if seen.any()
                        else actual.sum() * 0.0)
         seen_cells = None
+        if self.p3_seen is not None:
+            from gd_lab.gast.p3 import latent_groups
+            received = ~missing & ~partial.any(1)
+            p3_seen = self.p3_seen.update(rows, teacher_terrain[:, 187:] > .5,
+                                        pose[:, :3], stamp, received)
+            self.p3_groups = latent_groups(clean, teacher_terrain, p3_seen)
         if self.seen is not None:
             # Only frames the student actually got: no new "seen" cells from a dropped frame or a hidden camera.
             received = ~missing & ~partial.any(1)
             seen_cells = self.seen.update(rows, teacher_terrain[:, 187:] > .5, pose[:, :3], stamp, received)
         geometry_loss, height_loss, visibility_loss, visible_fraction = reconstruction_loss(
-            spatial, clean, teacher_terrain, return_components=True, row_weight=weight, seen=seen_cells)
+            spatial, clean, teacher_terrain, return_components=True, row_weight=weight, seen=seen_cells,
+            gap_observed=gap_observed)
         with torch.no_grad():  # P2: real gap cells the spatial loss supervises, as counts (same mask as the loss)
-            _, mask = targets(clean, teacher_terrain, seen_cells)
+            _, mask = targets(clean, teacher_terrain, seen_cells, gap_observed)
             _, _, gap_label, gap_known = clean.reshape(-1, 4, 11, 17).unbind(1)
             real_gap = ((gap_label > .5) & gap_known.bool()).flatten(1)
             num, den = int((real_gap & mask[..., 2].bool()).sum()), int(real_gap.sum())
@@ -159,5 +209,8 @@ class GastDistillation:
         self.metrics.update(action_mse=action_loss.item(), spatial_loss=geometry_loss.item(),
             height_visible_loss=height_loss.item(), visibility_bce=visibility_loss.item(),
             teacher_visible_fraction=visible_fraction.item(), quality_loss=quality_loss.item(),
-            quality_gate=gate.mean().item(), near_gap_row_fraction=near_gap.float().mean().item())
+            quality_gate=gate.mean().item(), near_gap_row_fraction=near_gap.float().mean().item(),
+            hidden_ahead_gap_row_fraction=hidden_gap.float().mean().item(),
+            latent_row_weight_mean=self.latent_row_weight.mean().item(),
+            action_row_weight_mean=self.action_row_weight.mean().item())
         return latent, memory, action_loss+.5*geometry_loss+.1*quality_loss
