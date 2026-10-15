@@ -1,0 +1,152 @@
+<title>RBQ10 정책 계보도</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+KR:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column; two wide diagrams scroll sideways inside their own frames; legend + notes as compact rows */
+:root{
+  --bg:#f5f6f3; --fg:#1d2321; --muted:#5d6763; --line:#cfd5d1; --panel:#ffffff; --accent:#2f6f5e;
+  --f-body:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--bg:#151a18;--fg:#e4e9e6;--muted:#9aa5a0;--line:#33403b;--panel:#1d2421;--accent:#7cc4ad;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#151a18;--fg:#e4e9e6;--muted:#9aa5a0;--line:#33403b;--panel:#1d2421;--accent:#7cc4ad;color-scheme:dark}
+body{background:var(--bg);color:var(--fg);font-family:var(--f-body);font-size:15px;line-height:1.6}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:16px;padding-block:28px 56px;display:grid;gap:28px}
+h1{font-size:1.7rem;margin:0;text-wrap:balance}
+h2{font-size:1.15rem;margin:0 0 8px;text-wrap:balance}
+p{margin:0;max-width:72ch}
+.sub{color:var(--muted)}
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;font-size:.88rem}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.sw{width:14px;height:14px;border-radius:3px;border:1px solid rgba(0,0,0,.25)}
+.frame{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow-x:auto;padding:12px}
+.frame pre.mermaid{margin:0;min-width:1100px;background:transparent}
+.key{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:10px 24px;font-size:.9rem}
+.key div{min-width:0}
+.key b{font-family:var(--f-mono);font-weight:500;color:var(--accent)}
+ul{margin:0;padding-left:1.2em;display:grid;gap:4px;max-width:90ch}
+code{font-family:var(--f-mono);font-size:.84em;overflow-wrap:anywhere}
+.note{font-size:.88rem;color:var(--muted)}
+</style>
+
+<div class="wrap">
+<header style="display:grid;gap:6px">
+  <h1>RBQ10 정책 계보도</h1>
+  <p class="sub">블라인드 출발점(ONNX b1_18, ARM1~4)부터 Ray+IR 교사, 카메라 학생까지 실패·중단 모델을 포함한 전체 계보. 2026-10-16 기준, 세 서버(로컬 5090 · onvlm2 다중 GPU · 90.111)의 학습 기록(params, manifest, README, 로그)에서 모음.</p>
+</header>
+
+<section style="display:grid;gap:10px">
+  <div class="legend">
+    <span><i class="sw" style="background:#9fd3b4"></i>채택 (다음 단계 출발점)</span>
+    <span><i class="sw" style="background:#a9c8ec"></i>현재 후보 / E1 진행 중</span>
+    <span><i class="sw" style="background:#d9dcd9"></i>대체됨 (다음 세대로 넘어감)</span>
+    <span><i class="sw" style="background:#f2b8b0"></i>실패 · 중단</span>
+    <span><i class="sw" style="background:#f4dc9a"></i>시작점 · 학습 기록 없음</span>
+  </div>
+  <div class="key">
+    <div><b>env</b> 병렬 환경 수 (DDP는 전체 합)</div>
+    <div><b>a→b</b> 시작→끝 이터 (학생은 캡처 수)</div>
+    <div><b>1G·3G</b> GPU 개수 @ 서버</div>
+    <div><b>ARM4</b> 100 Hz, Kp 123.39/127.77, Kd 2.4 (ARM1 50 Hz 기본, ARM2 100 Hz 기본, ARM3 50 Hz Kp 동일)</div>
+  </div>
+</section>
+
+<section>
+  <h2>교사 계보</h2>
+  <p class="note" style="margin-bottom:10px">화살표 글자 = 초기화 방법. "ONNX 복사"는 actor·CENet encoder·정규화만 옮기고 critic·decoder·지형 인코더는 새로 시작한 warm start.</p>
+  <div class="frame"><pre class="mermaid">
+flowchart TD
+  ONNX["DWB b1_18 ONNX<br/>배포 블라인드 · 50 Hz<br/>자체 학습 기록 없음"]:::root
+  SCR(("처음부터")):::root
+
+  SCR --> ARM1["ARM1 블라인드<br/>4096 env · 0→28748 · 1G 로컬<br/>몸통 접촉 붕괴로 중단"]:::fail
+  SCR --> ARM2["ARM2 블라인드<br/>4096 · 0→39999 · 1G 90.111<br/>완료, 미사용 (38000=c1d451f4)"]:::old
+  SCR --> ARM3["ARM3 블라인드<br/>4096 · 0→30000 · 1G onvlm2<br/>중단 (사유 기록 없음)"]:::fail
+  SCR --> ARM4["ARM4 블라인드 = DWB-38000<br/>4096 · 0→38000 · 1G onvlm2<br/>SHA c6cfe178"]:::ok
+
+  SCR --> VRL2["VRL ARM2 렌더 교사<br/>1024 · 0→9700 · 1G 로컬<br/>ARM4 계열로 대체"]:::old
+  SCR --> CVTT["CVTT 렌더 교사 (ARM4)<br/>4096 · 0→8600 · 3G onvlm2<br/>3700·3879·4125·5674·7761"]:::old
+  SCR --> GV1["GAST v1 시공간 교사<br/>4096 · 0→10342 · 3G onvlm2<br/>NaN 반복으로 실패 (7901)"]:::fail
+
+  ARM4 -- "blind_init" --> BS2A["BIVT 2-A 전체 높이맵<br/>4096 · 0→999 · 1G onvlm2"]:::old
+  BS2A -- resume --> BREN["BIVT-Render v1·v2<br/>4096 · 1000→2250 · 3G onvlm2<br/>렌더 가시성"]:::old
+  ARM4 -- "blind_init" --> BRAY["BIVT-Ray 2-R<br/>4096 · 0→7937 · 1G onvlm2<br/>레이캐스트 가시성 · Top 4500"]:::old
+  BRAY -- resume --> BENH["Enhanced Ray (가림 v2)<br/>4096 · 7938→19999 · 1G onvlm2<br/>7986 · 12123 · 13434"]:::old
+  ARM4 -- "고정 + 잔차" --> BAVRL["BAVRL 시각 잔차 PPO<br/>32 · 0→20000 · 1G 로컬<br/>미채택"]:::fail
+
+  ONNX -- "ONNX 복사" --> R1["BIVT-Ray b1_18 ①<br/>256 · 0→1600 · 1G 로컬"]:::old
+  R1 -- resume --> R2["② 1024 env · 1600→2000<br/>1G 로컬"]:::old
+  R2 -- resume --> R17["BIVT-Ray 17206 ③<br/>1024 · 2001→19999 · 1G 로컬<br/>카메라 vendor_legacy"]:::ok
+  R17 -- resume --> CLEAN["Clean 갭 파인튠<br/>4096 · 17207→34947 · 3G onvlm2<br/>vendor_new · 21068 채택"]:::ok
+  CLEAN -- "31625에서 resume" --> V2["Ray v2 보상 (마진·손잡이)<br/>4096 · 31626→36202 · 3G onvlm2<br/>뒷발 습관 남아 중단"]:::fail
+  CLEAN -- "21068 warm start" --> G21["GAST v2.1 (시간 기억)<br/>4096 · 0→8016 · 3G onvlm2<br/>model_2000 채택 · inf로 정지"]:::ok
+  G21 -- resume --> G21R["재시도 8000·8100<br/>4096 · 8001→8407 · 3G<br/>fused SDPA 원인 확인"]:::fail
+  G21R -- resume --> G26["GAST v2.1 math SDPA<br/>4096 · 8401→30000 · 3G onvlm2<br/>Top-1 26123 (10-13 기본)"]:::ok
+
+  G21 -- "2000 warm start" --> RI["Ray+IR 2769<br/>1024 · 0→5000 · 1G onvlm2<br/>E1 v25or 갭 99.0% · 카메라+필터 94.2%"]:::cur
+  G26 -- "26123 warm start" --> RIL["Ray+IR 갭 50% 2836<br/>1024 · 0→5000 · 1G 로컬<br/>E1 진행 중"]:::cur
+  ARM4 -- "blind_init" --> RID["Ray+IR 갭 50% 3906<br/>1024 · 0→5000 · 1G 90.111<br/>지형 인코더 새로 · E1 진행 중"]:::cur
+
+  classDef ok fill:#9fd3b4,stroke:#2f6f5e,color:#10221a
+  classDef cur fill:#a9c8ec,stroke:#2d5d8f,color:#0f1d2c
+  classDef old fill:#d9dcd9,stroke:#7d857f,color:#1d2321
+  classDef fail fill:#f2b8b0,stroke:#a8473a,color:#2a0f0b
+  classDef root fill:#f4dc9a,stroke:#9a7a22,color:#2a2109
+  </pre></div>
+</section>
+
+<section>
+  <h2>학생 계보 (카메라 → 지형 latent 증류)</h2>
+  <p class="note" style="margin-bottom:10px">숫자는 캡처 수. MJ = MuJoCo 갭 완주/18, E1 = Isaac 갭 clean/도달.</p>
+  <div class="frame"><pre class="mermaid">
+flowchart TD
+  CVTT["CVTT 3700·3879·4125·5674"]:::old --> SR1["RVLD 학생들<br/>64~128 env · 20000<br/>갭·계단 미통과"]:::old
+  CV77["CVTT 6987 · 7761"]:::old --> SR2["GAVD·RVLD·GAST-S<br/>64 env · 20000 · 로컬<br/>같은 교사 비교, 대체됨"]:::old
+  B45["Ray 4500 · 7986"]:::old --> SR3["GAVD·GAST-S<br/>64~516 env · 20000 · 로컬<br/>대체됨"]:::old
+  B134["Enhanced 13434"]:::old --> SR4["GAST-S DDP<br/>4096 · →15120 · 3G onvlm2<br/>OOM·중단"]:::fail
+  T17["BIVT-Ray 17206"]:::ok --> S17["GAST-S 16720·20000<br/>512 · 20000 · 1G 로컬<br/>legacy 카메라 폐기로 대체"]:::old
+  T17 --> G17["GAVD 17206<br/>512 · →11008 · 로컬<br/>중단"]:::fail
+  T21["Clean 21068"]:::ok --> S19["GAST-S 19840 → 갭 집중 24960<br/>512 · 20000 · 1G 로컬"]:::old
+  T21 --> RV["RVLD 19008 · GAVD 19008<br/>512 · 20000 · 1G 90.111<br/>평가 없이 v3로 흡수"]:::old
+  T5k["GAST v2.1 5000"]:::old --> SB["B seen2 16000<br/>512 · 0→16000 · 90.111<br/>MJ 0/18"]:::fail
+  T2k["GAST v2.1 2000"]:::ok --> S26["학생 28000 런 → 26624<br/>512 · 0→28000 · 1G 로컬<br/>MJ 6/18"]:::ok
+  S26 --> S34["seen0 갭 집중 → 34624<br/>256 · 26624→34624 · 로컬<br/>E1 58%"]:::ok
+  S26 --> SX["seen2 · gapobs · P1 (s42/s7)<br/>256 · →34624 · 로컬/90.111<br/>MJ 5~12/18, 미채택"]:::fail
+  S34 --> SP["P3 head-only · B1 actor copy · B2<br/>32~256 · →38624~42624<br/>MJ 5~15, 미채택"]:::fail
+  S34 --> B3["B3 s42 58084 (기억+head)<br/>32 · 34624→58084 · 1G 로컬<br/>E1 72.6% · 배포 기준"]:::ok
+  S34 --> B37["B3 s7 61323<br/>32 · →61323 · 90.111<br/>E1 74%, 시드 의존"]:::old
+  S34 -- "시각 경로 복사" --> V3["v3 belief GRU s42·s7<br/>32 · 0→50000 · 1G 90.111<br/>E1 40k 75.9/77.8% · 보류"]:::old
+  B3 --> ARMS["+8k 팔 C·B1·B2·B4<br/>32 · +8000 · 90.111<br/>E1 58~78%, 모두 불통과"]:::fail
+  V3 --> ARMV["+8k 팔 V3-C·V3-B1<br/>32 · +8000 · 90.111<br/>76.0 / 72.6%, 불통과"]:::fail
+  RIX["Ray+IR 2769 (LiDAR 직결)"]:::cur -. "학생 없이 v25or 지도 직접 입력" .-> NOS["학생 불필요 검토 중"]:::cur
+
+  classDef ok fill:#9fd3b4,stroke:#2f6f5e,color:#10221a
+  classDef cur fill:#a9c8ec,stroke:#2d5d8f,color:#0f1d2c
+  classDef old fill:#d9dcd9,stroke:#7d857f,color:#1d2321
+  classDef fail fill:#f2b8b0,stroke:#a8473a,color:#2a0f0b
+  </pre></div>
+</section>
+
+<section style="display:grid;gap:8px">
+  <h2>읽을 때 주의할 점</h2>
+  <ul>
+    <li><b>두 개의 블라인드 뿌리.</b> b1_18 ONNX 계열(17206 → 21068 → GAST 2000·26123 → 2769·2836)과 DWB-38000 계열(BIVT 2-A·Render·Ray 4500·Enhanced, BAVRL, 3906)은 서로 다른 블라인드에서 출발함.</li>
+    <li><b>b1_18은 50 Hz ONNX</b>(policy_dt 0.02, Kd 2.5)인데 17206 계열은 100 Hz ARM4 이득으로 학습함. b1_18 자체의 학습 기록은 남아 있지 않음.</li>
+    <li><b>같은 이름 다른 모델.</b> DWB-38000(c6cfe178)은 onvlm2 ARM4 블라인드 런의 model_38000이고(SHA로 확인), 90.111의 ARM2 model_38000(c1d451f4)과 다름.</li>
+    <li><b>GAST v2.1은 21068에서 출발</b>했고, model_2000은 그 런 안의 체크포인트. 26123은 같은 런을 8400부터 이어 30000까지 학습한 결과.</li>
+    <li><b>Clean 런은 34947에서 정지.</b> 21068은 초반 Top-1(채택), 31625는 마지막 Top-1(뒷발 습관)으로 v2 가지의 출발점.</li>
+    <li><b>기록 공백.</b> ARM3 중단 사유, Enhanced Ray의 GPU 개수, 초기 RVLD 학생의 서버는 기록이 없어 표시하지 않음.</li>
+  </ul>
+</section>
+
+<section style="display:grid;gap:8px">
+  <h2>주요 근거 위치</h2>
+  <ul class="note">
+    <li>블라인드 런: onvlm2 <code>gd_lab/logs/blind_rbq10_dreamwaq/arm_3·arm_4/2026-09-20_*_seed42_40k</code>, 90.111 <code>gd_lab/logs/blind_rbq10_dreamwaq/arm_2</code>, 로컬 <code>gd_lab/logs/arms_40k_seed42_20260919_181842/recovery.log</code></li>
+    <li>CVTT·BIVT(38000 계열): onvlm2 <code>gd_lab_vrl_old/logs/vision_rbq10_dreamwaq/arm_4/</code>, 로컬 <code>archive/gd_lab_vrl_checkpoints_20261007/teachers/</code></li>
+    <li>b1_18 계열 ①~③: 로컬 <code>gd_lab_vrl/logs/vision_rbq10_dreamwaq/arm_4/2026-10-03_*_dwb_v3_6_21_b1_18_ray_*</code></li>
+    <li>Clean·v2·GAST v2.1: onvlm2 <code>gd_lab_vrl_worktrees/{bivt-ray-ddp-newcam-17206, teacher-v2-20261007, gast-v21-20261007}</code></li>
+    <li>Ray+IR: onvlm2 <code>gast-rayir-20261014</code>, 로컬 <code>archive/codex_worktrees/update135_gap50</code>, 90.111 <code>gast-rayir-gap50-20261015</code></li>
+    <li>학생: 로컬 <code>archive/codex_worktrees/update37_b3</code>, 90.111 <code>gd_lab_vrl_worktrees/update51_student_v3</code>, <code>transfer_codex_collab_20261009/update110_arms</code></li>
+  </ul>
+</section>
+</div>
