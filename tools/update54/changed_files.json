@@ -1,0 +1,33 @@
+{
+  "existing_files_modified": [],
+  "added_code_and_tests": {
+    "src/gd_lab/gast/belief_aux.py": "58a0e41f0134e54c7b036698b01f09d086c95c23f8b6dba23fd63f7a0a7357dc",
+    "src/gd_lab/gast/v3_packet_contract.py": "0b8bcbc866e1ee5322d08594ddd15e72a05584e6e347b50448cc75f59f4bf216",
+    "tools/rl_replay/v3_runner_update54.py": "659504790745e4fc3fdb1dfe6c09fdfc4d82bd8c1e6f3014546815b84da4be0d",
+    "scripts/gast/train_student_live_update54.py": "264fdf6b877eace87cbb2407d71e947865415bc7ce4ac5642ff168dc31d2dfc9",
+    "scripts/gast/run_student_live_update54.sh": "0f3897447598e66e039a6b5273406af21bb13ae1a44adad8710d675a249fe912",
+    "run_v3_update54_90.sh": "6fffea12eae17f06ab66a9c03e1af352e8e20c48b56906fed6522bccd043c4f9",
+    "tools/update54/verify_cpu.py": "91d623c8598a9870dbba7709288e8e94cb3fea925b09fef2b6974354b5dfe031",
+    "tools/update54/verify_onnx.py": "0552ac56f0544a8e5930f44d6aa4a023b7180716b55c2d198610111d0bafa930",
+    "tools/update54/verify_runner.py": "a55cc327510acbd83796f920bb7706ed8cb18d604f074ca2f0caa00149650674"
+  },
+  "preserved_update51_files": [
+    "src/gd_lab/gast/student_v3.py",
+    "src/gd_lab/gast/v3_state.py",
+    "tools/rl_replay/v3_runner.py",
+    "scripts/gast/train_student_live.py",
+    "run_v3_90.sh",
+    "CODEX5090_TO_CLAUDE_UPDATE51_STUDENT_V3_20261010.md",
+    "tools/update51/verify_cpu.py",
+    "tools/update51/export_v3.py",
+    "tools/update51/cpu.sh",
+    "tools/update51/ONNX_STATE_CONTRACT.md",
+    "outputs/update51_cpu/large_tick.onnx",
+    "outputs/update51_cpu/static_checks.json",
+    "outputs/update51_cpu/verification.json",
+    "outputs/update51_cpu/large_encode.onnx",
+    "outputs/update51_cpu/small_tick.onnx",
+    "outputs/update51_cpu/small_encode.onnx"
+  ],
+  "review_patch": "tools/update54/review_delta.patch"
+}

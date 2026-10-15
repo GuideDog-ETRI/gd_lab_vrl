@@ -1,0 +1,12 @@
+{
+  "tools/update57/verify_cpu.py": "182dc4b121773a700c7680d03417df4cd327277e0d2fe47b43287cbac7bc834e",
+  "tools/update57/verify_runner.py": "f20ef3f701efa3e969b42aaff8d538523c30ae45b41a8c78281e24870d05ce89",
+  "tools/update57/export_v3.py": "7776bc208c27d0aad272aca2e8d4c53671cb143d900196011b492d955d212d34",
+  "tools/update57/benchmark.py": "643b531c132b9719719e2a89b73182e1321c9813a1d76def8eee7377f00ebad1",
+  "tools/update57/verify_static.py": "aff8bed88be75183f01356c517af15919d6fc2ffc87f2a772087a9c02c1a25db",
+  "tools/update57/verify_onnx.py": "89f5bf74775bfa12e6f8817fc5230cf15c7edbc35cf2391464a6a88fec4d05ff",
+  "src/gd_lab/gast/student_v3_update57.py": "012472d2c47d9fb7c1dad83f7f3d5df9233cf94eb9fe17ac63ce62a1a953f332",
+  "src/gd_lab/gast/v3_realtime.py": "5a812161d9a683a91732310ae7de570ef7a424c104ad23bf19ad6c248f0e9d39",
+  "tools/rl_replay/v3_runner_update57.py": "4a1ac5e0bfe66a700e710a3a79659c2c172dd4d0d05143bdd7054572f549405b",
+  "scripts/gast/train_student_live_update57.py": "d6174d340ecd0f799561dc42947c1771ee8c653e2f32877c8ded86ae8c67a516"
+}

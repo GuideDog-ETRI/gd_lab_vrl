@@ -1,0 +1,18 @@
+{
+  "src/gd_lab/gast/student_v3.py": "4b1f1abebb4b56672b81fd4ad1ef6a0f58c997d1396be58382295f262721dc49",
+  "src/gd_lab/gast/v3_state.py": "a80a364512f68d8f143ecc84b5211edc1b3519b1d0e1f91aa9db2e1e47ab17ab",
+  "tools/rl_replay/v3_runner.py": "ebb76152d20a46725ea68ea3c23775ff12b733a65f3c6f680b034a7b824790fa",
+  "scripts/gast/train_student_live.py": "2707c4acf3679397c67adc2deb19ec0591fe231d0b4117a8f6fe524e0fd88675",
+  "run_v3_90.sh": "c0d76c970e35ab5fe67cce21b0c316ad93e47d63ab279fa97b324933bb4f428b",
+  "CODEX5090_TO_CLAUDE_UPDATE51_STUDENT_V3_20261010.md": "2d32c193f3ae024811c3b6237ac9f8ce3e8f42494d7a1d4548879843c85bdb4c",
+  "tools/update51/verify_cpu.py": "e54cd122e36c302f8e661de5c23d3513b828a38dc29d2d0595aa374113562e6b",
+  "tools/update51/export_v3.py": "e0c80ab258165d427e1c74e2233973eae990a3dd805c3290be75f3593cf3ca30",
+  "tools/update51/cpu.sh": "150f12e00ad89cab093842951f136e88dd8388468613cac3ab18576c84c9daef",
+  "tools/update51/ONNX_STATE_CONTRACT.md": "96bfe1c144cc6903b4952dc1e133ac51875f7fa1557cb14c1a3f81e5451b95c8",
+  "outputs/update51_cpu/large_tick.onnx": "3d49550eb51394e9fb99bf8b51cdbed2d8491a887e2658ff3cf138f4079f0469",
+  "outputs/update51_cpu/static_checks.json": "68ac0b786353df4df3deaed7270c5a12dc762172d467d5304e5239e99675768e",
+  "outputs/update51_cpu/verification.json": "419d9e89aabf9834c2263cb1bb77fe7fabbcc31df56e54cd4d63a471a9cb5ab9",
+  "outputs/update51_cpu/large_encode.onnx": "17189dd10b344878b7897e188446dd0bd975ec16ed84bed4d4cd386e136e1bcf",
+  "outputs/update51_cpu/small_tick.onnx": "afc62d4b6a4162f6a6ccddf9a4b134eab76b8d3a9a99d943d0272910da906adf",
+  "outputs/update51_cpu/small_encode.onnx": "7191267e0898aa685a008105b27518783f931f97d16ebf2873c3159a04974a2c"
+}
