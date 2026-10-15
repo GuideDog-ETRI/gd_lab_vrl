@@ -1,0 +1,35 @@
+source: /home/user/gd_project/archive/codex_worktrees/update135_gap50/gast/checkpoints/26123_top1.pt
+source_sha256: 113c2b88a0518edfe85bdc33e3984f4f89d6412edb7773649548beaa65ed429e
+source_sha256_expected: 113c2b88a0518edfe85bdc33e3984f4f89d6412edb7773649548beaa65ed429e
+source_iteration: 26123
+source_task: Gd-GastGapCleanV21-Rbq10-Dreamwaq-v0
+source_kind: gast_v21
+cenet_optimizer_restored: true
+latent_head_zeroed: false
+ppo_optimizer: new
+learning_rates:
+  policy: 0.0001
+  terrain: 0.001
+copied: 69
+widened:
+- 'terrain_encoder.cnn.0.weight: (8, 2, 3, 3) -> (8, 3, 3, 3) (new input channels
+  zero)'
+terrain_levels_restored: true
+task: Gd-GastRayIrV21Gap50-Rbq10-Dreamwaq-v0
+train_arm_env: '4'
+reward_weights:
+  platform_gap_foot_drop: -2.0
+  platform_gap_crossing: 0.5
+  platform_gap_monitor: 1.0
+  platform_gap_intrusion: -3.0
+  platform_gap_clean: 0.5
+  gap_foothold_margin: -0.25
+  stair_foothold_margin: -0.2
+  gap_slot_probe: -1.0
+  stair_handle_disturbance: -1.0
+  stair_push_fall: -3.0
+  stair_push_slip: -0.2
+learning_rates_requested:
+  policy: 0.0001
+  terrain: 0.001
+schedule: fixed
