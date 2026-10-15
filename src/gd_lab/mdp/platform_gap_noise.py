@@ -6,6 +6,7 @@ boarding slots.  IR is deliberately untouched so the student can learn to use
 its complementary cue when depth lies.
 """
 from dataclasses import dataclass
+import math
 
 import torch
 
@@ -31,6 +32,13 @@ class PlatformGapDepthGhostCfg:
     false_hole_min_offset: float = 0.15
     false_return_offset: tuple[float, float] = (0.15, 0.65)
     patch_fraction: tuple[float, float] = (0.04, 0.16)
+
+    def __post_init__(self):
+        if (
+            not math.isfinite(float(self.probability))
+            or not 0 <= self.probability <= 1
+        ):
+            raise ValueError("ghost probability must be finite and in [0,1]")
 
 
 class PlatformGapDepthGhost:
@@ -77,8 +85,11 @@ class PlatformGapDepthGhost:
         n, cameras, _, h, w = frames.shape
         if clean_depth.shape != (n, cameras, h, w):
             raise ValueError("snapshot depth and student frame shapes differ")
-        self._ensure_state(frames.shape, frames.device)
         cfg = self.cfg
+        if cfg.probability == 0 and (self.remaining is None or not bool((self.remaining > 0).any())):
+            # Off and nothing in flight: identity, no projection, no RNG. Ghosts already running still finish.
+            return frames
+        self._ensure_state(frames.shape, frames.device)
         active = platform_gap_envs.reshape(n).bool().to(frames.device)
         if not active.any():
             return frames
