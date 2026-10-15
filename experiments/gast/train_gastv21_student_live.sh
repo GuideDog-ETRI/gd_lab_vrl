@@ -2,6 +2,7 @@
 # GAST camera student from a frozen GAST v2.1 teacher (full-grid 8-step memory teacher, vendor_new cameras).
 #   experiments/gast/train_gastv21_student_live.sh <teacher_package_dir> [captures=20000] [num_envs=512] [run_name]
 # The package needs teacher/model_*.pt, params/{agent,env}.yaml and SHA256SUMS.txt (checked here).
+# GAST_SEEN_SECONDS>0 also supervises height/gap on cells seen within that window (seen-cell supervision).
 # Distills in the teacher's own v2.1 env (26 cm gaps, stair disturbance at full force, commands to 1.2 m/s).
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -17,4 +18,5 @@ exec bash "$root/scripts/gast/run_student_live.sh" student \
   --teacher_checkpoint "$teacher" --num_envs "$envs" --bptt_steps 16 --iterations "$captures" --lr .0003 \
   --save_interval "${GAST_SAVE_INTERVAL:-500}" --top5_start_iteration "${GAST_TOP5_START:-2000}" \
   --camera_interval_ms 70 100 --camera_delay_ms 0 150 --camera_drop_prob .05 \
-  --perception_run_name "${4:-${name}_gast_student_${envs}env_${captures}_$(date +%Y%m%d_%H%M%S)}"
+  --seen_supervision_seconds "${GAST_SEEN_SECONDS:-0}" \
+  --perception_run_name "${4:-${name}_gast_student_${envs}env_${captures}_seen${GAST_SEEN_SECONDS:-0}_$(date +%Y%m%d_%H%M%S)}"
