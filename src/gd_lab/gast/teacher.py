@@ -225,3 +225,11 @@ class GastRunnerCfg(DreamwaqVrlRunnerCfg):
         self.algorithm.symmetry_cfg.data_augmentation_func = 'gd_lab.gast.teacher:mirror_gast'
         self.logger = 'tensorboard'
         self.experiment_name = 'gast/arm4'
+
+
+class GastRayIrActorCritic(GastActorCritic):
+    """UPDATE136 (E1 only): the UPDATE134B Ray+IR teacher; history frames carry [height, valid, IR]."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.terrain_encoder = TemporalTerrainEncoder(channels=3)

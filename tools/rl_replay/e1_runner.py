@@ -1,5 +1,5 @@
 """Closed-loop E1 adapter. Imported only by explicit --e1_condition replay."""
-import hashlib,json,types
+import hashlib,json,types,os
 from pathlib import Path
 import torch
 from e1_core import LatentSwitch,action_at_boundary
@@ -11,12 +11,16 @@ def load_teacher(env,cfg,path,device,policy_class=None):
     import importlib
     from rsl_rl.utils import resolve_obs_groups
     config=dict(cfg['policy']);name=config.pop('class_name')
+    saved=torch.load(path,map_location=device,weights_only=False)
     if policy_class is None:
         module,attr=name.split(':');policy_class=getattr(importlib.import_module(module),attr)
+        # UPDATE136: a 3-channel terrain CNN is the Ray+IR teacher ([height, valid, IR] history frames).
+        conv=saved['model_state_dict'].get('terrain_encoder.cnn.0.weight')
+        if conv is not None and conv.shape[1]==3:
+            from gd_lab.gast.teacher import GastRayIrActorCritic as policy_class
     obs=env.get_observations()
     groups=resolve_obs_groups(obs,cfg['obs_groups'],['critic'])
     policy=policy_class(obs,groups,env.num_actions,inference_only=True,**config).to(device)
-    saved=torch.load(path,map_location=device,weights_only=False)
     policy.load_state_dict(saved['model_state_dict'],strict=True)
     if policy.cenet.optimizer is not None:raise RuntimeError('E1 created a CENet optimizer')
     policy.eval()
@@ -46,6 +50,10 @@ class Recorder:
         self.ids=[self.robot.body_names.index(n) for n in self.names]
         self.sids=[self.sensor.body_names.index(n) for n in self.names]
         self.metrics=EpisodeMetrics(base.num_envs,self.names,condition)
+        self.flat=None
+        if os.environ.get('E1_B2_METRICS')=='1':
+            from e1_b2_metrics import FlatPitchGeometry
+            self.flat=FlatPitchGeometry(base,geometry)
         self.original=base._reset_idx
         def before_reset(env,ids,*args,**kwargs):
             self.sample(ids,terminal=True)  # capture final pose/contact BEFORE reset changes them
@@ -60,6 +68,7 @@ class Recorder:
         if not len(ids):return
         w,x,y,z=d.root_quat_w.unbind(-1)
         pitch=torch.asin((2*(w*y-z*x)).clamp(-1,1));roll=torch.atan2(2*(w*x+y*z),1-2*(x*x+y*y))
+        if self.flat is not None:self.flat.sample(ids,pitch)
         contact=self.sensor.data.net_forces_w[:,self.sids].norm(dim=-1)>15.
         time=torch.full((b.num_envs,1),b.common_step_counter*b.step_dt,device=b.device)
         packed=torch.cat((time,d.root_pos_w[:,[0,2]],pitch[:,None],roll[:,None],d.body_pos_w[:,self.ids].flatten(1),contact.float(),self.switch.first_step[:,None]),-1)
@@ -85,7 +94,11 @@ def run(env,teacher,student,attention,transport,args,agent_cfg,env_cfg,teacher_p
     teacher.actor.eval()
     fix_velocity(base.command_manager.get_term('base_velocity'),args.replay_vx)
     obs,_=env.reset()
+    from gain_control import freeze_gain_resampling
+    gain_control=freeze_gain_resampling(base)
+    initial_environment=environment_metadata(base)
     hidden=student.init_hidden(n,device);raw=torch.zeros(n,32,device=device);gate=torch.zeros(n,1,device=device)
+    packet_teacher=torch.zeros_like(raw);packet_events=[]
     episodes=torch.zeros(n,dtype=torch.long,device=device);last=torch.full_like(episodes,-1)
     switch=LatentSwitch(n,device);geometry=GapTileGeometry(base)
     rec=Recorder(base,switch,args.e1_condition,geometry,lambda:boarding_family_mask(base))
@@ -101,7 +114,7 @@ def run(env,teacher,student,attention,transport,args,agent_cfg,env_cfg,teacher_p
             near,_,_=rec.edges();distance=near-base.scene['robot'].data.root_pos_w[:,0]
             distance=torch.where(boarding_family_mask(base),distance,float('inf'))
             before=switch.injected.clone()
-            actions,latent,effective=action_at_boundary(teacher,obs,switch,args.e1_condition,raw,attention.latent,gate,attention.ready,age,distance,step)
+            actions,latent,effective=action_at_boundary(teacher,obs,switch,args.e1_condition,raw,attention.latent,gate,attention.ready,age,distance,step,packet_teacher)
             if args.e1_condition=='c_teacher_full':
                 error=float((actions-teacher.act_inference(obs)).abs().max())
                 max_equivalence=max(max_equivalence,error)
@@ -111,16 +124,21 @@ def run(env,teacher,student,attention,transport,args,agent_cfg,env_cfg,teacher_p
             rec.sample()
             obs,_,done,_=env.step(actions)
             reset=done.reshape(-1).bool();hidden[reset]=0;raw[reset]=0;gate[reset]=0
+            packet_teacher[reset]=0
             episodes+=reset.long();attention.reset(reset);switch.reset(reset)
             step=int(base.common_step_counter)
             if step==next_capture:
                 snap=base._vrl_camera_snapshot
                 extra=attention.capture(obs,teacher.act_inference(obs))
                 extra=tuple(v.detach().clone() if isinstance(v,torch.Tensor) else v for v in extra)
-                transport.capture(step,(snap[0].clone(),episodes.clone(),extra))
+                capture_teacher=teacher.terrain_latent(obs).detach().clone()
+                dropped_before=transport.dropped
+                transport.capture(step,(snap[0].clone(),episodes.clone(),extra,capture_teacher))
+                packet_events.append(['capture',step,transport.dropped>dropped_before])
                 next_capture=transport.next_capture(step);base._vrl_camera_capture_step=next_capture
             for packet in transport.receive(step):
-                frames,captured,extra=packet.payload
+                frames,captured,extra,capture_teacher=packet.payload
+                packet_events.append(['receive',packet.capture_step,packet.delivery_step,step])
                 valid=delivery_mask(packet.capture_step,captured,episodes,last)
                 valid &= torch.isfinite(frames).flatten(1).all(-1) & torch.isfinite(extra[3]).flatten(1).all(-1)
                 ids=valid.nonzero().flatten()
@@ -131,15 +149,19 @@ def run(env,teacher,student,attention,transport,args,agent_cfg,env_cfg,teacher_p
                 if not torch.isfinite(memory).all() or not torch.isfinite(ungated).all():raise RuntimeError('nonfinite student memory/raw head')
                 if not torch.allclose(output,ungated*quality,atol=1e-6,rtol=1e-5):raise RuntimeError('student raw/gate identity mismatch')
                 hidden[ids]=memory;raw[ids]=ungated;gate[ids]=quality
+                packet_teacher[ids]=capture_teacher[ids]
                 attention.latent[ids]=output;attention.ready[ids]=True;attention.stamp[ids]=extra[4][ids];last[ids]=packet.capture_step
+        if environment_metadata(base)!=initial_environment:raise RuntimeError('actuator gain changed after freeze')
         records=rec.metrics.finish()
         def digest(p):return hashlib.sha256(Path(p).read_bytes()).hexdigest()
         result={'schema':'update26_e1_v1','condition':args.e1_condition,'seed':agent_cfg.seed,'num_envs':n,'seconds':steps*dt,
           'student_iteration':iteration,'student_sha256':digest(args.student_resume),'teacher_sha256':digest(teacher_path),
-          'initial_state_sha256':initial_hash,'initial_terrain':initial_terrain,'environment':environment_metadata(base),
+          'initial_state_sha256':initial_hash,'initial_terrain':initial_terrain,'environment':environment_metadata(base),'initial_environment':initial_environment,'gain_control':gain_control,
+          'packet_events':packet_events,'packet_schedule_sha256':hashlib.sha256(json.dumps(packet_events).encode()).hexdigest(),
           'camera_transport':transport.config.manifest(dt),'transport_counts':{'captured':transport.captured,'dropped':transport.dropped,'delivered':transport.delivered},
           'max_teacher_action_equivalence_error':max_equivalence,'switches':switches,'approaches':records,
           'definitions':{'early_m':1.,'late_m':.3,'switch':'latch at exact pre-action step boundary through episode end; reset clears it',
+             'p_teacher_packet':'capture-time teacher latent carried in the identical packet; episode/reorder/finite mask shared; hold then student gate exactly once; same freshness mask',
              'baseline':'delivery-gated held latent with age<0.3 and ready; no second gate multiplication',
              'gate1':'last raw head, quality and age gate removed; zero until first valid packet',
              'teacher_history':'clean gast_history evaluated at policy rate, native history capture cadence unchanged',
@@ -147,6 +169,7 @@ def run(env,teacher,student,attention,transport,args,agent_cfg,env_cfg,teacher_p
              'geometry':'exact GapTileGeometry forward/right slot; gap-family envs only; lower deck used as height zero',
              'metrics':'UPDATE21 first crossing swings; foot centers; contact force norm>15N; clean=base beyond far+.8 and upright and no center below deck over slot',
              'termination':'captured before auto-reset; window end censored; no full RolloutLog'},'start_step':start}
+        if rec.flat is not None:result['update34_flat_pitch']=rec.flat.result()
         path=Path(args.replay_out)
         with path.open('x') as f:json.dump(result,f,indent=2,allow_nan=False)
         print('[E1] COMPLETE',path,'approaches',len(records),flush=True)

@@ -127,11 +127,7 @@ parser.add_argument("--gap_observed_supervision", action="store_true",
                          "(free-space test on the privileged mesh), not only where the pit floor is teacher-visible.")
 parser.add_argument("--resume_lr", type=float, default=None,
                     help="With --student_resume: set this learning rate instead of the checkpoint optimizer's.")
-parser.add_argument("--b2_trainable", choices=("memory_head", "all_but_quality"), default=None)
-parser.add_argument("--b2_group_weight", choices=("equal3", "prep4"), default=None)
-parser.add_argument("--b2_out", default=None, help="UPDATE31 isolated training output directory")
-parser.add_argument("--b3", action="store_true", help="UPDATE37 sampling and original-student action preservation")
-parser.add_argument("--e1_condition", choices=("a_student_gate","b_student_gate1","c_teacher_full","d_teacher_early","e_teacher_late","f_teacher_student_gate"), default=None, help="Frozen closed-loop E1; compact per-approach metrics instead of RolloutLog")
+parser.add_argument("--e1_condition", choices=("p_teacher_packet","a_student_gate","b_student_gate1","c_teacher_full","d_teacher_early","e_teacher_late","f_teacher_student_gate"), default=None, help="Frozen closed-loop E1; compact per-approach metrics instead of RolloutLog")
 parser.add_argument("--replay_out", default=None,
                     help="Analysis replay (tools/rl_replay): load --student_resume frozen, let the student drive, "
                          "record --replay_seconds of every step to this JSON and exit. Nothing is trained or saved.")
@@ -148,24 +144,6 @@ parser.add_argument("--replay_decoder_out", default=None,
 cli_args.add_rsl_rl_args(parser)
 AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
-if args_cli.b3 and (not args_cli.b2_out or args_cli.b2_trainable!='memory_head' or args_cli.b2_group_weight!='prep4'):
-    parser.error('B3 requires b2_out, memory_head and prep4')
-if args_cli.b2_out:
-    if args_cli.replay_out or args_cli.e1_condition or not args_cli.b2_trainable or not args_cli.b2_group_weight:
-        parser.error("B2 requires both unresolved choices explicitly; do not combine with replay")
-    if args_cli.num_envs != 32 or not args_cli.student_resume or not args_cli.v21_env or args_cli.gap_terrain_columns != 20:
-        parser.error("B2 requires 32 envs, --student_resume, --v21_env, --gap_terrain_columns 20")
-    if tuple(args_cli.camera_interval_ms)!=(70.,100.) or tuple(args_cli.camera_delay_ms)!=(0.,150.) or args_cli.camera_drop_prob!=.05:
-        parser.error("B2 requires interval70–100/delay0–150/drop.05")
-    target=Path(args_cli.b2_out).resolve()
-    if not target.is_relative_to(Path(__file__).resolve().parents[2]) or target.exists():
-        parser.error("B2 requires a new output directory inside this copy")
-    if not os.environ.get("TRAIN_ARM"):
-        parser.error("B2 requires TRAIN_ARM")
-    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools/rl_replay"))
-    args_cli.iterations=10**9
-elif args_cli.b2_trainable or args_cli.b2_group_weight:
-    parser.error("B2 options require --b2_out")
 if args_cli.e1_condition and (not args_cli.replay_out or args_cli.replay_warmup_seconds != 0 or args_cli.replay_vx is None or args_cli.replay_vx <= 0):
     parser.error("E1 requires --replay_out, --replay_warmup_seconds 0 and positive --replay_vx")
 if args_cli.actor_jacobian_latent_weight != 0:
@@ -187,7 +165,7 @@ if args_cli.replay_out:
             lock_path=Path(__file__).resolve().parents[2] / "outputs/e1.lock" if args_cli.e1_condition else None)
     except (ValueError, OSError) as exc:
         parser.error(str(exc))
-    if not args_cli.student_resume:
+    if not args_cli.student_resume and os.environ.get("U117") != "1":
         parser.error("--replay_out needs --student_resume (the student to replay)")
     # Student always drives, never learns, never saves; the run stops when the recording is full.
     args_cli.student_warmup, args_cli.student_ramp = 0, 1
@@ -356,13 +334,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     if args_cli.gap_terrain_columns:
         cols = set_gap_terrain_columns(env_cfg, args_cli.gap_terrain_columns)
         print(f"[INFO] Gap-focused terrain: platform_gap {args_cli.gap_terrain_columns}/{cols} columns", flush=True)
-    if args_cli.e1_condition or args_cli.b2_out:
-        from e1_runner import configure
+    if args_cli.e1_condition:
+        from e1_heightmap116 import configure
         configure(env_cfg)
     configure_vrl_cameras(env_cfg)
-    if args_cli.b3:
-        from b3_sampling import configure as configure_b3
-        configure_b3(env_cfg)
     # A capture may fall on any policy tick. Render at policy boundaries so
     # scheduled camera reads are current, including asynchronous reset rows.
     env_cfg.sim.render_interval = env_cfg.decimation
@@ -371,8 +346,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     ensure_prev_prev_action_tracking(env.unwrapped)
     env = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
-    if args_cli.e1_condition or args_cli.b2_out:
-        from e1_runner import load_teacher
+    if args_cli.e1_condition:
+        from e1_heightmap116 import load_teacher
         teacher = load_teacher(env, agent_cfg.to_dict(), checkpoint_path, agent_cfg.device)
     else:
         runner_class = _resolve(agent_cfg.class_name)
@@ -402,6 +377,14 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     print(f"[INFO] Nominal camera contract: {camera_steps} env steps ({cam_period}s), step_dt={dt}s")
     print(f"[INFO] Camera transport: {transport_config.manifest(dt)}; interval_steps={transport.interval}, delay_steps={transport.delay}")
 
+    if os.environ.get("U117") == "1":
+        from e1_heightmap117 import run
+        try:
+            run(env, teacher, None, None, transport, args_cli, agent_cfg, env_cfg, checkpoint_path, None)
+        finally:
+            env.close()
+        return
+
     student = GastStudent(env_cfg.camera_profile).to(device)
     from gd_lab.gast.p3 import configure_train_parts, restore_optimizer, balanced_latent_loss
     trainable_parameters = configure_train_parts(student, args_cli.train_parts)
@@ -416,7 +399,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     print(f"[INFO] Near-gap sample loss weight: {args_cli.gap_loss_weight}", flush=True)
     print(f"[INFO] Seen-cell supervision window: {args_cli.seen_supervision_seconds} s (0 = teacher-visible only)", flush=True)
     print(f"[INFO] Gap-observed (free-space) gap-channel supervision: {args_cli.gap_observed_supervision}", flush=True)
-    optimizer = None if (args_cli.replay_out or args_cli.b2_out) else torch.optim.Adam(trainable_parameters, lr=args_cli.lr)
+    optimizer = None if args_cli.replay_out else torch.optim.Adam(trainable_parameters, lr=args_cli.lr)
     start_iteration = 0
     if args_cli.student_resume:
         saved = torch.load(args_cli.student_resume, map_location=device, weights_only=False)
@@ -449,22 +432,10 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         print(f'[INFO] Student/optimizer resumed at {start_iteration}; train_parts={args_cli.train_parts}; '
               'physics, curriculum, hidden state and transport reset; optimizer status reported above', flush=True)
 
-    if args_cli.b2_out:
-        if args_cli.b3:
-            from b3_runner import run as run_b2
-        else:
-            from b2_runner import run as run_b2
-        try:
-            run_b2(env, teacher, student, attention, transport, args_cli, agent_cfg, env_cfg,
-                   checkpoint_path, start_iteration)
-        finally:
-            env.close()
-        return
-
     if args_cli.replay_out:
         sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools" / "rl_replay"))
         if args_cli.e1_condition:
-            from e1_runner import run as run_replay
+            from e1_heightmap116 import run as run_replay
         else:
             from student_replay import run as run_replay
         try:

@@ -48,14 +48,15 @@ def summarize_episode(rows,near,far,deck,foot_names,episode,env_id,termination,c
     crossed=np.flatnonzero((x>=far+.8)&(height-deck>.3)&(np.maximum(np.abs(p),np.abs(roll))<.5))
     cut=int(crossed[0])+1 if len(crossed) else len(a)
     # Stop first-approach metrics at failure/stall; never count failure dwell.
+    stop_reason=None
     progress=np.maximum.accumulate(x)
     for i in range(cut):
         if x[i]<near-1.5:continue
         if height[i]-deck<.3 or max(abs(p[i]),abs(roll[i]))>.5:
-            cut=i+1;break
+            cut=i+1;stop_reason="fall";break
         j=int(np.searchsorted(t,t[i]+2.))
         if j<len(t) and progress[j]-progress[i]<.05:
-            cut=i+1;break
+            cut=i+1;stop_reason="stall";break
     crossed=crossed[crossed<cut]
     feet=feet[:cut];contact=contact[:cut];t=t[:cut];x=x[:cut];p=p[:cut]
     flat=(x>=near-2.5)&(x<near-1.3)
@@ -63,7 +64,7 @@ def summarize_episode(rows,near,far,deck,foot_names,episode,env_id,termination,c
     changes={}
     for name,lo,hi in [('pre_1p0_0p7',-1.,-.7),('pre_0p7_0p4',-.7,-.4),('edge_0p2_0',-.2,0.)]:
         vals=np.degrees(p[(x-near>=lo)&(x-near<hi)])
-        changes[name]={'n':len(vals),'mean_delta_deg':float(vals.mean()-base) if len(vals) and base is not None else None,'min_delta_deg':float(vals.min()-base) if len(vals) and base is not None else None}
+        changes[name]={'n':len(vals),'mean_absolute_deg':float(vals.mean()) if len(vals) else None,'mean_delta_deg':float(vals.mean()-base) if len(vals) and base is not None else None,'min_delta_deg':float(vals.min()-base) if len(vals) and base is not None else None}
     over=(feet[:,:,0]>near)&(feet[:,:,0]<far);drop=bool(np.any(over&(feet[:,:,2]<0)))
     swings=[dict(leg=foot_names[i],group='front' if i in front else 'hind',**attempt(feet[:,i],contact[:,i],t,near,far,cut)) for i in range(4)]
     touchdowns=[]
@@ -74,6 +75,9 @@ def summarize_episode(rows,near,far,deck,foot_names,episode,env_id,termination,c
         if len(td):k=int(td[-1]);touchdowns.append({'leg':foot_names[i],'t':float(t[k]),'margin_m':float(near-feet[k,i,0])})
     return {'env_id':env_id,'episode_id':episode,'condition':condition,'width_m':far-near,'near':near,'far':far,
         'reached':bool(np.any(feet[:,front,0]>=near)),'crossed':bool(len(crossed)),'clean':bool(len(crossed)) and not drop,
+        'stop_reason':stop_reason,'stall':stop_reason=='stall',
+        'foot_drop_front':bool(np.any((over&(feet[:,:,2]<0))[:,front])),
+        'foot_drop_hind':bool(np.any((over&(feet[:,:,2]<0))[:,[i for i in range(4) if i not in front]])),
         'foot_drop':drop,'dip_ge15cm':bool(np.any(over&(feet[:,:,2]<-.15))),
         'flat_pitch_deg':base,'pitch':changes,'crossing_swings':swings,
         'last_front_touchdown':max(touchdowns,key=lambda v:v['t']) if touchdowns else None,
