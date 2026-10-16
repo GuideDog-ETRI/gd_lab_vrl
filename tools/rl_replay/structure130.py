@@ -310,3 +310,7 @@ class StructMemory:
                 packed_row[q]=5*np.clip(scanner_z-(g[0]-S['d_deep'])-.5,-1,1);packed_row[187+q]=1;source_row[q]=4
             elif cp[q]:
                 packed_row[q]=0.;packed_row[187+q]=0;source_row[q]=5
+
+# UPDATE145 diagnostics only; all original numerical methods remain unchanged above.
+from provenance145 import install_structure as _install_provenance
+_install_provenance(StructMemory, S)
