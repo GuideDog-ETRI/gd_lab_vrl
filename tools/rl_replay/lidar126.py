@@ -275,3 +275,7 @@ class Maps:
         st=dict(code_sha256=hashlib.sha256(open(structure130.__file__,'rb').read()).hexdigest(),rules=structure130.S,counts=self.struct_counts,memory={k:sum(m.counts[k] for m in self.struct) for k in self.struct[0].counts},
                 ms_per_env_capture=dict(n=len(self.struct_times),mean=1000*float(np.mean(self.struct_times)),p95=1000*float(np.quantile(self.struct_times,.95)),max=1000*float(np.max(self.struct_times))) if self.struct_times else None)
         return dict(structure130=st,counts=self.counts,carving_depth_m=dict(n=len(self.depths),quantiles=dict(zip(['min','p05','p25','p50','p75','p95','max'],np.quantile(self.depths,[0,.05,.25,.5,.75,.95,1]).tolist())) if self.depths else None),rules=CARVING)
+
+# UPDATE145 opt-in observation hooks; Maps(..., provenance=None) is default OFF.
+from provenance145 import install_maps as _install_provenance
+_install_provenance(Maps)
