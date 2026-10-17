@@ -160,6 +160,11 @@ class GastRayIrV21TeacherCfg(GastGapCleanV21TeacherCfg):
     """UPDATE134B: GAST v2.1 teacher (same rewards/terrain/disturbance) whose terrain input is raycast
     camera-visible cells (hidden = unknown) + NoisyTerrain noise, with an IR channel in the history."""
 
+    mapper_aug_enabled: bool = False
+    mapper_aug_ramp_steps: int = 50000
+    mapper_aug_clean_fraction: float = .25
+    mapper_aug_seed: int = 14942
+
     def __post_init__(self):
         super().__post_init__()
         from gd_lab.gast.rayir import RaycastIrTerrain

@@ -1,0 +1,80 @@
+[
+  {
+    "source": "/home/user/gd_project/archive/gd_lab_vrl_worktrees/aug149/checkpoints/teachers/gast/rayir_top5_20261016/2769_from2000/best_top5/2769_top1.pt",
+    "source_sha256": "65da772b8b793caf5e210f7db778c17d006999010ce964b2fc2af2deadad20c9",
+    "task": "Gd-GastRayIrV21-Rbq10-Dreamwaq-v0",
+    "source_iteration": 2769,
+    "start_iteration": 2770,
+    "absolute_step_offset": 277000,
+    "ppo": {
+      "state_count": 41,
+      "step_min": 2770.0,
+      "step_max": 58170.0,
+      "lrs": [
+        0.0001,
+        0.001
+      ]
+    },
+    "cenet": {
+      "state_count": 16,
+      "step_min": 516800.0,
+      "step_max": 516800.0,
+      "lrs": [
+        0.001
+      ]
+    },
+    "terrain_level_means_by_family": {
+      "pyramid_stairs": 8.550724983215332,
+      "pyramid_stairs_inv": 9.176470756530762,
+      "random_rough": 8.985294342041016,
+      "hf_pyramid_slope": 9.101449012756348,
+      "hf_pyramid_slope_inv": 9.558823585510254,
+      "pyramid_stairs_wide": 8.676470756530762,
+      "pyramid_stairs_inv_wide": 10.220588684082031,
+      "pyramid_stairs_nose": 8.855072975158691,
+      "pyramid_stairs_inv_nose": 9.029412269592285,
+      "ring_fence": 9.75,
+      "platform_gap": 9.384163856506348
+    },
+    "last_update_index_after_2000": 4769
+  },
+  {
+    "source": "/home/user/gd_project/archive/gd_lab_vrl_worktrees/aug149/checkpoints/teachers/gast/rayir_top5_20261016/3906_gap50_from_dwb38000/best_top5/3906_top1.pt",
+    "source_sha256": "f3e7afe53ea8be0f2dd777f331af417aba20b13b5e5be5470ec3d939470f4d98",
+    "task": "Gd-GastRayIrV21Gap50-Rbq10-Dreamwaq-v0",
+    "source_iteration": 3906,
+    "start_iteration": 3907,
+    "absolute_step_offset": 390700,
+    "ppo": {
+      "state_count": 41,
+      "step_min": 3907.0,
+      "step_max": 82047.0,
+      "lrs": [
+        0.0001,
+        0.001
+      ]
+    },
+    "cenet": {
+      "state_count": 16,
+      "step_min": 78140.0,
+      "step_max": 78140.0,
+      "lrs": [
+        0.001
+      ]
+    },
+    "terrain_level_means_by_family": {
+      "pyramid_stairs": 10.134615898132324,
+      "pyramid_stairs_inv": 9.784314155578613,
+      "random_rough": 9.058823585510254,
+      "hf_pyramid_slope": 9.078432083129883,
+      "hf_pyramid_slope_inv": 9.211539268493652,
+      "pyramid_stairs_wide": 8.333333969116211,
+      "pyramid_stairs_inv_wide": 9.823530197143555,
+      "pyramid_stairs_nose": 8.882352828979492,
+      "pyramid_stairs_inv_nose": 9.960784912109375,
+      "ring_fence": 8.576923370361328,
+      "platform_gap": 9.479452133178711
+    },
+    "last_update_index_after_2000": 5906
+  }
+]

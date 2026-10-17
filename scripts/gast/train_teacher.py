@@ -36,6 +36,8 @@ parser.add_argument("--warm_start_gast", type=str, default=None,
 parser.add_argument("--warm_start_dwb", type=str, default=None,
                     help="UPDATE135: blind DreamWaQ checkpoint as the backbone of a fresh Ray+IR GAST teacher "
                          "(actor latent columns and latent head zero). Starts a new run at iteration 0.")
+parser.add_argument("--resume_rayir149", type=str, default=None, help="Strict native UPDATE149B continuation")
+parser.add_argument("--warm_start_rayir", type=str, default=None, help="UPDATE149 native Ray+IR weights; new PPO, restored terrain levels, iteration zero.")
 parser.add_argument("--warm_start_sha256", type=str, default=None,
                     help="Expected sha256 of --warm_start_bivt; the 3-GPU launcher requires it for train runs.")
 parser.add_argument("--policy_lr", type=float, default=None, help="Fixed PPO lr of the backbone group (with --terrain_lr).")
@@ -45,8 +47,13 @@ AppLauncher.add_app_launcher_args(parser)
 args_cli, hydra_args = parser.parse_known_args()
 if (args_cli.policy_lr is None) != (args_cli.terrain_lr is None):
     parser.error("--policy_lr and --terrain_lr go together")
-if sum(x is not None for x in (args_cli.warm_start_bivt, args_cli.warm_start_gast, args_cli.warm_start_dwb)) > 1:
-    parser.error("choose one of --warm_start_bivt / --warm_start_gast / --warm_start_dwb")
+if sum(x is not None for x in (args_cli.warm_start_bivt, args_cli.warm_start_gast, args_cli.warm_start_dwb, args_cli.warm_start_rayir, args_cli.resume_rayir149)) > 1:
+    parser.error("choose one of --warm_start_bivt / --warm_start_gast / --warm_start_dwb / --warm_start_rayir")
+if args_cli.warm_start_rayir is not None:
+    if args_cli.policy_lr is None or args_cli.warm_start_sha256 is None or not os.path.isfile(args_cli.warm_start_rayir):
+        parser.error("--warm_start_rayir needs an existing checkpoint, sha256 and both learning rates")
+    if getattr(args_cli, "resume", False):
+        parser.error("--warm_start_rayir cannot be combined with resume")
 if args_cli.warm_start_dwb is not None:
     if args_cli.policy_lr is None or args_cli.warm_start_sha256 is None:
         parser.error("--warm_start_dwb needs --policy_lr, --terrain_lr and --warm_start_sha256")
@@ -133,6 +140,16 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
     if args_cli.max_iterations is not None:
         agent_cfg.max_iterations = args_cli.max_iterations
 
+    resume149 = None
+    if args_cli.resume_rayir149:
+        if agent_cfg.resume or args_cli.policy_lr is None or not args_cli.warm_start_sha256:
+            raise ValueError("UPDATE149B requires explicit SHA/grouped LR and no generic resume")
+        from gd_lab.gast.resume149 import validate_resume
+        resume149 = validate_resume(args_cli.resume_rayir149, args_cli.warm_start_sha256, args_cli.task)
+        print('[UPDATE149B source] ' + json.dumps(resume149), flush=True)
+        # Approved mature-source protocol: do not restart force/speed ramps.
+        os.environ['GD_LAB_V2_FORCE_RAMP_STEPS'] = '0'
+        os.environ['GD_LAB_V21_SPEED_RAMP_STEPS'] = '0'
     env_cfg.seed = agent_cfg.seed
     if args_cli.device is not None:
         env_cfg.sim.device = args_cli.device
@@ -185,13 +202,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         runner.deploy_context = capture_context(env, runner.alg.policy)
     except (ValueError, AttributeError, KeyError, TypeError) as exc:
         print(f"[WARN] Deployment metadata unavailable; checkpoints will not carry it: {exc}")
-    runner.add_git_repo_to_log(__file__)
+    if not resume149:
+        runner.add_git_repo_to_log(__file__)
     warm_start = None
     if args_cli.policy_lr is not None:
         from gd_lab.gast.warm_start import (build_grouped_optimizer, warm_start_from_bivt, warm_start_from_dwb,
-                                            warm_start_from_gast)
-        if any(x is not None for x in (args_cli.warm_start_bivt, args_cli.warm_start_gast, args_cli.warm_start_dwb)):
-            if args_cli.warm_start_dwb is not None:
+                                            warm_start_from_gast, warm_start_from_rayir)
+        if any(x is not None for x in (args_cli.warm_start_bivt, args_cli.warm_start_gast, args_cli.warm_start_dwb, args_cli.warm_start_rayir)):
+            if args_cli.warm_start_rayir is not None:
+                warm_start = warm_start_from_rayir(runner.alg, args_cli.warm_start_rayir, args_cli.policy_lr,
+                    args_cli.terrain_lr, expected_sha256=args_cli.warm_start_sha256, expected_task=args_cli.task)
+            elif args_cli.warm_start_dwb is not None:
                 warm_start = warm_start_from_dwb(runner.alg, args_cli.warm_start_dwb, args_cli.policy_lr,
                                                  args_cli.terrain_lr, expected_sha256=args_cli.warm_start_sha256)
             elif args_cli.warm_start_gast is not None:
@@ -202,17 +223,46 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
                                                   args_cli.terrain_lr, expected_sha256=args_cli.warm_start_sha256)
             means = warm_start.get("terrain_level_means_by_family") or {}
             family_columns = getattr(runner, "_top5_family_columns", None)
+            if args_cli.warm_start_rayir is not None and (not family_columns or set(family_columns) - set(means)):
+                raise ValueError("UPDATE149 requires saved levels for every terrain family")
             if means and family_columns:
                 from gd_lab.rl.terrain_resume import restore_family_start_levels
                 scene = env.unwrapped.scene
                 warm_start["terrain_levels_restored"] = bool(
                     restore_family_start_levels(scene.terrain, scene.env_origins, family_columns, means))
+            if args_cli.warm_start_rayir is not None and not warm_start.get("terrain_levels_restored"):
+                raise ValueError("UPDATE149 terrain level restoration failed; refusing to start")
+            if args_cli.warm_start_rayir is not None:
+                env.reset()  # align robot pose/history with the restored family origins
+                print("[UPDATE149] Native weights copied, new PPO, restored family levels, fresh iteration 0", flush=True)
         else:  # resuming a warm-started run: the saved optimizer state has the two groups
             if agent_cfg.algorithm.schedule != "fixed":
                 raise ValueError("per-group learning rates need agent.algorithm.schedule=fixed")
             runner.alg.optimizer = build_grouped_optimizer(
                 runner.alg.policy, args_cli.policy_lr, args_cli.terrain_lr, runner.alg.optimizer)
             runner.alg.learning_rate = args_cli.policy_lr
+    if resume149:
+        runner.strict_resume149 = resume149
+        runner.load(args_cli.resume_rayir149)
+        from gd_lab.gast.resume149 import verify_loaded
+        resume149['loaded_state_check'] = verify_loaded(runner.alg, args_cli.resume_rayir149)
+        if runner.current_learning_iteration != resume149['start_iteration']:
+            raise ValueError('UPDATE149B next iteration mismatch')
+        raw = env.unwrapped
+        raw._aug149_diagnostics = True
+        raw._aug149_rank_after_step = env_cfg.mapper_aug_ramp_steps
+        term = raw._gast_terrain_term
+        term.step_offset = resume149['absolute_step_offset']
+        from gd_lab.gast.resume149 import reset_restored_env
+        reset_restored_env(env)  # noise clock restored; mapper clock stays zero
+        runner._top5_records.clear()
+        runner.aug149_start_iteration = runner.current_learning_iteration
+        runner.aug149_manifest = {**resume149, 'force_scale':1., 'speed_ceiling':1.2,
+            'noise_strength':min(1., .1+term.step_offset/200000.), 'clean_fraction':.25,
+            'mapper_ramp_steps':env_cfg.mapper_aug_ramp_steps, 'mapper_enabled':env_cfg.mapper_aug_enabled}
+        print('[UPDATE149B restored] ' + json.dumps(runner.aug149_manifest), flush=True)
+    if args_cli.warm_start_rayir is not None and agent_cfg.resume:
+        raise ValueError("UPDATE149 warm start cannot use agent.resume=true")
     if agent_cfg.resume:
         print(f"[INFO] Loading checkpoint: {resume_path}")
         runner.load(resume_path)
@@ -225,7 +275,7 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
         # warm-start provenance carried by the checkpoint (never replaced by a placeholder).
         from gd_lab.gast.warm_start import check_resumed_rates, resumed_provenance
         actual = check_resumed_rates(runner.alg.optimizer, args_cli.policy_lr, args_cli.terrain_lr)
-        record = warm_start if warm_start is not None else resumed_provenance(resume_path)
+        record = warm_start if warm_start is not None else resumed_provenance(args_cli.resume_rayir149 if resume149 else resume_path)
         manager = env.unwrapped.reward_manager
         gap_terms = [n for n in ("platform_gap_foot_drop", "platform_gap_crossing", "platform_gap_monitor",
                                  "platform_gap_intrusion", "platform_gap_clean", "gap_foothold_margin",
@@ -237,7 +287,9 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             "reward_weights": {n: float(manager.get_term_cfg(n).weight) for n in gap_terms},
             "learning_rates_requested": {"policy": args_cli.policy_lr, "terrain": args_cli.terrain_lr},
             "learning_rates": actual,
-            "schedule": agent_cfg.algorithm.schedule}
+            "schedule": agent_cfg.algorithm.schedule,
+            "mapper_augmentation": {name: getattr(env_cfg, name, None) for name in (
+                "mapper_aug_enabled", "mapper_aug_ramp_steps", "mapper_aug_clean_fraction", "mapper_aug_seed")}}
         runner.gast_warm_start.pop("terrain_level_means_by_family", None)
         print(f"[INFO] GAST warm start: {runner.gast_warm_start}", flush=True)
 
@@ -248,12 +300,17 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             dump_yaml(os.path.join(log_dir, "params", "gast_warm_start.yaml"), runner.gast_warm_start)
 
     started = time.perf_counter()
-    runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
+    runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=not bool(resume149))
     completion = {'completed_updates': agent_cfg.max_iterations, 'wall_seconds': time.perf_counter()-started,
                   'checkpoint': os.path.join(log_dir, f'model_{runner.current_learning_iteration}.pt'),
                   'num_envs_per_rank0': env.unwrapped.num_envs,
                   'total_envs': getattr(runner, '_global_env_count', env.unwrapped.num_envs),
                   'horizon': agent_cfg.num_steps_per_env}
+    augmentation = getattr(getattr(env.unwrapped, "_gast_terrain_term", None), "mapper_aug", None)
+    if augmentation is not None:
+        completion["mapper_aug_last_capture"] = {k: (v.item() if torch.is_tensor(v) else v)
+            for k, v in augmentation.last_diagnostics.items()}
+        print(f"[UPDATE149] final augmentation diagnostics: {completion['mapper_aug_last_capture']}", flush=True)
     if not runner.disable_logs and not getattr(runner, 'stopped_early', False):
         with open(os.path.join(log_dir, 'completion.json'), 'w') as handle:
             json.dump(completion, handle, indent=2)
