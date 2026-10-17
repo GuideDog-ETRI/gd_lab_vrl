@@ -60,7 +60,10 @@ def install_episode_collector(env, family_columns: dict[str, list[int]]) -> list
                                                                   (1.0 + levels[index] / max_level)))))}
             if clean is not None:
                 row["gap_clean_success"] = float(bool(clean[index]) and not bypassed[index] and not base[index])
-            if validate_episode(row):
+            # Ignore all episodes that started before local augmentation reached full strength.
+            after = getattr(self, '_aug149_rank_after_step', None)
+            eligible = after is None or int(self.common_step_counter - self.episode_length_buf[ids[index]]) >= after
+            if eligible and validate_episode(row):
                 records.append(row)
         return original_reset(ids)
 
