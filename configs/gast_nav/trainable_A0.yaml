@@ -1,0 +1,7 @@
+stage: A0
+train_prefixes: [actor.0.W_new, nav_wide_encoder., nav_near_encoder., nav_normalizer., critic., nav_critic_]
+old_lr_scale: 0.1
+old_stats: false
+new_stats: true
+cenet_step: false
+aux_step: false

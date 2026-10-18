@@ -1,0 +1,5 @@
+source: checkpoints/teachers/gast/rayir_top5_20261016/3906_gap50_from_dwb38000/best_top5/3906_top1.pt
+sha256: f3e7afe53ea8be0f2dd777f331af417aba20b13b5e5be5470ec3d939470f4d98
+source_iteration: 3906
+nav_iteration: 0
+parity_atol: 1.0e-6

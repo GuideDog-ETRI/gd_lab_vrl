@@ -1,0 +1,39 @@
+# Runtime thresholds, CLOCK_MONOTONIC ms on the wire, seconds in timers.
+command:
+  timeout_ms: 500.0
+  future_tolerance_ms: 5.0
+  y_off_range: [-0.20, 0.20]
+  margin_range: [0.05, 0.20]
+  turn_cap_range: [0.2, 1.0]
+  v_cap_range: [0.3, 1.0]
+  defaults: {y_off: 0.0, margin: 0.10, turn_cap: 0.6}
+  omega_max_verified: null  # Must be supplied from verification, not assumed safe.
+landing:
+  announce_s: 2.0
+  stable_after_announce_s: 0.5 # release requires continuous dwell >= announce_s + this value.
+  stable_v_mps: 0.05
+  stable_w_radps: 0.1
+  release_timeout_ms: 500.0
+supervisor:
+  terrain_age_ms: 300.0
+  pose_age_ms: 150.0
+  reverse_angle_deg: 2.0
+  reverse_rate_radps: 0.1
+  reverse_rate_duration_s: 0.3
+  yaw_deadband_rad: 0.0
+  v_person_max: 0.8
+  max_map_age_s: 0.3
+  max_speed_mps: 1.0
+  residual_margin_m: 0.0 # Must be calibrated before operational use.
+  sim_infer_controller: DAMP # fallback_action=VISION_HOLD in sim, DAMP on hardware.
+ppo:
+  intervention_reward: -1.0 # Configurable development coefficient, not a safety threshold.
+  advantage_epsilon: 1.0e-8
+  clip_param: 0.2
+  entropy_coef: 0.01
+  value_loss_coef: 1.0
+  gamma: 0.99
+  lam: 0.95
+  max_grad_norm: 1.0
+  auxiliary_coef: 0.1
+  auxiliary_samples: 2048
