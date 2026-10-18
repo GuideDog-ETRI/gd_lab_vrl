@@ -16,7 +16,7 @@ RBQ10 안내견 로봇의 비전 보행 학습 저장소다. 블라인드 DreamW
 | 3906 E1 | v25or 갭 96.8%, 카메라+필터 96.2%, 계단 100% |
 | 배포 후보 | 원래 3906, A2769_top1 (aug149 매퍼 오차 증강 파인튠, 브랜치 `aug149-mapper-aug`). 최종 선택 대기 |
 | MuJoCo depth_ir 갭 (12 seed) | A2769_top1 11/12, 3906 10/12 |
-| 진행 중 | pose(odom) 오차 평가 도구 (UPDATE157), NavSkill 설계 v0.2 검토 (좁은 통로·시계방향 회전·계단 정렬) |
+| 진행 중 | pose(odom) 오차 평가 도구 (UPDATE157), NavSkill 설계 v0.2 검토 (좁은 통로·시계방향 회전·계단 정렬), sim_docker 통합 (실행기 구현, in-sim smoke·PR 전) |
 | 실기 | GAST 경로는 아직 시뮬레이션 전용이다. 실기 pose는 camel_pilot `/odom`을 쓸 예정이고, 포팅할 때 구현한다 |
 
 **계보**
@@ -85,6 +85,7 @@ logs/                학습 로그 (git 밖)
 - [비전 RL 구현 총정리 (PDF)](docs/design/VISION_RL_OVERVIEW_20261018.pdf)
 - [Ray+IR 교사 설계 (3906 기준)](docs/design/GAST_RAYIR_TEACHER_DESIGN_20261018.md)
 - [NavSkill 설계 v0.2 (검토 중)](docs/design/GAST_NAVSKILL_DESIGN_20261018.md)
+- [sim_docker GAST 교사 통합 현황](docs/design/SIMDOCKER_GAST_INTEGRATION_STATUS_20261018.md)
 - [정책 계보](docs/lineage/records_20261016/LINEAGE_20261016.md)
 - [E1 평가](experiments/e1/README.md), [RL Replay](tools/rl_replay/README.md)
 
