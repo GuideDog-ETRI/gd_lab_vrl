@@ -8,6 +8,7 @@ commands:
   task_probabilities: {passage: 0.25, turn: 0.20, stairs: 0.20, stop_start: 0.10, legacy: 0.25}
   default_conditions_fraction: 0.30
   go_probability: 0.80
+  minimum_cap_mps: 0.3
   resample_s: 5.0
   condition_change_probability: 0.1
   condition_rate_per_s: {y_off: 0.02, margin: 0.01, turn_cap: 0.1}
@@ -82,3 +83,13 @@ training:
   checkpoint_interval: 250
   top_k: 5
   log_root: logs/gast/nav_v1
+
+landing_sensor:
+  flat_tolerance_m: 0.05
+  descent_drop_m: 0.10
+  slip_speed_mps: 0.15
+observability:
+  unknown_hold_s: 3.0
+  forward_m: 0.8
+  turn_radius_m: 0.65
+  sdf_clip_m: 6.0

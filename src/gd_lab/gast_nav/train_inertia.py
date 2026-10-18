@@ -83,6 +83,8 @@ class ExternalForceAccumulator:
         self.last_force=torch.zeros_like(self.force)
         self.last_torque=torch.zeros_like(self.force)
         self.write_count=0
+        self.last_handle=torch.zeros_like(self.force)
+        self.last_acceleration=torch.zeros(num_envs,3,device=device)
 
     def submit_handle(self, force_w, torque_w):
         if force_w.shape != self.force.shape or torque_w.shape != self.torque.shape: raise ValueError('wrench shape')
@@ -94,6 +96,7 @@ class ExternalForceAccumulator:
 
     def apply(self, robot, acceleration):
         masses=robot.root_physx_view.get_masses().to(acceleration.device)
+        self.last_handle.copy_(self.force);self.last_acceleration.copy_(acceleration)
         self.last_force,self.last_torque=sum_external_wrenches(masses,acceleration,self.force,self.torque)
         robot.set_external_force_and_torque(self.last_force,self.last_torque,is_global=True)
         self.write_count += 1

@@ -40,11 +40,6 @@ def legacy_reward_masks(mode,phase,go,hold):
     for p in ('PRE_BRAKE','LANDING_ENTERED','DWELL'):blocked |= phase==schema.PHASES.index(p)
     return {'xy_tracking':legacy,'yaw_tracking':legacy,'stair_stall':~blocked}
 
-def intervention_penalty(controller,previous,coefficient):
-    """Use either this env term OR GastNavPPO adjustment, never both."""
-    hold=schema.CONTROLLERS.index('HOLD_3906')
-    return ((controller==hold)&(previous!=hold)).float()*coefficient
-
 def compose_total(legacy_terms,nav_weighted,*,mode,phase,go,hold,xy_names,yaw_names,stall_names):
     masks=legacy_reward_masks(mode,phase,go,hold)
     result={}

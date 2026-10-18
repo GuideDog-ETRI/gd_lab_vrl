@@ -20,3 +20,6 @@ archive/update149_validation/mplconfig/
 archive/update149_validation/pytest-of-user/
 tests/gast_nav/.runtime/
 tests/gast_nav/cpu_results.log
+tests/gast_nav/update*_smoke/
+tests/gast_nav/update*_smoke_console.txt
+tests/gast_nav/update*_cpu*_result.txt

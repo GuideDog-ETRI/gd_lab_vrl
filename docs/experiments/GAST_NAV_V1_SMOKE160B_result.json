@@ -1,0 +1,165 @@
+{
+  "status": "passed",
+  "optimizer_steps": 0,
+  "rollout_steps": 200,
+  "stage": "B",
+  "migration": {
+    "source": "/home/user/gd_project/archive/gd_lab_vrl_worktrees/gast_nav_v1/checkpoints/teachers/gast/rayir_top5_20261016/3906_gap50_from_dwb38000/best_top5/3906_top1.pt",
+    "source_sha256": "f3e7afe53ea8be0f2dd777f331af417aba20b13b5e5be5470ec3d939470f4d98",
+    "source_iteration": 3906,
+    "nav_iteration": 0,
+    "fresh_keys": [
+      "actor.0.W_new",
+      "critic.0.W_new",
+      "nav_wide_encoder.0.weight",
+      "nav_wide_encoder.0.bias",
+      "nav_wide_encoder.2.weight",
+      "nav_wide_encoder.2.bias",
+      "nav_wide_encoder.6.weight",
+      "nav_wide_encoder.6.bias",
+      "nav_near_encoder.0.weight",
+      "nav_near_encoder.0.bias",
+      "nav_near_encoder.2.weight",
+      "nav_near_encoder.2.bias",
+      "nav_near_encoder.6.weight",
+      "nav_near_encoder.6.bias",
+      "nav_normalizer._mean",
+      "nav_normalizer._var",
+      "nav_normalizer._std",
+      "nav_normalizer.count",
+      "nav_critic_wide.0.weight",
+      "nav_critic_wide.0.bias",
+      "nav_critic_wide.2.weight",
+      "nav_critic_wide.2.bias",
+      "nav_critic_wide.6.weight",
+      "nav_critic_wide.6.bias",
+      "nav_critic_near.0.weight",
+      "nav_critic_near.0.bias",
+      "nav_critic_near.2.weight",
+      "nav_critic_near.2.bias",
+      "nav_critic_near.6.weight",
+      "nav_critic_near.6.bias",
+      "nav_critic_normalizer._mean",
+      "nav_critic_normalizer._var",
+      "nav_critic_normalizer._std",
+      "nav_critic_normalizer.count"
+    ],
+    "strict_load": true,
+    "ppo_optimizer": "new",
+    "cenet_optimizer": "new"
+  },
+  "manifest_stage": "A",
+  "scene_kinds": [
+    "legacy",
+    "nav_corridor",
+    "nav_door",
+    "nav_stair_landing",
+    "nav_turn_room"
+  ],
+  "observation_shapes": {
+    "policy": [
+      16,
+      230
+    ],
+    "critic": [
+      16,
+      298
+    ],
+    "terrain": [
+      16,
+      374
+    ],
+    "gast_clean": [
+      16,
+      748
+    ],
+    "gast_history": [
+      16,
+      4496
+    ],
+    "nav_wide": [
+      16,
+      27,
+      43,
+      49
+    ],
+    "nav_near": [
+      16,
+      3,
+      25,
+      37
+    ],
+    "nav_features": [
+      16,
+      16
+    ],
+    "nav_privileged": [
+      16,
+      9
+    ],
+    "nav_controller": [
+      16
+    ],
+    "nav_mode": [
+      16
+    ]
+  },
+  "controllers": [
+    0,
+    1
+  ],
+  "force_sum_max_error": 0.0,
+  "force_write_count": 400,
+  "rewards": {
+    "progress": 0.0,
+    "overspeed": 0.0,
+    "clearance": 0.0,
+    "offset": -0.008735843934118748,
+    "stop_success": 0.0,
+    "false_stop": 0.0,
+    "forbidden_entry": 0.0,
+    "turn_tracking": -0.0350063294172287,
+    "reverse_rate": 0.0,
+    "reverse_accumulation": -4.131470268475823e-05,
+    "turn_drift": -0.001236713258549571,
+    "stair_alignment": 0.0,
+    "dwell_motion": 0.0,
+    "contact": 0.0
+  },
+  "cylinder_skips": [
+    {
+      "kind": "nav_corridor",
+      "level": 4,
+      "attempts": 4,
+      "cylinder_skipped": 0,
+      "fraction": 0.0,
+      "over_10_percent": false
+    },
+    {
+      "kind": "nav_door",
+      "level": 1,
+      "attempts": 3,
+      "cylinder_skipped": 0,
+      "fraction": 0.0,
+      "over_10_percent": false
+    },
+    {
+      "kind": "nav_stair_landing",
+      "level": 0,
+      "attempts": 3,
+      "cylinder_skipped": 0,
+      "fraction": 0.0,
+      "over_10_percent": false
+    },
+    {
+      "kind": "nav_turn_room",
+      "level": 3,
+      "attempts": 3,
+      "cylinder_skipped": 3,
+      "fraction": 1.0,
+      "over_10_percent": true
+    }
+  ],
+  "cylinder_enabled": 10,
+  "cylinder_C_steps": 20
+}
