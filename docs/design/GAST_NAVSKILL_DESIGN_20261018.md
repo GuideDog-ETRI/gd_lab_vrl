@@ -1,89 +1,100 @@
-# GAST-NavSkill 기본 설계서 (v0.2, 2026-10-18)
+# GAST-NavSkill 기본 설계서 (v0.3, 2026-10-18)
 
 좁은 공간 통과, 시계방향 제자리 회전, 계단 정렬을 학습하는 교사 정책의 기본 설계다. 백본은 Ray+IR 3906이다.
 
 **상태**
-- 설계 검토 단계. 구현과 학습은 하지 않는다.
-- v0.1은 검토자 두 세션(5090, 90.111)의 검토 UPDATE155를 받았고, 이 판에 반영했다.
-- v0.2 재검토(UPDATE156)는 아직 받지 않았다.
+- 설계 검토 단계다. 구현·학습은 하지 않는다.
+- 검토 이력: v0.1 → UPDATE155, v0.2 → UPDATE156. 두 번 모두 두 검토가 "조건부"로 판정했다.
+- v0.3은 UPDATE156 지적과 2026-10-18 사용자 결정을 반영했다. UPDATE158 교차 검증은 아직 받지 않았다.
+- 현행 학습(3906) 구조는 `GAST_RAYIR_TEACHER_DESIGN_20261018.md`에 있다. 이 문서는 바뀌는 점만 적는다.
 
-**참조**
-- 현행 학습의 구조는 `GAST_RAYIR_TEACHER_DESIGN_20261018.md`에 있다. 이 문서는 바뀌는 점만 적는다.
+**v0.2 → v0.3 변경**
 
-**v0.1 → v0.2 주요 변경**
-1. **권한 경계 확정 (사용자 결정).** gdm이 갈림길, 다음 계단, 회전의 시작과 끝을 정한다. 정책은 단일 경로 안의 실행만 맡는다.
-2. **명령 구조.** 기존 명령 3칸(vx, vy, ωz)의 의미는 그대로 둔다. 새 명령은 별도 입력으로 붙인다(어댑터).
-3. **시계방향 제한.** TURN 모드에만 적용한다(제안, 사용자 확인 필요). 이 제한은 학습으로 보장되지 않는다. 어댑터 clamp와 감독기가 보장한다.
-4. **장애물 지도.**
-   - 범위를 후방 2 m 요구에 맞게 넓혔다.
-   - 근거리 5 cm 정밀 여유 지도를 추가했다.
-   - 관측은 레이 첫 히트 기준 free / occupied / unknown으로 만든다.
-   - 높이대는 국소 지지면을 기준으로 잰다.
-5. **계단참.** `stop_t` 입력을 폐기하고 FSM으로 처리한다.
-6. **정지 보장.** RL 밖에서 한다. 감독기가 위험을 감지하면 검증된 hold 제어기로 전환한다.
-7. **가능/불가 판정.** 현재 상태 기준으로 하고 unknown을 포함한다. false-stop 지표를 추가했다.
-8. **warm start.** strict resume이 아니라 schema migration으로 한다.
-9. **mirror 증강.** 비대칭 과제에서는 끈다.
-10. **저장·통신.** 저장은 uint8과 캡처 단위 중복 제거로 줄인다. 통신은 계약 v2로 바꾼다.
-11. **학습 예산.** 15k iter는 최대 예산이다. 단계별 gate를 통과해야 다음 단계로 간다.
+| 구분 | 변경 내용 |
+|---|---|
+| 사용자 결정 | 통과·회전 판정은 다리 포함 로봇 swept 폭 + margin 기준 |
+| | 사용자 추적 입력 삭제 |
+| | 장소별 위치는 조건 c로 지정 |
+| | 후방 coverage는 가정으로 둠 |
+| | 시계방향 제한은 TURN 모드만 |
+| | 계단참은 네 발 접지 시 일시 정지. 1차는 AUTO release만, 입력 통로는 다중 소스 |
+| | 역회전 수치는 학습 밖 설정값 |
+| | 진급 기준과 실행 순서 확정 |
+| UPDATE156 반영 | "감독기가 보장" 문구 삭제 |
+| | TURN clamp와 mode handshake |
+| | 계단참 혼합 감지, requested_go와 effective_go 분리 |
+| | hold 후보와 전환 검증 |
+| | 학습 중 감독기 개입 규칙 |
+| | A0를 additive adapter + gradient mask로 |
+| | 지지면 추정, free 판정, 근거리 clearance 생성법 |
+| | 패킷·rollout 저장 계약 |
+| | jerk 불일치 수정 |
+| | kinematic 사람 모델 수정 |
+| | 안전 horizon 단위 수정 |
 
 ---
 
 ## 0. 요약
 
-| 항목 | 결정(안) |
+| 항목 | 결정 |
 |---|---|
-| 백본 | Ray+IR **3906** (sha f3e7afe5…, deployment_manifest iteration 3906). aug149 5737과 혼동하지 않는다 |
-| 권한 경계 | **gdm**: 목적지, 경로, 갈림길, 다음 계단, 회전의 시작과 끝, 외부 조건 c<br>**정책**: 주어진 단일 경로 안에서 장애물 회피, 중앙 정렬, 계단 정렬, 불가 시 정지<br>**감독기 (RL 밖)**: 명령 중재, 계단참 FSM, 안전 정지(hold 제어기로 전환) |
-| 정책 형태 | 관절을 직접 출력하는 단일 정책. 비교 기준으로 "감독기 + 기존 3906 보행" 2단 구조를 둔다(9장) |
-| 기존 입력 | 고유감각 46(명령 3칸 포함) + CENet 230, 하방 지형 [h, valid, IR] 187 × 8프레임. **의미·단위·순서를 그대로 유지** |
-| 새 입력 | ① 장애물 지도 (넓은 지도 + 근거리 정밀 지도)<br>② 핸들 사용자 상태<br>③ NavSkill 명령 (mode, go, 상한값, 단계 표시)<br>④ 외부 조건 c |
+| 백본 | Ray+IR **3906** (sha f3e7afe5…). aug149 5737과 혼동하지 않는다 |
+| 권한 경계 | **gdm**: 목적지, 경로, 갈림길, 다음 계단, 회전 시작·종료, 조건 c, 하강 승인(선택)<br>**정책**: 주어진 단일 경로 안에서 장애물 회피, 중앙·오프셋 정렬, 계단 정렬, 불가 시 정지<br>**감독기 (RL 밖)**: 명령 중재, mode 전환, 계단참 FSM, 안전 감시, hold 전환 |
+| 정책 형태 | 관절을 직접 출력하는 단일 정책. 비교 기준은 "감독기 + 기존 3906 보행" 2단 구조 |
+| 기존 입력 | 고유감각 46(명령 3칸 포함) ×4 + CENet 230 + 하방 지형 [h, valid, IR] 187×8. 의미, 단위, 순서를 유지한다 |
+| 새 입력 | ① 넓은 장애물 지도<br>② 근거리 clearance 지도<br>③ NavSkill 명령 (mode, go, 상한)<br>④ 계단참 phase<br>⑤ 조건 c |
 | 학습 규모 | onvlm2 GPU 0·1·2 DDP, `--total_envs 4096` (rank당 1366/1365/1365), horizon 100 |
-| iteration | **최대 예산 15k** (A ≤3k / B ≤7k / C ≤5k). 먼저 100–300 update pilot으로 실제 비용을 재고, gate를 통과해야 다음 단계로 간다 |
+| iteration | 기대 **약 6k** (pilot + A 1k + B 3k + C 2k). 상한 15k (A ≤3k, B ≤7k, C ≤5k). 단계 gate를 통과해야 다음 단계로 간다 (7.6) |
+| 시간 | 기대 약 2–2.5일 (학습 1.5–1.8일 + 단계 평가). 상한 15k면 약 3.6–4.5일. pilot에서 다시 산정한다 |
+
+**보장에 대한 원칙**
+- 학습은 행동 경향만 만든다.
+- 감독기는 명령을 제한하고, 위반이 감지되면 hold로 전환한다.
+- 시계방향 준수, 비접촉, 정지 거리는 **시험 결과(0/N과 신뢰 상한)로만** 주장한다.
 
 ---
 
 ## 1. 요구 기능과 성공 기준
 
-**수치 기준의 성격**
-- 성공 기준 수치는 **개발 gate 제안**이다. 사람 가까이에서 운용해도 된다는 승인 기준이 아니다.
-- 유한 시험에서 사고가 없었다면 "0/N"과 신뢰 상한을 함께 보고한다.
-  - 예: 12회 모두 사고 0이어도, 단측 95% 사고확률 상한은 약 22%다.
+수치는 개발 gate용이며 사람 근접 운용의 승인 기준이 아니다. 유한 시험에서 사고가 0건이면 "0/N"과 단측 95% 상한을 함께 적는다(예: 0/12 → ≈22%).
 
 ### 1.1 좁은 통로 통과 (개찰구, 엘리베이터 문, 지하철 문, 좁은 복도)
 
-| # | 요구 | 성공 기준 (안) |
+| # | 요구 | 성공 기준 |
 |---|---|---|
-| P1 | 시각장애인이 로봇 **오른쪽 뒷다리 옆**에서 하네스를 잡는다. 로봇의 비충돌이 1순위다. 다만 **사람과 접촉해도 된다는 뜻은 아니다.** 로봇과 사람이 함께 통과할 수 없으면 정지한다 | feasible 장면 안전 완주 ≥95%. 구조물·사람 접촉 0/N |
-| P2 | 통로 중앙에 정렬한다. 외부 조건 `y_off`로 옆 오프셋을 준다 | y_off = 0일 때 중심선 오차 < 5 cm |
-| P3 | 진입 불가, 충돌 우려, 판단 불가(unknown)이면 결정 지점 전에 안전하게 정지한다 | refusal recall ≥95%, false-stop ≤5% |
+| P1 | 시각장애인이 오른쪽 뒤에서 하네스를 잡는다. 로봇·사람·승객 모두 비접촉이 필수다 | feasible 장면 안전 완주 ≥95%, 접촉 0/N |
+| P2 | 통로 중앙에 정렬하고, 조건 `y_off`만큼 옆으로 비킨다 | y_off 추종 오차 < 5 cm |
+| P3 | 통과할 수 없거나 판단할 수 없으면 결정 지점 전에 정지한다 | refusal recall ≥95%, false-stop ≤5% |
 
-**통로 폭과 여유**
-- 필요 폭 = `W_swept + 2·margin + 불확실성 여유`
-  - `W_swept`는 보행 중 다리가 쓸고 지나가는 폭의 실측값이다.
-- 로봇 폭 0.45 m는 다시 측정한다. 실제 collision geometry와 걸음새별 swept envelope를 쓴다.
-- 0.55 m 개찰구는 명목상 한쪽 여유가 5 cm다. 통과로 분류할지는 측정 결과를 보고 사용자가 정한다(10장).
-- 통로·차량 치수는 공개 자료와 도면을 따른 **무작위화 가정**이다. 실측 근거로 확정할 항목은 10장에 둔다.
+**통과 판정 (확정)**
+- 통로 폭 ≥ `W_swept + 2·margin`이면 시도하고, 아니면 정지한다.
+  - `W_swept`는 다리를 포함한 로봇의 걸음새별 swept 폭이며, 구현 전에 실측한다.
+- 0.9 m 장애인용 개찰구를 포함해 모든 통로에 같은 규칙을 쓴다. 특정 폭을 기준으로 두지 않는다.
+- 측정 불확실성은 margin과 별도로 감독기가 inflate한다.
 
 ### 1.2 좁은 공간 시계방향 제자리 회전 (지하철 안, 엘리베이터 안)
 
-| # | 요구 | 성공 기준 (안) |
+| # | 요구 | 성공 기준 |
 |---|---|---|
-| R1 | 열차 가감속(가정 범위, 7.5)을 견디며 회전한다 | 넘어짐 0/N |
-| R2 | 의자·사람·기둥과 접촉 없이 회전한다 | 접촉 0/N |
-| R3 | TURN 모드에서는 시계방향으로만 돈다 (위에서 볼 때 ωz < 0) | 양의 yaw 누적 ≤ 허용치(평가 기준, 제안 3°). 실행 중에는 감독기가 개입 기준(설정값, 제안 2°)에서 hold로 전환한다. 두 값 모두 학습에 넣지 않는다 |
-| R4 | 회전이 불가능하거나 판단할 수 없으면 회전하지 않고 정지한다 | refusal recall ≥95% |
-| R5 | 제자리를 유지한다. 기준점은 회전 시작 시점의 **차량 바닥 좌표계** 몸 중심이다 | 중심 이동 < 5 cm |
-| R6 | 회전 종료는 gdm이 정한다. gdm이 odom으로 목표 각도를 보고 mode를 바꾸거나 정지시킨다 | 종료 명령 후 정지 응답 p95 < 0.5 s (제안) |
+| R1 | 열차 가감속(가정 범위, 7.5)을 견딘다 | 넘어짐 0/N |
+| R2 | 의자·사람·기둥과 접촉하지 않는다 | 접촉 0/N |
+| R3 | TURN 모드에서는 시계방향(ωz < 0)으로만 돈다 | 양의 yaw 누적 ≤ 허용치 (아래) |
+| R4 | 회전 swept 원 + margin이 들어가지 않거나 판단할 수 없으면 회전하지 않는다 | refusal recall ≥95% |
+| R5 | 제자리를 유지한다. 기준은 회전 시작 시의 차량 바닥 좌표 | 회전 중 **최대** 중심 이동 < 5 cm |
+| R6 | 회전 종료는 gdm이 odom 각도로 정한다 | 종료 명령 → 정지 p95 < 0.5 s |
+
+- R3의 두 수치는 학습에 넣지 않는다.
+  - 허용치: 평가 설정, 제안 3°.
+  - 실행 중 개입: 감독기 설정, 제안 2°.
 
 ### 1.3 계단 정렬 오르내리기 (단일 경로)
 
-| # | 요구 | 성공 기준 (안) |
+| # | 요구 | 성공 기준 |
 |---|---|---|
-| S1 | 상위는 전진/정지(go)만 준다. **갈림길과 다음 계단은 gdm이 고른다. 학습 장면은 단일 경로만 쓴다** | — |
-| S2 | 계단 방향에 스스로 정렬하며 오르내린다. 작은 좌우 yaw 보정을 허용한다(NAV 모드에는 시계방향 제한이 없다) | yaw 오차 < 5°, 계단 이탈 0/N |
-| S3 | 장애물이 있으면 좌우로 걸어 가용 폭의 중앙(+ y_off)에 정렬한다. 폭이 넓어지면 다시 중앙으로 돌아간다 | 중심선 오차 < 5 cm, 접촉 0/N |
-| S4 | 계단참에 도착하면 정지한 뒤 내려간다 (FSM, 3.5) | dwell 이행 100%, release 성공 ≥95% |
+| S1 | 상위는 go만 준다. 갈림길과 다음 계단은 gdm이 고르고, 학습은 단일 경로만 한다 | — |
+| S2 | 계단 방향에 스스로 정렬한다 (NAV 모드, 양방향 yaw 보정) | yaw 오차 < 5°, 이탈 0/N |
+| S3 | 장애물이 있으면 가용 폭의 중앙(+y_off)에 정렬한다 | 중심선 오차 < 5 cm, 접촉 0/N |
+| S4 | 계단참에서 네 발이 접지하면 일시 정지한 뒤 하강한다 (3.5) | dwell 이행 100%, release 성공 ≥95% |
 
 ---
 
@@ -91,28 +102,21 @@
 
 ```
 기존 (3906에서 이관, 의미 유지)
-  고유감각 46 (vx, vy, ωz 3칸 포함) ─┬───────────────────────────────┐
-  CENet 230 → z_t 19 ────────────────┘                               │
-  하방 지형 [h,v,IR]×187×8 → GAST encoder → latent 32 ───────────────┤
-새로 추가                                                             ├─► actor MLP ─► 관절 12
-  넓은 장애물 지도 (3.2) → 장애물 CNN → 32 ── FiLM(c) ── [연결 열 0] ─┤
-  근거리 정밀 지도 (3.2) → 작은 CNN → 16 ──────────────── [연결 열 0] ─┤
-  핸들 사용자 상태 (3.3) 8 ────────────────────────────── [연결 열 0] ─┤
-  NavSkill 명령 (3.4) + 단계 표시 (3.5) + 조건 c (4) ──── [연결 열 0] ─┘
-critic: 위 전부 + 특권 정보 (GT 여유 거리 / SDF, 상태별 가능·불가·unknown 표시, GT 사람, 차량 가속도)
-감독기 (RL 밖): 명령 어댑터 → 계단참 FSM → 안전 감시 → [정상: NavSkill | 위험: hold 제어기]
+  고유감각 46 ×4 step (vx, vy, ωz 3칸 포함) ─┬─────────────────────────────┐
+  CENet 230 → z_t 19 ─────────────────────────┘                             │
+  하방 지형 [h,v,IR]×187×8 → GAST encoder → latent 32 ──────────────────────┤ actor 기존 층 (W_old)
+새로 추가 (additive adapter, 7.1)                                           │      +
+  넓은 장애물 지도 (3.2a) → 장애물 CNN → 32 ─┐                              │ actor 새 열 (W_new, 0 초기화)
+  근거리 clearance (3.2b) → 작은 CNN → 16 ───┼── concat ────────────────────┘      → MLP → 관절 12
+  NavSkill 명령 (3.4) + phase (3.5) + 조건 c (4) ┘
+critic: 위 전부 + 특권(GT SDF, 물리적 feasibility, 관측 가능성, 차량 가속도, 감독기 개입 상태)
+감독기 (RL 밖): 명령 어댑터 → mode handshake → 계단참 FSM → 안전 감시 → [NavSkill | hold 제어기]
 ```
 
-**초기화 원칙**
-- 새 encoder 내부는 정상적으로 초기화한다.
-- actor 첫 층에서 **새 입력에 연결되는 열만 0**으로 둔다.
-- FiLM은 identity(γ=1, β=0)로 시작한다.
-- 그러면 기존 입력이 같을 때 시작 행동이 3906과 같다. 시작 전에 parity 검사로 확인한다(7.1).
-- "장애물 feature = 0"이 "장애물 없음"이나 "센서 unknown"을 뜻하지는 않는다. unknown은 지도 채널에 명시한다.
-
-**배포 계약**
-- **하방 지형 하위 계약은 유지한다.** 17×11, 10 cm, 8프레임, 프레임 폭 561, GSC2.
-- **전체 배포 계약은 v2로 바뀐다** (6장 T8). Pilot, sidecar, exporter, sim_docker 실행기를 함께 수정해야 한다.
+- 조건 c는 **concat으로 시작**한다. FiLM은 ablation으로 필요성을 확인한 뒤 별도 계약으로 추가한다. v0.2 그림의 FiLM은 뺐다.
+- 새 encoder 내부는 정상 초기화한다. actor 쪽 새 연결(W_new)만 0으로 둔다.
+- "장애물 feature 0"은 "장애물 없음"이 아니다. unknown은 지도 채널로 따로 표시한다.
+- 하방 지형 하위 계약(17×11, 10 cm, 8프레임, 폭 561, GSC2)은 유지한다. 전체 배포 계약은 v2로 바뀐다 (6장).
 
 ---
 
@@ -120,128 +124,150 @@ critic: 위 전부 + 특권 정보 (GT 여유 거리 / SDF, 상태별 가능·�
 
 ### 3.1 센서 독립의 의미
 
-- 정책은 원시 센서를 보지 않는다. "센서 처리기"가 몸 중심 공통 표현으로 바꿔 넘긴다.
-- "센서 독립"은 **같은 계약과 검증된 오차 범위 안에서 센서를 바꿀 수 있다**는 뜻이다. 관측 범위, 정확도, 지연이 달라지면 정책을 다시 검증한다.
-- 학습에서는 센서 family를 무작위로 샘플한다. 장착 위치, FOV, 거리, 레이 밀도, 몸과 핸들의 가림을 바꾼다. 배포 후보 조합은 따로 검증한다.
-- 예: Mid-360의 수직 FOV는 −7°…+52°이고 근거리 검출에 제한이 있다. 실측 coverage로 요구를 확인해야 한다.
+- 정책은 원시 센서를 보지 않는다. 처리기가 몸 중심의 공통 표현으로 바꾼다.
+- "센서 독립"은 **같은 계약과 검증된 오차 범위 안에서 교체 가능**하다는 뜻이다. 범위, 정확도, 지연이 바뀌면 다시 검증한다.
+- 학습에서는 센서 family를 무작위로 바꾼다: 장착 위치, FOV, 거리, 레이 밀도, 가림.
 
 ### 3.2 장애물 지도
 
 **(a) 넓은 지도 (정책 입력)**
 
-| 항목 | 설계(안) |
+| 항목 | 설계 |
 |---|---|
-| 좌표 | 몸 yaw 정렬, 몸 중심 원점, 셀 중심 기준 |
-| 범위 | x −2.4…+2.4 m, y −2.1…+2.1 m. 10 cm → **49 × 43**. 근거: 뒷 hip(x −0.312, y ±0.09; sidecar FK)에서 반경 2 m 원 두 개의 합집합이 x −2.31…+1.69, y ±2.09다 |
-| 높이대 | **국소 지지면 기준.** 셀마다 그 칸 지지면 높이(하방 지형 또는 support mesh)에서 잰다. global floor 기준이 아니므로 위층 계단 디딤판은 장애물이 아니다 |
-| B1 | 0.03–0.30 m: 발·다리, 낮은 짐 |
-| B2 | 0.30–0.80 m: 몸통, 좌석면, 개찰구 날개 |
-| B3 | 0.80–2.20 m: 사람 몸통, 손잡이, 문틀 (핸들 사용자 머리 높이 포함) |
-| 칸 값 | 높이대마다 3상태 **occupied / free / unknown** (2 bit). 레이 첫 히트까지 지나간 공간만 free, 히트한 칸은 occupied, 그 뒤는 unknown |
-| 시간 | 현재 프레임 + 과거 2프레임 (10 Hz 캡처). 프레임마다 캡처 timestamp, pose, age를 둔다 |
-| warp 규칙 | ego warp는 정적 배경만 맞춘다. 움직이는 사람의 ghost는 age로 구분한다. warp 보간 때문에 occupied가 지워지거나 free가 넓어지면 안 된다 |
-| 오래된 정보 | 셀별 TTL(제안 0.5 s). 지나면 unknown이 된다. reset 때 이전 episode의 정보를 전부 지운다 |
+| 좌표·범위 | 몸 yaw 정렬, 몸 중심 원점, 셀 중심 기준. x −2.4…+2.4 m, y −2.1…+2.1 m, 10 cm → **49 × 43** |
+| 높이대 | **추정 지지면 기준**. B1 0.03–0.30 m, B2 0.30–0.80 m, B3 0.80–2.20 m |
+| 칸 값 | 높이대마다 2 bit: 0 = unknown, 1 = free, 2 = occupied, 3 = 예약(받으면 거절) |
+| 칸 age | 높이대별 마지막 관측 이후 시간. 4 bit, 0.1 s 단위로 0–1.5 s. 15는 "≥1.5 s 또는 없음" |
+| 시간 | 현재 + 과거 2 프레임 (10 Hz). 프레임마다 sample pose와 timestamp를 붙인다 |
+| TTL | 칸 age가 0.5 s를 넘으면 unknown으로 처리한다. 처리기와 정책 쪽 history가 같은 규칙을 쓴다 |
 
-**(b) 근거리 정밀 지도 (정책 입력)**
+**지지면 추정 (UPDATE156 C)**
+- 칸별 지지면은 **센서가 관측한 바닥·디딤판 점에서만** 만든다.
+  - 이미 관측된 바닥과 연결되어 있어야 한다.
+  - 단차는 ≤0.25 m, 경사는 제한 범위 안이어야 한다.
+  - 하방 지형(17×11)과 넓은 지도 쪽 관측을 함께 쓴다.
+- 좌석 상판처럼 바닥과 연결되지 않은 수평면은 지지면이 아니라 B2 occupied다.
+- 지지면을 모르는 칸은 모든 높이대를 unknown으로 둔다.
+- GT support mesh는 actor 입력에 쓰지 않는다. critic과 oracle에만 쓴다.
 
-| 항목 | 설계(안) |
+**free 판정**
+- 레이 첫 히트까지 지나간 구간만 free 증거다.
+- 한 칸×높이대를 free로 판정하려면 그 체적을 지난 레이가 2개 이상이고, 칸 높이 범위의 50% 이상을 덮어야 한다(제안). 증거가 부족하면 unknown이다.
+- 자기 몸 히트는 지우되, 그 뒤를 free로 만들지 않는다.
+- 같은 레이에서 정적 메시 히트와 해석적 동적 물체 히트(사람 capsule, 문·날개 box) 중 **가장 가까운 것**을 쓴다.
+
+**움직이는 물체**
+- 짧은 history는 ego-motion만 정렬한다. 같은 age의 정적 물체와 동적 물체는 구별할 수 없다.
+- occupied는 TTL까지 보수적으로 유지한다. warp 보간 때문에 occupied가 지워지거나 free가 넓어지지 않게 한다.
+
+**(b) 근거리 clearance 지도 (정책 입력)**
+
+| 항목 | 설계 |
 |---|---|
-| 범위 | 몸 외곽 주변 x −0.9…+0.9 m, y −0.6…+0.6 m. 5 cm → **37 × 25** |
-| 값 | 가장 가까운 occupied까지의 거리 (clearance/SDF, 0–0.5 m에서 절단) + unknown 마스크 1개 |
-| 목적 | 5 cm 여유를 판단하는 근거. 10 cm 칸의 양자화 오차(대각선 약 7 cm)를 피한다 |
+| 범위 | x −0.9…+0.9 m, y −0.6…+0.6 m, 5 cm → **37 × 25** |
+| 값 | **clipped unsigned clearance**: 가장 가까운 occupied 경계까지 거리 0–0.5 m, uint8 (1/255 × 0.5 m). 0은 occupied 위이거나 접촉 거리 |
+| 채널 | ① 하단(B1+B2) clearance ② 상단(B3) clearance ③ unknown bit |
+| 생성 | 10 cm 지도를 업샘플하지 **않는다**. 원시 점·레이로 5 cm 점유 격자를 따로 만든 뒤 거리 변환한다. 가장자리 효과를 피하려고 계산 영역은 ROI보다 사방으로 0.5 m 넓게 잡는다 |
+| 한계 | 칸 중심 기준 대각선 오차가 약 3.5 cm라서, 이것만으로 5 cm margin을 보장하지 않는다. 감독기가 불확실성만큼 inflate한다 |
 
-**(c) 안전 지도 (감독기 전용, 정책 입력 아님)**
-- 후방 두 원 전체와 회전 swept 영역을 담는다.
-- 실제 장애물 기하를 불확실성만큼 inflate해서 쓴다.
+**(c) 안전 지도 (감독기 전용)**
+- 후방 coverage 전체와 회전 swept 영역을 담는다.
+- 센서로 얻은 기하에 불확실성과 unknown을 반영한다. 배포에서는 GT를 쓰지 않는다.
 
-**학습 시 관측 생성 (T2)**
-1. 센서 원점에서 레이를 쏜다.
-2. 같은 레이에서 **정적 메시 히트와 해석적 동적 물체 히트 중 가장 가까운 것**을 고른다.
-   - 해석적 동적 물체: 사람(capsule), 문과 개찰구 날개(box).
-   - 따로 만든 raster를 OR로 합치는 방식은 쓰지 않는다.
-3. 자기 몸 히트를 지운다. 이때 지운 히트 뒤를 free로 만들지 않는다.
-4. 다음 오차를 넣는다: extrinsic 오차, 스캔 내 시간차, 투명·반사면 dropout, 덩어리 손실, 지연 0–150 ms, blackout.
-5. 보이지 않는 GT 형상은 critic과 feasibility 판정에만 남긴다.
+**센서 coverage 가정 (확정)**
+- 전방: Ouster + Mid-360. 지면부터 천장까지 본다.
+- 후방: **좌우 뒷다리 바로 위(뒷 hip, x ≈ −0.31 m)를 기준으로 그 뒤쪽 영역 전체**를 지도 범위 안에서 본다고 가정한다.
+- 장착 위치는 확정하지 않는다. 학습에서 위치·각도를 무작위화하고 가림·잡음·결측을 넣는다.
 
-### 3.3 핸들 사용자 상태 — **삭제 (2026-10-18 사용자 결정: 사용자 추적은 넣지 않음)**
+### 3.3 핸들 사용자 상태 — 삭제
 
-- 값: 상대 위치 (x, y), 상대 속도 (vx, vy), 추적 신뢰도, 추적 age, 연결 상태, valid.
-- "추적을 잃음"과 "사람이 없음"을 구분한다. 추적이 끊겨도 GT로 대체하지 않는다.
-- 실제 공급원(후방 센서 추적기)은 아직 확인하지 못했다.
-  - 로컬에서 `gdm_obstacle_tracker_node`를 재사용할 파일을 찾지 못했다.
-  - 10장 결정 4번.
+- 사용자 결정(2026-10-18)으로 사용자 추적은 입력에서 뺐다.
+- 사람은 후방 장애물 지도에 occupied로 보이는 그대로 다룬다.
+- 시뮬레이터에는 핸들 사용자를 물리 물체로 그대로 둔다 (5장).
 
-### 3.4 명령: 기존 3칸 유지 + NavSkill 명령 추가 (어댑터)
+### 3.4 명령: 기존 3칸 유지 + NavSkill 명령 (어댑터)
 
-3906은 heading 명령으로 학습했지만, actor가 실제로 받는 값은 이미 `(vx, vy, ωz)`다. heading 오차는 command generator 안에서 ωz로 바뀐다.
-따라서 이번 변경은 "입력을 바꾸는 것"이 아니라 **명령 생성 과정과 분포를 바꾸는 것**이다.
-`V21VelocityCommand`의 계단 heading 강제와 `platform_gap_commands`의 갭 heading 설정도 함께 다룬다.
+actor는 이미 `(vx, vy, ωz)`를 받는다. 이번 변경은 **명령 생성기와 분포**를 바꾸는 것이다.
+- `V21VelocityCommand`의 계단 heading 강제와 `platform_gap_commands`의 heading 설정은 LEGACY 모드에서만 실행한다.
 
 | 입력 | 값 | 의미 |
 |---|---|---|
-| 기존 3칸 (46 안) | vx, vy, ωz | 모드별로 어댑터가 채운다. scale과 history 순서는 유지한다<br>LEGACY: 3906과 같음<br>NAV: (go·v_cap, 0, 0)<br>TURN: (0, 0, turn_rate) |
-| `mode` | one-hot {LEGACY, NAV, TURN} | 셋은 서로 배타적이다. gdm이 명시적으로 보낸다 |
-| `go` | 0 / 1 | **go=0이면 모든 mode보다 우선한다** |
-| `v_cap` | 0.3–1.0 m/s | 속도 상한. 목표 속도는 경로 진행 속도이고 v_cap을 넘지 않는다 |
-| `turn_rate` | −1.0…0 rad/s | TURN 모드 전용. 어댑터가 `min(turn_rate, 0)`으로 clamp한다 |
+| 기존 3칸 | vx, vy, ωz | 어댑터가 모드별로 채운다<br>• LEGACY: 3906과 같다<br>• NAV: (effective_go·v_cap, 0, 0)<br>• TURN: (0, 0, effective_turn_rate)<br>단위·scale은 같다. 다만 NAV의 vx는 "상한을 목표속도 형식으로 넣은 것"이라 의미가 완전히 같지는 않다 |
+| `active_mode` | one-hot {LEGACY, NAV, TURN} | 감독기가 handshake를 마친 모드 |
+| `effective_go` | 0 / 1 | 감독기가 적용한 go. 요청 go가 1이어도 계단참·hold·unknown 대기 중에는 0일 수 있다 |
+| `v_cap` | 0.3–1.0 m/s | **NAV1에만 둔다** (조건 c에서 뺐다) |
+| `effective_turn_rate` | `clamp(requested, −min(turn_cap, ω_max_verified), 0)` | TURN 전용 |
+
+**우선순위**: invalid·NaN·timeout > go=0 > 계단참 FSM·hold > mode 명령 > 속도·회전 상한.
+
+**mode handshake**
+- 순서: requested_mode → STOPPING → STABLE(안정 정지 확인) → active_mode.
+- gdm은 active_mode, ack, hold_reason을 돌려받는다.
+- 중복 메시지가 와도 TURN 시작점(기준 yaw)을 다시 잡지 않는다. manoeuvre ID로 구분한다.
 
 **보상 masking**
-- NAV 모드에서는 기존 lin_vel_xy·ang_vel_z 추종 보상을 끄고, 경로 축 기준 진행 보상으로 바꾼다. 정책이 스스로 옆걸음과 yaw 정렬을 해도 처벌받지 않게 하기 위해서다.
-- LEGACY 모드에서는 기존 보상을 그대로 쓴다.
-
-**명령 무결성**
-- 범위를 넘거나 NaN이면 거절한다.
-- 통신 timeout이면 go=0으로 처리한다.
-- mode를 바꿀 때는 정지를 거친다.
-- 조건 c를 바꿀 때는 rate limit을 건다.
+- NAV: 기존 xy·yaw 추종 보상을 끄고, 경로 축 진행 보상을 쓴다.
+- TURN: 기존 yaw 추종 대신 새 회전 보상을 쓴다. 앞뒤·좌우 drift와 속도 상한 관리는 유지한다.
+- LEGACY: 기존 보상 그대로.
 
 ### 3.5 계단참 FSM (감독기, 학습·배포 공통 코드)
 
 ```
-APPROACH ─(계단참 진입 event)→ LANDING_ENTERED ─(안정 정지 조건 충족)→ DWELL
-DWELL ─(dwell ≥ T_stop & go=1)→ RELEASED → DESCEND ─(첫 하강 단 통과)→ APPROACH (re-arm)
-어느 상태든 go=0이면 그 자리에 정지하고 timer를 유지한다. 외부 stop이 시간 만료보다 우선한다.
+APPROACH ─(hint arm + 감지 확인)→ PRE_BRAKE ─(정지 envelope 지점)→ LANDING_ENTERED
+LANDING_ENTERED ─(네 발 접지 + 안정 정지)→ DWELL ─(landing_release 수락)→ RELEASED → DESCEND
+DESCEND ─(현재 계단참 이탈 확인 + 다음 구간 전이)→ APPROACH (re-arm)
 ```
 
-- **계단참 진입 event**
-  - 조건: 단일 경로 장면에서 오르막 계단 다음에 평지가 0.6 m 이상 이어지고, 그 앞에 내리막 모서리가 있다.
-  - 판정 근거: 하방 지형과 넓은 지도의 지지면. 학습과 배포가 같은 함수를 쓴다.
-  - gdm route hint로 대체해도 된다.
-- **dwell timer**
-  - 선속도 < 0.05 m/s, |ωz| < 0.1 rad/s, 네 발 접지일 때만 증가한다.
-  - 기준은 차량 바닥 좌표계다.
-  - 계단참 이전에 다른 곳에서 서 있던 시간은 세지 않는다.
-- **정책 입력**: phase one-hot, dwell 진행률(dwell / T_stop, 0–1).
-- **보상 충돌 해소**: v2.1의 `stair_stall`은 DWELL 상태에서만 끈다.
-- **release (확정 2026-10-18)**: 하강 재개 명령의 입력 통로는 **하나**다. 이 통로에 세 가지 소스가 명령을 넣을 수 있다.
-  - **입력 통로**: NAV1의 `landing_release`
-    - 필드: landing ID, seq, 소스 태그 {AUTO, GDM, USER}, timestamp
-    - FSM은 소스와 관계없이 같은 규칙으로 처리한다.
-  - **AUTO**: FSM이 스스로 낸다. 조건은 안내 음성이 끝난 뒤 0.5 s 지났고, 그때까지 안정 정지를 유지했으며, go=1인 것이다.
-  - **GDM**: gdm이 승인으로 보낸다.
-  - **USER**: 사용자 음성 입력을 ROS 토픽으로 받는다. **지금은 구현하지 않는다.**
-  - **어떤 소스든 공통으로 확인하는 조건**
-    - 현재 landing ID와 일치하는가
-    - DWELL 상태이고 안정 정지 중인가
-    - 다음 하강 지지면이 관측되는가
-    - go=1이고, 활성 hold가 없는가
-    - 명령이 신선한가
-  - 조건을 하나라도 못 맞추면 명령을 무시한다. 그 사유는 gdm에 돌려준다.
-  - **1차 구현 범위 (확정)**: AUTO만 구현해 자동 하강한다. 입력 통로와 소스 태그 구조는 처음부터 만들어 둔다. 나중에 GDM·USER는 통로에 붙이기만 하면 되고, FSM을 고치지 않는다.
-  - 어느 소스를 받을지는 실행 설정으로 정한다. 1차 기본값은 AUTO다.
-- **phase 이벤트와 음성 안내**: 감독기가 phase가 바뀔 때마다 이벤트를 낸다(같은 이벤트를 다시 알리지 않음).
-  - 이벤트는 gdm에 돌려주고, TTS로 안내한다.
-  - TTS는 TODO T1의 ZMQ 경로를 쓴다. 별도 스레드로 보내 제어 지연이 없게 한다.
+**감지 (혼합)**
+- gdm의 landing·next-segment hint로 FSM을 **arm**한다.
+- 현장 진입과 안정 정지는 **공통 감지 함수**로 확인한다.
+  - 근거: 하방 지형과 넓은 지도의 지지면.
+  - 판정: 오르막 다음 평지, 그 앞 내리막 모서리.
+  - 평지가 길어 내리막이 지도 밖이면 hint로 arm하고 "평지 지속"만 확인한다.
+- hint가 없거나 감지와 맞지 않으면 자동 하강하지 않는다. hold하고 gdm에 알린다.
+- 학습에서도 phase를 GT 라벨로 주지 않고, 배포와 같은 감지 함수 출력을 쓴다.
 
-  | 이벤트 | 안내 예시 |
-  |---|---|
-  | LANDING_ENTERED | "계단참입니다. 잠시 멈춥니다." |
-  | DWELL 시작 | 짧은 알림음 |
-  | RELEASED | "내려갑니다." |
-  | 정지 유지 | "잠시 대기합니다." |
+**사전 감속 (PRE_BRAKE)**
+- 진입을 확인한 뒤 제동하면 늦을 수 있다.
+- 실측 정지 envelope만큼 앞에서 감속을 시작한다.
 
-  - T_stop은 고정 1.0 s 대신 **안내가 끝나는 시점 + 0.5 s**로 둔다. TTS가 연결되기 전(1차)에는 안내 시간을 설정값(제안 2.0 s)으로 둔다.
-  - 시뮬레이터에서는 같은 메시지를 로그와 Console에 표시한다.
+**dwell**
+- 시작 조건: 네 발 접지(실기 contact estimator, debounce·hysteresis)와 안정 정지(선속도 < 0.05 m/s, |ωz| < 0.1 rad/s).
+- **연속 유지**를 요구한다. 미끄러짐, 발 이탈, 속도 초과가 생기면 timer를 0으로 되돌린다.
+- go=0이면 timer를 멈춘다(pause, reset 아님). 다시 시작할 때 안정 상태를 재검증한다.
+- 비상 정지는 dwell을 충족한 것으로 치지 않는다.
+
+**requested_go와 effective_go**
+- LANDING_ENTERED와 DWELL 동안 effective_go = 0이다. requested_go는 그대로 둔다.
+- 그래야 release 조건이 스스로 막히지 않는다.
+
+**release (확정)**
+- 입력 통로: NAV1의 `landing_release` **하나**. 필드는 landing ID, seq, 소스 {AUTO, GDM, USER}, timestamp.
+- 1차 구현은 **AUTO만**이다.
+  - 조건: 안내 시간(1차 설정값 2.0 s) + 0.5 s 동안 안정 정지를 유지했고, requested_go = 1.
+  - GDM 승인과 USER(음성 → ROS 토픽)는 나중에 이 통로에 붙인다. FSM은 고치지 않는다.
+- 소스와 관계없는 공통 조건. 하나라도 어긋나면 무시하고 사유를 gdm에 돌려준다.
+  - landing ID 일치
+  - DWELL 안정 정지 중
+  - 다음 하강 지지면이 관측됨
+  - requested_go = 1
+  - 활성 hold 없음
+  - 명령이 신선함
+
+**re-arm**
+- 현재 계단참을 벗어난 것을 확인하고 다음 구간으로 넘어간 뒤에만 다시 arm한다. "첫 하강 단 통과" 즉시가 아니다.
+- mode·route·odom reset, 센서 timeout, 새 landing ID가 오면 reset한다.
+
+**stall masking**
+- `stair_stall`은 감독기가 진행을 금지한 상태(PRE_BRAKE, LANDING_ENTERED, DWELL, hold, unknown 대기, 외부 stop)에서 모두 끈다.
+- 정상 APPROACH에서는 유지한다.
+
+**정책 입력**: phase one-hot, dwell 진행률(0–1).
+
+**phase 이벤트**
+- phase가 바뀔 때마다 gdm에 이벤트를 보낸다. 같은 이벤트는 다시 보내지 않는다.
+- 1차는 로그와 Console에 표시한다.
+- 나중에 TTS(ZMQ, TODO T1)로 안내한다. 예: "계단참입니다. 잠시 멈춥니다." / "내려갑니다."
 
 ---
 
@@ -249,44 +275,52 @@ DWELL ─(dwell ≥ T_stop & go=1)→ RELEASED → DESCEND ─(첫 하강 단 �
 
 | 조건 | 범위 | 의미 | 기본값 |
 |---|---|---|---|
-| `y_off` | −0.20…+0.20 m | **경로·계단 축 기준** 옆 오프셋 (+ = 진행 방향 왼쪽). 몸 y축 기준이 아니다 | 0 |
-| `margin` | 0.05–0.20 m | 한쪽 최소 여유. 불확실성 여유는 따로 둔다. 절대 하한은 감독기가 강제한다 | 0.10 |
-| `v_cap` | 0.3–1.0 m/s | 속도 상한 (3.4와 같음) | 1.0 |
+| `y_off` | −0.20…+0.20 m | **경로·계단 축 기준** 옆 오프셋 (+ = 진행 방향 왼쪽) | 0 |
+| `margin` | 0.05–0.20 m | 한쪽 최소 여유. 절대 하한은 감독기가 강제한다 | 0.10 |
 | `turn_cap` | 0.2–1.0 rad/s | 회전율 상한 | 0.6 |
 
+**장소별 예시 (확정, gdm이 설정)**
+
+| 장소 | 설정 |
+|---|---|
+| 계단 | `y_off` = 0 (중앙) |
+| 출입문 | `y_off` = +0.05~+0.10 m (조금 왼쪽, 사람 어깨 공간) |
+| 개찰구 | `y_off` = 0 (사람이 뒤로 서서 따라옴) |
+
+- 정책에는 장소 이름을 넣지 않고 숫자 조건만 넣는다.
 - **우선순위**: 충돌·관측 불확실성·하드웨어 한계 > margin > y_off·속도 추종.
-  - 보상 가중치만으로는 이 순서가 보장되지 않는다. 그래서 감독기도 같은 순서를 적용한다.
-- **불가능한 y_off**: 감독기가 가능한 구간으로 clamp하고, 요청값과 적용값을 gdm에 돌려준다(제안).
-- **넣는 방식**
-  - concat으로 시작한다. FiLM이 필요한지는 ablation으로 확인한다.
-  - 30% 에피소드는 기본값으로 학습한다.
-  - 일부 에피소드는 도중에 조건을 바꾼다. 이때도 rate limit을 건다.
-  - 조건이 누락되면 학습에 맡기지 않는다. runtime에서 기본값으로 바꾼다.
+  - 보상 가중치만으로는 이 순서를 보장할 수 없어서 감독기도 같은 순서를 적용한다.
+  - 불가능한 y_off는 가능한 구간으로 clamp하고, 요청값과 적용값을 gdm에 돌려준다. 그래도 안 되면 정지한다.
+- **학습**: 조건을 무작위로 준다. 30% 에피소드는 기본값이고, 일부 에피소드는 rate limit을 걸고 도중에 바꾼다.
+- 누락·NaN·timeout은 runtime에서 기본값이나 정지로 처리한다.
 
 ---
 
 ## 5. 학습 장면 (모두 단일 경로)
 
-| 장면 | 구성 (무작위화 가정) | 기능 |
+| 장면 | 구성 (무작위화) | 기능 |
 |---|---|---|
-| 개찰구 | 폭 0.50–1.00 m, 길이 1.2–2.0 m, 날개 높이 0.9–1.2 m. 날개는 해석적 동적 box | P1–P3 |
+| 개찰구 | 폭 0.50–1.00 m(0.9 m 장애인용 포함), 길이 1.2–2.0 m, 날개 0.9–1.2 m. 날개는 동적 box | P1–P3 |
 | 문 | 엘리베이터 0.7–1.1 m, 지하철 1.2–1.4 m, 문턱 0–3 cm, 승강장 갭 5–20 cm. 문은 동적 box | P1–P3, 갭 |
-| 좁은 복도 | 폭 0.6–1.5 m, 굽은 구간, 기둥, 짐. 갈림길 없음 | P1–P2 |
-| 지하철 차내 | 도면 기준(차체 2.65 m, 통로 1.2 m, 문 1.3 m, 긴 의자, 기둥) ±15%. 승객 0–4명 | R1–R6 |
+| 좁은 복도 | 0.6–1.5 m, 굽은 구간, 기둥, 짐 | P1–P2 |
+| 지하철 차내 | 도면 기준(차체 2.65 m, 통로 1.2 m, 문 1.3 m, 긴 의자, 기둥) ±15%, 승객 0–4명 | R1–R6 |
 | 엘리베이터 | 1.1–1.6 × 1.4–2.0 m, 탑승자 0–3명 | R2–R6 |
-| 장애물 계단 | 폭 1.2–3.0 m, 계단 위 장애물, 손잡이, 계단참. 갈림 없음 | S1–S4 |
-| 기존 지형 | 3906 구성(갭 50% 등), LEGACY 모드 | 회귀 방지 |
+| 장애물 계단 | 폭 1.2–3.0 m, 장애물, 손잡이, 계단참 | S1–S4 |
+| 기존 지형 | 3906 구성, LEGACY 모드 | 회귀 방지 |
+
+- 폭 범위는 가능·불가 사례를 둘 다 만들기 위한 것이다. 판정은 1.1의 swept 폭 규칙으로 한다.
+
+**사람 모델 (UPDATE156 수정)**
+- 핸들 사용자: 오른쪽 뒤 연결점을 따라오는 추종자. 반응 지연 0.2–0.6 s, 속도·가속 제한, 멈칫함, 손 놓음.
+- 다른 승객: 정지 또는 0–0.8 m/s 이동.
+- 이동 방식은 **collision-aware 궤적**이다. 로봇과 닿을 것으로 예측되면 멈추거나 경로를 바꾼다.
+  - kinematic pose로 로봇을 밀어 넣지 않는다. 힘 제한만으로는 관통을 막을 수 없기 때문이다.
+  - 침투가 생기면 그 장면을 폐기하고 기록한다.
+- 관측(capsule)과 물리 충돌체의 pose, 크기, 시간을 일치시킨다.
 
 **지형 스캐너와 구조물**
-- 하방 지형(T1)은 배포 매퍼처럼 **모든 기하를 본다.** 실제 v25or 매퍼도 좌석을 높이로 본다.
-- 학습과 배포의 의미를 맞추기 위해, 학습에서도 지형 스캐너에 구조물을 포함한다.
-- 단, 3906은 높은 벽을 거의 본 적이 없다(ring_fence ≤0.15 m). 그래서 단계 A 전에 "벽·좌석이 있는 E1"로 기존 경로가 어떻게 반응하는지 확인한다(UPDATE156 질문 Q3).
-
-**사람 모델**
-- 핸들 사용자: 오른쪽 뒤 연결점을 따라오는 추종자. 반응 지연 0.2–0.6 s, 속도·가속 제한, 멈칫함, 손 놓음을 넣는다.
-- 다른 승객: 정지해 있거나 0–0.8 m/s로 움직인다.
-- 관측(capsule)과 물리 충돌체는 pose, 크기, 시간을 일치시킨다.
-- kinematic 사람에는 힘 제한을 둔다. 로봇을 관통하거나 무한한 힘으로 밀면 안 된다.
+- 하방 지형은 배포 매퍼처럼 구조물을 포함해서 본다.
+- 다만 "모든 기하를 넣으면 v25or와 같다"고 가정하지 않는다. 단계 A 전에 검증 matrix(9장 V0)를 통과해야 한다.
 
 ---
 
@@ -294,275 +328,325 @@ DWELL ─(dwell ≥ T_stop & go=1)→ RELEASED → DESCEND ─(첫 하강 단 �
 
 | # | 구성 요소 | 변경 |
 |---|---|---|
-| T1 | 하방 지형 (Ray+IR) | 하위 계약은 그대로 둔다. 구조물이 들어가면서 입력 의미가 바뀌는지 확인한다 (5장) |
-| T2 | 장애물 지도 생성기 (학습) | 레이 first-hit. 정적 메시와 해석적 동적 물체를 같은 레이에서 비교. 지지면 기준 높이대, 2-bit 3상태, 5 cm SDF. GPU 텐서 연산 |
-| T3 | 장애물 지도 생성기 (배포) | 점군을 몸 좌표로 바꾸고 자기 몸을 지운다. free-space ray evidence와 셀별 TTL. sidecar(Python)로 시작해 나중에 C++로 옮긴다 |
-| T4 | RayCaster 제약 | Isaac `ray_caster.py`는 정적 메시 1개만 지원한다. 정적 구조물은 메시로 합치고, 동적 물체는 해석적 교차를 따로 계산한다. env 사이 오염을 막고 메시 수와 VRAM을 측정한다 |
-| T5 | 핸들 사용자 추적 | 학습은 GT에 지연·노이즈·추적 상실을 넣는다. 배포 공급원은 미확인 |
-| T6 | 천장 스칼라 | 폐지한다. B3를 2.2 m까지 넓혀 대신한다 |
-| T7 | MuJoCo sidecar | 장애물 지도, 사람, 문, 관성 외력, 감독기, FSM을 학습과 같은 코드로 구현한다. GT·센서·필터 단계를 따로 기록하고, 특권 정보 누출을 검사한다 |
-| T8 | **배포 계약 v2** | 아래 표 |
+| T1 | 하방 지형 (Ray+IR) | 하위 계약 유지. 구조물 포함 시 의미가 바뀌는지는 V0에서 검증 |
+| T2 | 장애물 지도 (학습) | 레이 first-hit, 정적과 동적을 같은 레이에서 비교, 관측 지지면, free 증거 규칙, 칸 age. GPU 텐서 연산 |
+| T3 | 장애물 지도 (배포) | 점군 → 몸 좌표, 자기 몸 제거, free-space ray evidence, 칸 age와 TTL. T2와 같은 규칙. sidecar(Python)로 시작해 C++로 옮긴다 |
+| T4 | 근거리 clearance | 원시 점·레이 → 5 cm 점유 격자 → 거리 변환. 학습과 배포가 같은 코드를 쓴다 |
+| T5 | RayCaster 제약 | Isaac `ray_caster.py`는 정적 메시 1개만 지원한다. 정적 구조물은 메시로 합치고, 동적 물체는 해석적 교차로 따로 계산한다. env 사이 오염을 막고 메시 수와 VRAM을 측정한다 |
+| T6 | MuJoCo sidecar | 장애물·근거리 지도, 동적 물체, 관성 외력, 감독기, FSM을 학습과 같은 코드로 구현한다. GT·센서·필터 단계를 따로 기록하고 특권 정보 누출을 검사한다 |
+| T7 | 장애물 지도 warp | 3상태 categorical 전용 warp: occupied 보존, free 비확장, 범위 밖은 unknown. 기존 `warp_memory`(bilinear, 11×17 고정)는 쓰지 않는다. Python·ONNX·C++ golden parity를 확인한다 |
+| T8 | **배포 계약 v2** | 아래 |
 
-**배포 계약 v2 패킷**
+**패킷**
 
-| 패킷 | 내용 | 크기 |
+| 패킷 | 내용 | 크기·전송 |
 |---|---|---|
 | GSC2 | 기존 지형 (변경 없음) | 기존 |
-| OBS1 | 넓은 지도 1프레임 (49×43 × 3 bands × 2 bit, bit-packed) + 근거리 SDF (37×25 uint8 + unknown bit) + seq, capture timestamp, pose | 약 1.6 kB + 1.0 kB → UDP datagram 하나 |
-| NAV1 | mode, go, v_cap, turn_rate, c, 핸들 사용자 상태, seq, timestamp, valid | < 100 B |
+| OBS1 | 넓은 지도 1 프레임 (2 bit 상태 + 4 bit age, 49×43×3) + 근거리 (37×25 × uint8 ×2 + unknown bit)<br>헤더: magic, version, length, 지도 해상도·원점·band 메타, sample pose, sample time(CLOCK_MONOTONIC), seq, reset epoch, CRC32 | 약 4.7 kB + 2.0 kB. **로봇 내부 local IPC(loopback 또는 shared memory)로만** 보낸다. 물리 네트워크로 보낼 때는 MTU 이하로 분할하고 완결 재조립과 만료를 명세한다 |
+| NAV1 (gdm → 감독기) | requested_mode, requested_go, v_cap, turn_rate, c, `landing_release`(ID, seq, 소스), manoeuvre ID, heartbeat, seq, timestamp | 필드 확정 후 산정 |
+| NAV1-ACK (감독기 → gdm) | active_mode, effective_go, phase, dwell 진행률, hold_reason, 적용된 c, release 거절 사유, phase 이벤트 | 같음 |
 
-- **history 구성**: 과거 프레임 history는 받는 쪽(Pilot)에서 만든다. GSC2와 같은 방식이다. Pilot은 자기 pose로 history를 쌓고, warp는 encoder ONNX 안에서 한다.
-- **패킷 검사**: 패킷마다 seq, freshness, 재정렬, 완결성을 검사한다.
-- **새 ONNX 입력**: 이름, 형상, 정규화, FiLM, 버전 메타데이터를 exporter(`gd_rbq10_deploy_vrl/export/gast_teacher_oracle.py`, `gd_lab_vrl/src/gd_lab/gast/action_export.py`)에 추가한다. torch → ONNX → Pilot parity를 확인한다.
-- **알려진 불일치 정리**: 현재 계약은 history 초기값을 `zeros`로 적어 두었다. 그런데 launcher는 `RBQ_VRL_HISTORY_INIT=repeat_first`를 쓴다. v2에서 하나로 고정한다.
-- **실기 경로 없음**: 현재 GAST 경로는 시뮬레이션 전용이다. Pilot은 `--interface lo --sim`에서만 GAST를 허용한다. 실기 pose 입력(`/odom`)도 아직 구현돼 있지 않다. 실기 배포 경로는 계약 v2와 함께 설계한다.
-- **지연 예산 (실시간 1급 기준, 측정 전 목표)**
+**인코딩·시간·pose 규칙**
+- bit 순서는 little-endian, x-fastest, band-major다. 예약 상태값 3을 받으면 패킷 전체를 거절한다.
+- OBS1의 pose는 **그 지도 snapshot을 표현한 sample pose**다.
+  - 수신 시 최신 pose로 대체하지 않는다.
+  - 받는 쪽은 sample pose에서 현재 pose로 한 번만 변환한다.
+- GSC2·OBS1·NAV1 사이 최대 skew를 정한다(제안 100 ms). 넘으면 unknown이나 정지로 처리한다.
 
-  | 구간 | 예산 |
-  |---|---|
-  | 정책 tick | 100 Hz (10 ms) |
-  | 장애물 지도 캡처 → 통합 | p95 ≤ 100 ms, p99 ≤ 150 ms |
-  | 새 encoder 추론 (로봇 CPU) | ≤ 1 ms |
-  | 감독기 판단 → hold 전환 | ≤ 1 tick |
+**exporter·초기화**
+- exporter(`gast_teacher_oracle.py`, `action_export.py`)에 새 ONNX 입력의 이름, 형상, 정규화, 버전 메타데이터를 추가한다.
+- torch → ONNX → Pilot parity를 확인한다.
+- history 초기화(`zeros` vs `repeat_first`): 기존 3906 reference의 실제 설정을 기록하고, v2에서 하나를 선택한 뒤 parity를 다시 확인한다. 기준 실행을 조용히 바꾸지 않는다.
 
-  - UPDATE154 CPU replay에서 RAW=0의 p95가 140 ms였다. 그래서 150 ms 안에 들어온다고 가정하지 않고 실측한다.
+**실기 경로**
+- 지금은 시뮬레이션 전용이다(`--sim`).
+- 실기 pose는 camel_pilot `/odom`이다. pose, 접지, 센서 시계, hold 통합 계약과 함께 포팅한다.
+
+**지연 예산 (측정 전 목표)**
+
+| 구간 | 예산 |
+|---|---|
+| 정책 tick | 10 ms (100 Hz) |
+| 캡처 → 지도 통합 | p95 ≤ 100 ms, p99 ≤ 150 ms |
+| 10 Hz 위상 | 최대 약 100 ms (별도 합산) |
+| 새 encoder 추론 | ≤ 1 ms |
+| 감독기 판단 → hold 전환 명령 | ≤ 1 tick |
+
+- "전환 명령 ≤ 1 tick"이 실제 정지가 1 tick에 끝난다는 뜻은 아니다. 실제 정지 시간은 따로 측정한다.
 
 ---
 
 ## 7. 변경 범위 ② — PPO 학습
 
-### 7.1 warm start = schema migration
+### 7.1 warm start = schema migration + additive adapter
 
-1. **고정 reference.** 원본 3906을 SHA, normalizer, 명령·history 계약과 함께 고정 보관한다.
-2. **검증 복사.** 3906 state dict를 key와 shape별로 검증하며 복사한다.
-   - 허용하는 확장은 세 가지다: actor 첫 층에 0 열 추가, critic 입력 확장, 새 encoder 추가.
-   - 변환한 전체 state를 strict load한다.
-   - 기존 `warm_start.py`는 새 key를 거부한다(첫 terrain conv widening만 허용). 그래서 migration 코드를 새로 만든다.
-3. **optimizer.** PPO optimizer는 새로 만든다. parameter group은 기존 경로와 새 경로로 나눈다. CENet optimizer도 새로 만든다.
-   - source iteration과 nav iteration·global sample 수를 따로 기록한다.
-   - strict resume은 NavSkill 첫 checkpoint부터 지원한다.
-4. **parity 검사 (학습 시작 조건).**
-   - 기존 관측에서 기존 행동을 유지한다.
-   - 새 입력이나 조건을 바꿔도 처음에는 행동이 같다.
+1. **고정 reference**: 원본 3906을 SHA, normalizer, 명령·history 계약과 함께 고정 보관한다.
+2. **migration**
+   - key와 shape별로 검증 복사한다.
+   - 허용 확장: actor 새 입력 열(W_new), critic 입력 확장, 새 encoder 2개, 새 입력 normalizer(새 통계). FiLM은 추가할 때 별도로 허용한다.
+   - 변환 후 전체를 strict load한다.
+3. **additive adapter**
+   - actor 첫 층을 `W_old·x_old + W_new·x_new`로 나눈다. W_new는 0으로 초기화한 **별도 Parameter**다.
+   - 같은 Parameter 텐서에 열을 붙이면, A0에서 기존 층을 동결할 때 새 열도 학습되지 않는다. 그래서 분리한다.
+4. **optimizer**
+   - PPO와 CENet optimizer를 새로 만든다. parameter group은 old와 new로 나눈다.
+   - source iteration과 nav iteration을 따로 기록한다.
+   - strict resume은 NavSkill 첫 checkpoint부터 한다.
+5. **parity (학습 시작 조건)**
+   - 기존 관측에서 기존 행동이 나온다. 어댑터가 값을 바꾸는 경우는 "같은 관측"이 아니므로 따로 표시한다.
+   - 새 입력이나 조건을 바꿔도 처음에는 행동이 같다 (W_new = 0).
    - normalizer와 history가 보존된다.
    - PyTorch와 ONNX가 일치한다.
-   - blackout·stale·reset 궤적이 일치한다.
-5. **기존 능력 보호.**
-   - 단계 A0(≤300 iter)에서는 CENet과 지형 encoder를 고정하고 새 경로만 학습한다.
-   - 그 뒤 기존 경로의 lr은 ×0.1로 둔다.
-   - LEGACY 장면에서는 고정한 3906 행동에 KL anchor를 건다. NAV/TURN 장면에서는 걸지 않는다.
-6. **mirror 증강.** 오른쪽 핸들, 시계방향, y_off 때문에 NAV/TURN 에피소드에서는 끈다. LEGACY 에피소드에만 기존 `mirror_gast`를 적용한다.
+   - blackout, stale, reset 궤적이 일치한다.
+6. **보호**
+   - A0 (≤300 iter): W_old, CENet, 지형 encoder, 기존 normalizer를 동결한다. 학습 대상은 W_new, 새 encoder, 새 normalizer, critic이다. 새 경로의 gradient norm을 확인한다.
+   - A0 이후: 기존 경로는 lr ×0.1로 둔다. LEGACY 장면에서만 고정 3906 행동에 KL anchor를 건다.
+7. **mirror**
+   - LEGACY 행에만 `mirror_gast`를 적용한다. mixed minibatch에서 LEGACY 행만 고른다.
+   - 새 채널(장애물 지도, phase, c)을 가진 행은 mirror하지 않는다.
+   - mirror된 행이 NAV/TURN으로 학습되지 않게 막는다.
 
 ### 7.2 변경 목록
 
 | # | 항목 | 현재 (3906) | 변경 |
 |---|---|---|---|
-| L1 | 시작점 | 3906 | schema migration warm start (7.1) |
-| L2 | 규모 | 1 GPU, 1024 env | DDP 3 GPU, `--total_envs 4096`. rank 평균 gradient의 작은 편향은 기록한다. 새 parameter·optimizer·normalizer·NaN collective 동기화를 검사한다 |
-| L3 | 명령 | heading 100%, 정지 20% | mode별 생성기 (7.3). heading 강제 로직은 LEGACY에서만 유지 |
-| L4 | 관측 | 46 + 230 + 지형 | + 장애물 지도 2종, 핸들 사용자 8, NavSkill 명령, phase, c |
-| L5 | 네트워크 | GAST encoder + MLP | + 장애물 CNN(→32), 근거리 CNN(→16), (FiLM). 새 연결 열은 0 |
-| L6 | critic | 깨끗한 지형 | + GT SDF, 상태별 feasibility 3분류, GT 사람, 차량 가속도 |
-| L7 | 보상 | v2.1 + clean gap | + 7.4. mode별 masking |
-| L8 | 외란 | 계단 핸들 외력, 짐 0/6 kg | + 열차 관성 외력 (7.5). 같은 외력 버퍼에 합산 |
-| L9 | 커리큘럼 | 지형 레벨 (family 평균 복원) | + stage, 폭, 밀도, 가속, 조건, 노이즈 스케줄. **전체 상태를 checkpoint에 저장** (기존 floor(mean) 복원은 부족) |
-| L10 | 종료 | 넘어짐 등 | + 구조물·사람 접촉(접촉력 기준). 사람과 접촉하면 즉시 종료 |
-| L11 | 저장 | float32 rollout | 장애물 지도는 **캡처 단위 uint8 / bit-packed + 중복 제거**. step에는 캡처 index와 age만 둔다. PPO update 때 encoder를 다시 계산한다. latent만 저장하지 않는다 |
-| L12 | 모델 선택 | online Top-5 | Top-5는 보조 지표 (scene × mode × 조건별 표본). 최종 선택은 9장 gate |
-| L13 | 넣지 않는 것 | — | mapper 오차 증강, fused SDPA, NAV/TURN의 mirror |
+| L1 | 시작점 | 3906 | migration + additive adapter (7.1) |
+| L2 | 규모 | 1 GPU, 1024 env | DDP 3 GPU, `--total_envs 4096`. rank 평균 gradient의 편향과 mode별 sample filtering에 따른 rank별 유효 sample 수를 기록한다 |
+| L3 | 명령 | heading 100%, 정지 20% | mode별 생성기와 handshake (3.4, 7.3) |
+| L4 | 관측 | 46×4 + 230 + 지형 | + 넓은 지도, 근거리 지도, NavSkill 명령, phase, c |
+| L5 | 네트워크 | GAST encoder + MLP | + 장애물 CNN(→32), 근거리 CNN(→16), additive adapter |
+| L6 | critic | 깨끗한 지형 | + GT SDF, 물리적 feasibility, 관측 가능성, 차량 가속도, 감독기 개입 상태 |
+| L7 | 보상 | v2.1 + clean gap | + 7.4, mode·phase별 masking |
+| L8 | 외란 | 계단 핸들 외력, 짐 0/6 kg | + 열차 관성 외력 (7.5). 같은 외력 buffer에 합산 |
+| L9 | 커리큘럼 | family 레벨 평균 복원 | stage, 폭, 밀도, 가속, 조건, 노이즈 스케줄, RNG, baseline hash, gate 결과를 **전체 저장**. reset-resume과 bit-exact 재개를 구별해 기록 |
+| L10 | 종료 | 넘어짐 등 | + 구조물·사람 접촉 (사람 접촉은 즉시 종료) |
+| L11 | 저장 | float32 rollout | 7.2.1 |
+| L12 | 모델 선택 | online Top-5 | 보조 지표(scene × mode × 조건별 표본). 최종 선택은 9장 |
+| L13 | 감독기 개입 | 없음 | 7.2.2 |
+| L14 | 넣지 않는 것 | — | mapper 오차 증강, fused SDPA, NAV/TURN mirror, 사용자 추적 입력, FiLM(1차) |
 
-**L2 주의**
-- `--num_envs 4096`로 쓰면 rank마다 4096이 되어 총 12288 env가 된다. 반드시 `--total_envs 4096`을 쓴다.
+#### 7.2.1 rollout 저장 (UPDATE156 보완)
 
-**저장량 추정 (넓은 지도 기준)**
+**저장 원칙**
+- 장애물 지도와 근거리 지도는 **캡처 단위 packed(bit/uint8) 불변 객체**로 pool에 넣는다.
+  - 키는 (env, reset epoch, capture seq)다.
+  - rollout과 update가 끝날 때까지 참조 count로 pin한다.
+- step마다 저장하는 것:
+  - 그 시점에 **이미 도착해 있던** 캡처 ID와 history ID
+  - current pose, 상대 warp, age
+  - phase, 적용된 c와 mode, effective_go, reset 표시
+- 나중에 도착한 캡처로 과거 step을 다시 만들지 않는다(미래 정보 누출 방지).
+- 센서 노이즈를 update 때 다시 뽑지 않는다. 저장된 packed 관측을 복원하고, encoder만 현재 parameter로 다시 계산한다.
+- old log_prob, value, action은 rollout 당시 값을 저장한다.
+- update 사이에 latent cache를 재사용하지 않는다.
+- minibatch 단위로 unpack → warp → encoder를 다시 계산한다. rollout 전체를 float32로 한 번에 풀지 않는다.
+- dense와 packed 경로의 obs, action, logprob, gradient parity를 확인한다.
 
-| 방식 | 크기 |
-|---|---|
-| v0.1: float32 3프레임을 매 step 저장 | 약 37.5 GB |
-| v0.2: 2 bit, 캡처 단위, 중복 제거. 49×43×3 bands × 2 bit ≈ 1.6 kB/캡처 × 10캡처 × 4096 env | 약 65 MB |
-| 근거리 SDF: 925 B/캡처, 같은 방식 | 약 38 MB |
+**저장량 (4096 env, 1 s rollout, 10 Hz)**
+- 신규 10 캡처 + 이전 2 캡처 = 12 캡처 × 약 6.7 kB (넓은 지도 상태+age + 근거리) ≈ **330 MB**.
+- 여기에 메타(pose, age, ID), critic GT SDF, 기존 지형·history storage가 따로 붙는다.
+- 최종 값은 pilot에서 peak VRAM으로 측정한다.
+
+#### 7.2.2 학습 중 감독기 개입 (UPDATE156 A)
+
+학습 env에서도 배포와 같은 감독기를 돌린다. hold나 clamp가 정책 행동을 대신한 transition은 다음과 같이 다룬다.
+- **기록**: 정책 제안 action과 log_prob, 실제 실행 controller ID와 action, override 사유.
+- **actor loss**: **정책이 실제로 제어한 transition에만** 적용한다. hold 구간은 actor loss에서 뺀다.
+- **value**: 개입도 환경 전이로 보고 계속 학습한다. 개입이 시작될 때 개입 페널티를 줘서 "아무렇게나 해도 hold가 살려 준다"를 학습하지 않게 한다.
+- **보고**: 감독기 있음(shielded)과 없음(unshielded) 성능을 따로 낸다. 정책 자체의 refusal 능력과 감독기 덕분의 무충돌을 구분하기 위해서다.
+- **DDP**: actor loss mask 때문에 rank별 유효 sample 수가 달라진다. 그 수를 기록하고, 필요하면 sample 수로 가중한다.
 
 ### 7.3 명령 분포 (에피소드 단위, 단계 B 기준)
 
 | 작업 | 비율 | 명령 |
 |---|---|---|
-| 통로 통과 | 25% | NAV, go=1 (중간에 go 전환), v_cap·y_off 무작위 |
-| 시계방향 회전 | 20% | TURN, turn_rate −0.2…−turn_cap. 무작위 시점에 mode를 바꿔 시작과 끝을 흉내 낸다 |
-| 계단 정렬 | 20% | NAV, go만. FSM 작동 |
-| 정지·출발 | 10% | go 무작위 전환. mode 전환 포함 |
-| 기존 지형 | 25% | LEGACY, 3906 분포 그대로 |
+| 통로 통과 | 25% | NAV, go 전환 포함, v_cap·y_off 무작위 |
+| 시계방향 회전 | 20% | TURN, turn_rate −0.2…−turn_cap. 다양한 자세·위상에서 시작과 종료 (handshake 경유) |
+| 계단 정렬 | 20% | NAV, go만, FSM 작동, AUTO release |
+| 정지·출발 | 10% | go 전환, mode 전환 (handshake 경유) |
+| 기존 지형 | 25% | LEGACY, 3906 분포 |
 
-에피소드 비율과 별도로 **실제 transition 비율과 task별 return·gradient 크기**를 기록한다.
+- 실제 transition 비율과 task별 return·gradient 크기를 기록한다.
+- TURN 커리큘럼 순서: 저속 → 중속, 정지 상태에서 진입 → 회전 중 정지 → blocked·unknown → 외란.
 
-### 7.4 보상 추가 (가중치는 구현할 때 조정)
+### 7.4 보상 추가
 
 | 보상 | 내용 |
 |---|---|
-| 여유 | 몸·다리 swept 외곽이 GT SDF 기준 margin보다 가까우면 페널티. 접촉은 큰 페널티 (사람 접촉은 종료) |
-| 중앙 정렬 | 가용 폭 중심선 + y_off 기준 (경로 축) |
-| 진행 | NAV, go=1, feasible일 때 경로 축 진행 속도 추종 |
-| 정지 | **상태별로 준다.** infeasible·unknown: 결정 지점 전 안전 정지에 보상, 진입에 페널티. feasible: 불필요한 정지(false-stop)에 페널티 |
-| 회전 | TURN: turn_rate 추종, 양의 yaw 페널티(**임계값 없이** 양의 yaw rate와 누적량에 비례), 중심 이동 페널티, swept 여유 |
-| 계단 | 계단 축 yaw 오차, DWELL 정지 유지 (stair_stall은 DWELL에서 끔) |
-| 사람 | 핸들 거리 범위 유지, 다른 승객과의 여유 |
+| 여유 | 몸·다리 swept 외곽이 GT SDF 기준 margin보다 가까우면 페널티. 접촉은 큰 페널티, 사람 접촉은 종료 |
+| 중앙·오프셋 | 가용 폭 중심선 + y_off (경로 축) |
+| 진행 | NAV, effective_go = 1, feasible이고 관측됐을 때 경로 축 진행 속도 추종 |
+| 정지 | 아래 2축 표 |
+| 회전 | TURN: turn_rate 추종. 반시계 회전에는 **임계값 없이** 양의 yaw rate와 누적량에 비례 페널티. 최대 중심 이동 페널티, swept 여유 |
+| 계단 | 계단 축 yaw 오차, DWELL 정지 유지 (stall masking은 3.5) |
 | 외란 | 기존 넘어짐·미끄러짐 항목 재사용 |
+| 개입 | 감독기 개입 시작 페널티 (7.2.2) |
 
-**feasibility 판정 (critic·보상 전용)**
-- 독립 oracle 검사기가 **현재 상태**를 기준으로 판정한다.
-  - 고려 요소: 현재 pose, 다리 sweep, 경로, margin·y_off, 제동 거리, 동적 사람, 핸들 사용자 통과 가능성.
-- 결과는 세 가지다.
-  - feasible: 충분히 관측됐고 가능하다.
-  - infeasible: 불가능하다.
-  - unknown: 관측상 판단할 수 없거나 경계 근처다.
-- unknown에서는 안전 정지와 제한된 관측 행동만 보상한다. 진행 보상은 주지 않는다.
-- 단, 로봇 발 주변의 자기 가림으로 생긴 unknown은 swept 영역과 겹칠 때만 위험으로 친다. 그렇지 않으면 로봇이 교착에 빠진다.
+**feasibility 2축 (UPDATE156)**
+- 축 1, 물리적 feasibility: GT 기하 기준으로 1.1·1.2의 swept 폭 규칙을 적용한다.
+- 축 2, 관측 가능성: actor가 본 지도로 판단할 수 있는가.
+
+| 물리 \ 관측 | 충분히 관측됨 | unknown (가림·시야 밖) |
+|---|---|---|
+| 가능 | 진행 보상. 불필요한 정지에 페널티 | 정지·대기·제한된 관측 행동 허용. 진행 보상 없음, 정지 페널티 없음 |
+| 불가 | 결정 지점 전 정지에 보상, 진입에 페널티 | 정지에 보상, 진입에 페널티 |
+
+- 로봇 발 주변의 자기 가림 unknown은 swept 영역과 겹칠 때만 unknown으로 친다.
+- 판단 불가 대기(감독기 설정, 제안 3 s)가 끝나도 unknown이면 hold하고 gdm에 재계획을 요청한다. 3 s는 학습 밖 설정이다.
 
 ### 7.5 열차 관성 외력
 
-**외력 적용**
-- 회전하지 않는 차량 좌표계에서 바닥을 고정한다.
-- **모든 링크의 COM에 `F_i = −m_i·a_train(t)`를 global frame으로 건다.** m_i는 랜덤화 후 질량이고 payload를 포함한다.
-- 계단 핸들 외력과 같은 external-wrench 버퍼에 합산한다. 프레임 설정을 덮어쓰지 않는다.
-- 매 physics step마다 적용하고, reset 때 지운다.
-- 동적 사람과 짐에도 같은 외력을 건다. kinematic 구조물은 차량에 고정한다.
-- **병진만** 다룬다. 차량 회전(roll / pitch / yaw sway)은 다루지 않는다(Coriolis 등 생략).
+**모델**
+- 회전하지 않는 차량 좌표계를 쓴다. 모든 링크 COM에 `F_i = −m_i·a_train(t)`를 global frame으로 건다. m_i는 랜덤화 후 질량이고 payload를 포함한다.
+- 핸들 외력과 같은 buffer에 합산한다. 매 physics step 적용하고 reset 때 지운다.
+- 동적 사람·짐에도 같은 가속을 반영한다.
+- 병진만 다룬다(차량 회전은 제외).
 
-**IMU 일관성**
-- 현재 관측은 gyro와 projected_gravity만 쓴다.
-- 실제 자세 추정기는 가속의 영향을 받는다. 그래서 가속 중 gravity 추정 편향을 노이즈로 넣는다.
-- accelerometer를 관측에 추가하는 경우에만 specific force `Rᵀ(a_rel + a_train − g)`를 재현한다.
+**IMU**
+- 현재 관측은 gyro와 projected_gravity다. 가속 중의 gravity 추정 편향을 노이즈로 넣는다.
+- accelerometer를 관측에 넣을 때만 specific force `Rᵀ(a_rel + a_train − g)`를 재현한다.
 
-**범위 (훈련 가정, 출처 미검증)**
-- 진행 방향: 0.6–1.2 m/s², 드물게 1.8–3.0 m/s²
-- 좌우: 0.3–1.5 m/s², 0.5–2 Hz
-- jerk ≤ 10 m/s³ (제안). 상승 시간과 지속 시간도 범위로 정한다.
+**가속 범위 (훈련 가정, 출처 미검증)**
+- 진행 방향: 0.6–1.2 m/s², 드물게 1.8–3.0 m/s², 상승 시간 1–2 s.
+- 좌우 정현파: 진폭 A와 주파수 f를 **함께 샘플**해서 jerk `2πfA ≤ 10 m/s³`를 지킨다.
+  - 예: A = 1.5 m/s²이면 f ≤ 1.06 Hz, f = 2 Hz이면 A ≤ 0.8 m/s².
+  - v0.2는 둘을 독립 샘플해서 jerk가 18.8 m/s³까지 나왔다. 이를 고쳤다.
+- 진행 방향 프로파일에도 jerk ≤ 10 m/s³를 적용한다.
 
-**검증**
-- moving-floor 모델과 비교하는 fixture를 둔다. 질점·마찰 조건에서 상대 궤적이 일치하는지 확인한다.
-- force4(150 N × 2 s)와는 별개 시험이다. 서로 대체하지 않는다.
+**검증·구분**
+- moving-floor 모델과 비교하는 fixture를 둔다.
+- force4와는 별개 시험이다.
 
-### 7.6 단계와 예산
+### 7.6 단계, 진급 기준(확정), 예산
 
-| 단계 | 최대 iter | 진급 기준 (안) | 중단·재설계 |
-|---|---|---|---|
-| P (pilot) | 100–300 update | parity 통과. 3 rank의 peak VRAM, map ms, physics ms, rollout/update ms, step/s, p95 지연을 측정하고 전체 시간을 다시 산정 | NaN, rank 불일치, 측정값이 예산 초과 |
-| A0 | ≤300 (A에 포함) | 기존 경로를 고정한 상태에서 새 경로에 학습 신호가 들어가는지 확인 | 새 branch가 학습되지 않음 |
-| A | ≤3k | 넓은 장면 safe completion ≥95%, go/stop·TURN 동작, legacy E1·MuJoCo 비열등 | legacy가 유의하게 하락, 2회 연속 개선 없음 |
-| B | ≤7k | scene별로: feasible 완주 ≥95%, false-stop ≤5%, 접촉 0/N, dwell 100%, release ≥95%. 독립 seed batch 두 번 연속 유지 | 특정 폭·계단·사람 조건 악화, 영구 정지, label 모순, 감독기 개입률 증가 |
-| C | ≤5k | held-out 센서·기하·외력·사람에서 같은 gate + baseline 비열등. 조건 추종, age·dropout 회복, 정지 응답 | oracle에서만 성공, 실제 지연이 가정을 넘음 → 학습 연장이 아니라 표현·처리기 수정 |
+**실행 순서 (확정)**
+- pilot → A → 평가 → B → 평가 → C.
+- 단계마다 아래 진급 기준으로 진행 여부를 정한다.
+- 평가는 250–500 iter마다 한다. 독립 seed batch 두 번 연속 통과해야 진급한다.
 
-- 평가는 250–500 iter마다 한다.
-- 비열등 허용폭, 제한 시간, 정지 거리 기준은 **실행 전에** 정한다(10장 결정 9번).
-- 시간 근거:
-  - GAST v2.1 기준 16 s/iter로 계산하면 15k ≈ 2.8일, 30% 추가 시 ≈ 3.6일이다.
-  - 실제 iter당 시간은 pilot 측정값으로 바꾼다.
-  - 4096 × 100 × 15k = 61.4억 transition으로, 3906 학습량의 12배다.
+| 단계 | 최대 iter | 기대 iter | 진급 기준 | 중단·재설계 |
+|---|---|---|---|---|
+| P (pilot) | 300 | 100–300 | parity 통과. 3 rank의 peak VRAM, map ms, physics ms, rollout/update ms, step/s, p95 지연 측정 → 시간 재산정 | NaN, rank 불일치, 예산 초과 |
+| A0 | 300 (A에 포함) | 300 | 새 경로 gradient 확인 | 새 branch가 학습되지 않음 |
+| A | 3k | 약 1k | 넓은 장면 safe completion ≥95%, go/stop·TURN·handshake 동작, legacy 비열등 | legacy 하락, 2회 연속 개선 없음 |
+| B | 7k | 약 3k | scene별 feasible 완주 ≥95%, false-stop ≤5%, 접촉 0/N, dwell 100%, release ≥95% | 특정 조건 악화, 영구 정지, label 모순, 개입률 증가 |
+| C | 5k | 약 2k | held-out 센서·기하·외력·사람에서 같은 기준 + baseline 비열등, 조건 추종, age·dropout 회복, 정지 응답 | oracle에서만 성공, 실제 지연이 가정을 넘음 → 학습 대신 표현·처리기 수정 |
+
+**공통 진급 기준 (확정, 제안값 채택)**
+- feasible 안전 완주 ≥95%
+- false-stop ≤5%
+- 접촉 0/N
+- 기존 갭·계단 E1(카메라+필터)과 MuJoCo depth_ir에서 고정 3906 대비 **2%p 넘게 떨어지지 않음** (같은 seed·노이즈·payload·명령)
+
+**시간 추정**
+
+| 근거 | 값 |
+|---|---|
+| 3906 실측 | 1024 env, 1 GPU(90.111 RTX 5090) **11.7 s/iter**. 5000 iter에 16.3 h |
+| GAST v2.1 | 4096 env, 3 GPU(onvlm2) 약 16 s/iter (rank당 1366 env + DDP 동기화) |
+| NavSkill 추가 비용 (가정) | 장애물 레이캐스트, 동적 물체, 근거리 거리 변환, 감독기, packed 저장·재계산으로 **+30–60%** → 약 21–26 s/iter |
+| 기대 (약 6k) | 6,000 × 21–26 s ≈ **35–43 h (1.5–1.8일)**. 단계 평가(약 3회 × 3–4 h)를 더하면 **약 2–2.5일** |
+| 상한 (15k) | 15,000 × 21–26 s ≈ **3.6–4.5일** + 평가 |
+
+- 학습량 비교: 4096 × 100 × 6k = 24.6억 transition으로, 3906(1024 × 100 × 5000 = 5.1억)의 약 5배다.
+- 3906은 1–2k iter에서 점수가 평탄해졌다. NavSkill은 작업이 여러 개라 단계당 1–3k를 기대한다.
+- 실제 iter 시간은 pilot 측정값으로 바꾼다.
 
 ---
 
 ## 8. 배포 안전 구조 (RL 밖)
 
-현재 Pilot은 정책이 낸 관절 목표를 바로 적용한다(`RlWalker.cpp:285–308`). 그래서 go=0을 보내도 정지가 보장되지 않는다.
+- Pilot은 정책의 관절 목표를 바로 적용한다(`RlWalker.cpp:285–308`).
+- infer 실패 시 VisionHold/Damp fallback은 있지만, 새 감독기 요구를 충족하지 않는다.
+- 기존 상태 기계와 새 감독기 사이의 우선순위와 소유권을 정한다. actuator writer는 하나만 둔다.
 
-### 8.1 감독기 (명령 어댑터 + FSM + 안전 감시)
+### 8.1 감독기
 
-**입력**
-- NAV1 명령, 안전 지도, 상태(odom, yaw rate), 정책 출력 명령.
-
-**예측과 개입**
-- 예측 horizon = evidence age + 계산·구동 지연 + 실측 제동·걸음 drift.
-- 이 horizon 안에 swept 영역이 occupied나 위험한 unknown에 닿을 것으로 예측되면, 먼저 감속하고 그다음 hold로 전환한다.
+**예측 (단위 정정, UPDATE156 D)**
+- 시간 horizon: `T_h = evidence age + 계산·구동 지연 + 실측 정지 시간`.
+- 공간 여유: `T_h` 동안 swept volume을 적분한 영역 + 제동 중 drift + 측정 불확실성.
+- 이 영역이 occupied나 위험 unknown에 닿을 것으로 예측되면 감속하고, 그래도 안 되면 hold로 전환한다.
+- evidence age가 허용 한계를 넘으면 정해 둔 fallback(감속 → hold)을 실행한다.
+- p95 지연은 최악 제동의 상한이 아니다. 최대값도 측정한다.
 
 **TURN 모드**
-- 명령 단계에서 `turn_rate ≤ 0`으로 clamp한다.
-- 실제 양의 yaw가 개입 기준(실행 설정값, 제안: 누적 2° 또는 0.1 rad/s × 0.3 s)을 넘으면 hold로 전환한다. 이 값은 재학습 없이 바꿀 수 있다. 각도 unwrap과 노이즈 deadband를 적용한다.
-- 이것은 사후 감시이고, 선제 보장이 아니다.
+- 명령은 3.4의 clamp를 쓴다.
+- 실행 중 개입 기준(감독기 설정, 제안): 반시계 누적 2° **또는** 양의 yaw rate 0.1 rad/s가 0.3 s 지속(약 1.7°). 두 조건은 독립이며 OR로 묶는다.
+- 누적 counter는 manoeuvre ID 단위다. mode를 왕복해도 지우지 않는다. 각도 unwrap과 deadband를 적용하고, 기준은 차량 바닥 yaw다.
+- 이것은 사후 보호다. 개입 뒤에도 제동하는 동안 더 돌 수 있으므로 허용치(3°)보다 작은 값에서 개입한다.
+
+**판단 불가 대기**
+- 진행이나 회전에 필요한 영역이 unknown이면 정지하고 최대 3 s(설정값) 기다린다.
+- 그래도 unknown이면 hold하고 gdm에 재계획을 요청한다.
 
 **hold 제어기**
-- 후보 1: 원본 3906 + 영 명령. standing 20%로 학습해서 서 있는 동작이 이미 검증돼 있다.
-- 후보 2: PD 서기 자세.
-- 어느 쪽이든 다음을 검증한다: 전환 과도 응답, 정지 거리·시간(p95/max), overshoot.
-- 모터를 끄는 것은 정지가 아니다.
+- 1차 후보: 원본 3906 + 영 명령.
+  - **"검증된 hold"라고 부르지 않는다.** standing 20%는 학습 분포였을 뿐, 안전 정지가 실증된 것은 아니다.
+  - 지형·CENet 경로를 공유하므로, encoder가 실패하면 독립 fallback이 아니다. 그 경우를 위해 기존 VisionHold/Damp 경로를 독립 fallback으로 남긴다.
+- PD 서기 자세로 즉시 당기지 않는다. 계단 위아래 발이나 swing 중인 발을 끌 수 있다. 안정 접지 상태에서 제한된 전환의 마지막 단계로만 쓴다.
+- **전환 검증**
+  - 전환 종류: NAV→hold, hold→NAV, TURN→hold.
+  - 조건 교차: 보행 위상, 속도, payload, 마찰, 경사, 계단 모서리, 갭 걸침, 차량 가속.
+  - 측정: joint target 점프, dq, 토크와 토크 변화율, 접촉 충격, 미끄러짐, 최대 drift, 정지 거리·시간(p95/max), 역회전 overshoot.
+- hold 정책의 history는 실제 최근 관측으로 유지한다. 전환할 때 zeros나 repeat_first로 인위적으로 reset하지 않는다.
+- 새로 다가오는 사람이 정지한 로봇에 부딪히는 경우는 hold만으로 막을 수 없다. 운용 범위와 gdm 개입 상태를 명시한다.
 
 ### 8.2 출력
 
-- 적용한 조건(y_off clamp 등), hold 사유, phase를 gdm에 돌려준다.
+NAV1-ACK(6장)로 다음을 gdm에 돌려준다: 적용된 조건, hold 사유, phase 이벤트, release 거절 사유.
 
 ---
 
 ## 9. 검증 계획
 
-| 시험 | 기준 (안) |
+| 시험 | 기준 |
 |---|---|
-| E1 (Isaac): 갭·계단 G, 카메라+필터 | 고정 reference 3906과 같은 seed·노이즈·payload·명령에서 비열등 |
-| MuJoCo depth_ir 갭 | 같은 조건에서 3906 비열등 (12회는 기능 선별용, 신뢰구간과 함께 보고) |
+| **V0 (단계 A 전)** 구조물 포함 하방 지형 | 아래 V0 상세 |
+| **V1** hold 전환 fixture | 8.1 전환 검증 matrix |
+| E1 갭·계단 (G, 카메라+필터) | 고정 3906 대비 −2%p 이내 |
+| MuJoCo depth_ir 갭 | 같은 기준, 신뢰구간 함께 보고 |
 | 통로 | feasible 완주 ≥95%, time-to-pass p50/p95, false-stop ≤5%, refusal precision/recall, 접촉 0/N |
-| 회전 | 양의 yaw 누적 ≤ 허용치, 접촉 0/N, 중심 이동 < 5 cm, 종료 응답 |
-| 계단 | yaw 오차 < 5°, dwell 100%, release ≥95%, 접촉 0/N |
-| 조건 | y_off −0.1 m에서 오차 < 3 cm. 불가능한 y_off는 clamp 사실을 보고 |
-| 정지 응답 | 위험 감지 또는 go=0부터 안정 정지까지의 거리·시간 p95/max, 재출발 지연, stop/go 진동 횟수 |
+| 회전 | 양의 yaw 누적 ≤ 허용치(평가 설정 3°), 접촉 0/N, 최대 중심 이동 < 5 cm, 종료 응답, 개입 빈도 |
+| 계단 | yaw < 5°, dwell 100%, release ≥95%, 접촉 0/N, phase 이벤트 순서 |
+| 조건 | y_off 추종 < 5 cm, 불가능한 y_off의 clamp 보고 |
+| 정지 응답 | 위험 감지·go=0 → 정지까지 거리·시간 p95/max, 재출발 지연, stop/go 진동 |
+| 감독기 유무 | shielded와 unshielded를 따로 보고 |
 | 외력 force4 150 N × 2 s | 3906 비열등 |
-| 비교 기준 | 감독기 + 3906 2단 구조 (같은 장면) |
-| 최종 검증 | 개발 평가와 분리한 held-out layout·seed. 모델 선택에는 쓰지 않는다 |
+| 비교 기준 | 감독기 + 3906 2단 구조 |
+| **검증 세트와 최종 시험 분리** | C 단계 held-out은 validation이다. 최종 시험은 개발 중 쓰지 않은 별도 layout·seed pool로 하고, 모델 선택에는 쓰지 않는다 |
 
-분모는 scene별 feasible / infeasible / unknown으로 나누고, 폭·사람·가속·센서 age별로도 나눠 보고한다.
+**V0 상세**
+1. 고정 3906으로 같은 pose·scan에서 기존 지형 경로와 구조물 포함 경로를 비교한다: h, valid, IR, age, latent, action.
+   - 대상: 벽(거리·높이·방향), 좌석 위·아래 가림, 천장, 얇은 기둥, 이동 사람.
+2. 안전한 paired scene에서 갭·계단 성공, stall, 최소 여유를 잰다.
+3. GT, camera-visible GT, v25or, MuJoCo depth_ir 단계로 나눠 비교한다.
+4. 허용할 분포 변화 기준은 미리 정해 둔다.
+
+**집계 분모**: scene별로 물리 가능·불가 × 관측됨·unknown × 폭·사람·가속·센서 age로 나눈다.
 
 ---
 
-## 10. 사용자 결정 항목
+## 10. 사용자 결정 (2026-10-18, 모두 확정)
 
-**확정 (2026-10-18)**
-- 갈림길과 다음 계단은 gdm이 정한다. 정책은 단일 경로만 학습한다.
-- **시계방향 제한은 TURN 모드에만 둔다.**
-  - TURN은 gdm이 mode=TURN으로 명시적으로 넣는다.
-  - NAV 모드의 계단·통로 yaw 보정은 양방향을 허용한다.
-  - 회전 종료는 gdm이 odom 각도를 보고 정한다.
-- **계단참에서는 네 발이 모두 닿으면 일시 정지한다.** 하강 재개는 단일 입력 통로로 받고, 소스는 AUTO, GDM, USER(USER는 나중에)다 (3.5절).
-  - LANDING_ENTERED 상태에서 네 발 접지를 확인한 시점부터 DWELL(일시 정지)에 들어간다.
-  - 접지는 실기 contact estimator 기준이며 debounce를 둔다.
+| # | 항목 | 결정 |
+|---|---|---|
+| 1 | 권한 경계 | 갈림길과 다음 계단은 gdm이 정하고, 단일 경로만 학습한다 |
+| 2 | 시계방향 | TURN 모드에만 적용한다. NAV의 yaw 보정은 양방향이다. 회전 종료는 gdm이 정한다 |
+| 3 | 역회전 수치 | 학습에 넣지 않는다. 허용 3°는 평가 설정, 개입 2°는 감독기 설정이다. 학습은 임계값 없는 비례 페널티만 쓴다 |
+| 4 | 계단참 | 네 발이 접지하면 일시 정지한다. release는 단일 통로에 AUTO·GDM·USER 소스다. 1차는 AUTO만 하고, TTS는 나중에 한다 |
+| 5 | 통과·회전 판정 | 다리 포함 로봇 swept 폭 + margin이 들어가면 시도하고, 아니면 정지한다. 특정 폭 기준은 두지 않는다 |
+| 6 | 사용자 추적 | 입력에 넣지 않는다 |
+| 7 | 장소별 위치 | 조건 c(y_off 등)로 준다. 계단은 중앙, 출입문은 조금 왼쪽, 개찰구는 중앙(사람이 뒤에서 따라옴) |
+| 8 | 후방 coverage | 좌우 뒷 hip 위 기준으로 뒤쪽 전체를 본다고 가정한다. 장착 위치는 미정 |
+| 9 | 판단 불가 | 정지하고 최대 3 s 대기한 뒤 hold + gdm 재계획 요청 (설정값) |
+| 10 | 치수·외란 | 기존 값을 쓰고, 판정은 5번 규칙으로 한다 |
+| 11 | 진급 기준 | 제안값 채택 (7.6) |
+| 12 | 실행 순서 | pilot → A → 평가 → B → 평가 → C, 단계마다 gate |
 
-**남은 결정**
-1. **역회전 허용치 (TURN 모드)** → **확정 (2026-10-18): 숫자는 학습에 넣지 않고 외부에서 정한다.**
-   - **학습**: 반시계(양의 yaw) 회전에 임계값 없이 비례 페널티를 준다. 정책은 "거꾸로 덜 돌수록 좋다"만 배운다. 특정 각도 숫자는 정책 안에 들어가지 않는다.
-   - **허용치 (제안 3°)**: 시험과 모델 선택에 쓰는 합격 기준이다. 평가 설정이며 언제든 바꿀 수 있다.
-     - 셈법: 한 회전 동작 동안의 반시계 누적. 시계방향으로 상쇄하지 않고, deadband 이하는 세지 않는다.
-   - **감독기 개입 (제안 2° 또는 0.1 rad/s × 0.3 s)**: 실행 중 hold로 전환하는 감독기 설정값이다. 재학습 없이 바꿀 수 있다.
-   - 수치는 시뮬에서 개입 빈도와 쓸림 폭을 보고 조정한다.
-2. ~~계단참 재개~~ → **확정 (2026-10-18)**: 입력 통로는 하나이고, 소스는 AUTO, GDM, USER 셋 다 넣을 수 있다. USER(음성 → ROS 토픽)는 나중에 구현한다. 세부 규칙은 3.5절 release.
-   - 1차 구현은 AUTO 자동 하강만 한다. 입력 통로는 여러 소스를 받을 수 있게 만든다.
-   - TTS 서버의 ZMQ 주소와 메시지 형식은 나중에 확인한다. 1차에서는 phase 이벤트를 로그와 Console에만 표시한다.
-3. **통과·회전 판정 기준** → **확정 (2026-10-18)**: 특정 폭(0.55 m 등)을 기준으로 정하지 않는다. **다리를 포함한 로봇 swept 폭 + 양쪽 margin보다 통로가 넓으면 시도하고, 아니면 정지한다.**
-   - 장애인용 개찰구(0.9 m)도 같은 규칙으로 판정한다.
-   - 좁은 곳의 제자리 회전도 같다. 다리를 포함한 회전 swept 영역 + margin이 들어가면 시도하고, 아니면 정지한다.
-   - 학습 장면의 폭 범위(0.50–1.00 m 등)는 가능·불가 양쪽 사례를 만들기 위한 무작위화 범위일 뿐이다.
-4. **핸들 사용자 추적** → **확정: 입력에서 뺀다.**
-   - 3.3절 핸들 사용자 상태 8차원을 정책 입력과 계약 v2(NAV1)에서 삭제한다.
-   - 사람은 후방 장애물 지도에 occupied로 보이는 그대로 다룬다. 쓸고 지나가지 않는 것은 지도와 여유 보상으로 배운다.
-5. **장소별 위치 조정** → **확정: 외부 조건 c로 넣는다** (4장, 학습 중 무작위로 주고 그 값에 맞춰 보상).
-   - 예시 (gdm이 장소마다 설정):
-     - 계단: `y_off` = 0 (중앙)
-     - 출입문: 사람 어깨가 걸리지 않게 `y_off` = +0.05~+0.10 m (조금 왼쪽)
-     - 개찰구: 사람이 뒤로 서서 따라오므로 `y_off` = 0
-   - 정책 안에 장소 이름은 넣지 않는다. 숫자 조건만 넣는다.
-   - 안전 우선순위: 로봇과 사람 모두 비접촉이 필수다. 조건을 지킬 수 없으면 가능한 범위로 줄이고, 그래도 안 되면 정지한다.
-6. **후방 센서 coverage** → **확정 (가정)**: 후방 센서가 **좌우 뒷다리 바로 위(뒷 hip, x ≈ −0.31 m)를 기준으로 그 뒤쪽 영역을 모두** 본다고 가정한다(지도 범위 안).
-   - 장착 위치는 확정하지 않는다. 학습에서는 위치·각도를 무작위화하고, 가림·잡음·결측은 그대로 넣는다.
-   - 전방은 기존 가정(Ouster + Mid-360, 지면부터 천장)을 유지한다.
-7. **판단 불가(unknown) 처리.** 진행이나 회전에 필요한 영역에 센서가 아직 못 본 칸이 있어 가능·불가를 판단할 수 없을 때의 규칙이다. 원인은 가림, 시야 밖, 결측 등이다.
-   - 제안: 그 자리에 정지해 최대 3 s 기다린다(사람이 비키거나 문이 열려 보이게 되는 경우). 그래도 모르면 hold하고 gdm에 "판단 불가"를 알려 재계획을 요청한다.
-   - 로봇 발 주변처럼 자기 몸에 가려 생기는 unknown은 swept 영역과 겹칠 때만 따진다.
-   - 대기 시간 3 s는 감독기 설정값이며 학습에 넣지 않는다.
-8. **치수·외란** → **확정**: 이미 정한 값(5장 장면 치수, 7.5 열차 가속 범위)을 쓴다. 통과 여부는 3번 규칙(로봇 폭 기준)으로 판정한다.
-9. **진급 기준 (stage gate) 수치.** 학습 단계(A→B→C)를 넘어갈 때 쓰는 합격선이다. 개찰구 치수가 아니다.
-   - 제안: 7.6과 9장의 값을 쓴다.
-     - feasible 장면 안전 완주 ≥95%
-     - false-stop ≤5%
-     - 접촉 0/N
-     - 기존 갭·계단 E1과 MuJoCo가 3906보다 2%p 넘게 떨어지지 않을 것
-   - 통과 가능 여부 자체는 3번 규칙으로 판정한다.
-10. **실행 순서.** 학습을 한 번에 15k iter 돌리지 않는다. 단계를 나눠 확인하며 진행한다.
-    - pilot(100–300 update)으로 메모리·속도·parity 확인 → 단계 A(≤3k) → 평가 → 통과하면 B(≤7k) → 평가 → C(≤5k).
-    - 단계마다 9번 기준으로 진행 여부를 정한다.
+**구현 단계에서 확인할 것**
+- 로봇 swept 폭 실측
+- TTS ZMQ 주소와 메시지 형식
+- 실기 `/odom` 오차
 
 ---
 
@@ -570,37 +654,54 @@ DWELL ─(dwell ≥ T_stop & go=1)→ RELEASED → DESCEND ─(첫 하강 단 �
 
 | 위험 | 대책 |
 |---|---|
-| 기존 갭·계단 능력 망각 | 연결 열만 0으로 초기화, A0 동결, LEGACY에만 KL anchor, transition 비율 기록, 단계별 E1·MuJoCo |
-| 지나친 보수화 (가능한데 멈춤) | 상태별 feasibility, false-stop 페널티와 지표, unknown은 swept 영역과 겹칠 때만 위험 |
-| 투시 정보 누출 | first-hit 3상태, 보이지 않는 GT는 critic에만, MuJoCo 누출 검사 |
-| 구조물이 하방 지형 의미를 바꿈 | 단계 A 전 벽·좌석 E1 확인 |
-| 학습–배포 차이 | 같은 처리기 코드, 센서 family 무작위화, sidecar 선검증 |
-| 정지 미보장 | 감독기 + 검증된 hold 제어기 |
-| 메모리·시간 초과 | bit-packed 저장, pilot 측정, 단계별 중단 예산 |
-| 시뮬레이터 간 차이 | 최종 선택에 MuJoCo 필수 (5737 사례) |
-| 실기 경로 부재 | 계약 v2에서 실기 pose(/odom)와 센서 경로 설계 (6장) |
+| 기존 능력 망각 | additive adapter(W_new = 0), A0 동결, LEGACY에만 KL anchor, transition 비율 기록, 단계별 E1·MuJoCo |
+| 지나친 보수화 | 2축 feasibility, false-stop 지표, 자기 가림 unknown 제외 |
+| 투시 정보 누출 | first-hit 3상태, 관측 지지면만 사용, 보이지 않는 GT는 critic에만, 누출 검사 |
+| 구조물이 하방 지형 의미를 바꿈 | V0 검증 matrix |
+| hold가 정책을 대신해 학습을 왜곡 | 7.2.2 개입 규칙, unshielded 보고 |
+| 정지 미보장 | 감독기 + hold 전환 검증(V1) + 독립 fallback |
+| 메모리·시간 초과 | packed 저장, pilot 측정, 단계별 예산 |
+| 시뮬레이터 간 차이 | 최종 선택에 MuJoCo 필수 |
+| 실기 경로 부재 | 계약 v2, `/odom` 포팅 |
 
 ---
 
-## 12. UPDATE155 지적 → v0.2 반영 위치
+## 12. UPDATE156 지적 → v0.3 반영 위치
 
 | 지적 | 반영 위치 |
 |---|---|
-| 후방 범위 부족 | 3.2(a) 49×43, 3.2(c) 안전 지도 |
-| 10 cm 칸으로 5 cm 여유를 판단할 수 없음 | 3.2(b) 5 cm SDF, 1.1 필요 폭 공식 |
-| FOV 마스크는 투시 정보를 줌 | 3.2 학습 관측 생성: first-hit, 같은 레이에서 동적 물체 처리 |
-| 지지면과 장애물 혼동 | 3.2(a) 국소 지지면 기준, 5장 지형 스캐너 |
-| 명령은 이미 (vx, vy, ωz) / heading override | 3.4 어댑터, mode별 masking |
-| 시계방향 보장 불가 | 3.4 clamp, 8.1 감독기, 10장 결정 1 |
-| 계단참 stop_t 부족, 갈림길 | 3.5 FSM, 1.3 S1 단일 경로 (확정) |
-| go=0이 정지를 보장하지 않음 | 8장 감독기와 hold 제어기 |
-| feasibility 한 bit로는 부족 | 7.4 상태별 3분류, 9장 지표 |
-| 열차 가속 frame과 IMU | 7.5 |
-| strict resume과 새 shape 혼용 | 7.1 schema migration |
-| mirror 증강 위반 | 7.1 6번 |
-| 37.5 GB 저장 | 7.2 L11, 저장량 추정 |
-| UDP 한도 초과, exporter·Pilot 누락 | 6장 T8 계약 v2 |
-| DDP total_envs | 7.2 L2 |
-| 15k 근거 부족 | 7.6 pilot과 gate |
-| 두 수준 구조 대안 | 0장, 9장 비교 기준 |
-| 실시간 지연 | 6장 지연 예산 |
+| "감독기가 보장" 문구 | 0장 보장 원칙, 머리말 |
+| turn_cap clamp, go·timeout 우선순위 | 3.4 |
+| mode 전환 handshake, ack | 3.4, 6장 NAV1-ACK |
+| v_cap 중복 | 3.4 (NAV1에만), 4장 |
+| 3°와 1.7° trigger 불일치 | 8.1 (독립 OR, manoeuvre counter) |
+| 계단참 hint + 감지 혼합 | 3.5 |
+| requested_go / effective_go | 3.4, 3.5 |
+| 계단참 진입 전 사전 감속 | 3.5 PRE_BRAKE |
+| dwell 연속·reset·pause, stall masking 범위 | 3.5 |
+| re-arm 조건 | 3.5 |
+| hold 후보, PD 즉시 전환 금지, 전환 검증 | 8.1, 9장 V1 |
+| stale encoder 시 독립 fallback | 8.1 |
+| 감독기 개입과 PPO | 7.2.2 |
+| A0에서 새 열이 학습되지 않음 | 7.1 additive adapter |
+| FiLM·normalizer 허용 목록 | 7.1 |
+| LEGACY-only mirror 구현 | 7.1 |
+| 관측 지지면, GT 누출 | 3.2 지지면 추정 |
+| free 판정 체적 기준 | 3.2 free 판정 |
+| B3만으로 머리 여유 판단 불가 | 3.2(b) 상단 clearance 채널. 머리 여유를 보장한다고 표현하지 않음 |
+| 근거리 SDF 업샘플 금지, unsigned 정의 | 3.2(b) |
+| 칸 age, TTL 재현 | 3.2(a), 6장 OBS1 |
+| sample pose 사용 | 6장 |
+| categorical warp | 6장 T7 |
+| MTU·fragmentation | 6장 OBS1 (local IPC) |
+| enum, CRC, 버전 | 6장 |
+| rollout 저장: 도착 캡처, pin, 불변 관측, 재계산, 메모리 | 7.2.1 |
+| feasibility 물리·관측 2축 | 7.4 |
+| 동적 ghost 표현 과장 | 3.2 움직이는 물체 |
+| kinematic 사람 | 5장 사람 모델 |
+| jerk 2πfA 불일치 | 7.5 |
+| 안전 horizon 단위 혼합 | 8.1 |
+| 구조물 포함 지형 검증 | 9장 V0 |
+| 검증 세트와 최종 시험 분리 | 9장 |
+| 사용자 추적 대체 시 기능 축소 | 3.3 삭제 (사용자 결정). 사람 추적에 의존하는 성공 기준 제거 |
+| history 초기화 불일치 | 6장 |
