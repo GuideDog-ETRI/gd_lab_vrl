@@ -15,6 +15,7 @@ from .command_generator import route_hint
 from .control_runtime import ControlRuntime,zero_legacy_command_history
 from .landing_fsm import LandingObservation
 from .supervisor import HealthInput
+from .person_contact import PersonContactTracker,IsaacResetOverlapQuery,reset_overlap_mask
 from .train_inertia import TrainInertia,ExternalForceAccumulator
 from .obs_terms import (ObservationPipeline,static_sensor_rays,world_to_sample,capsules_to_sample,
                         randomize_sensor_pattern,critic_privileged)
@@ -34,6 +35,12 @@ class NavState:
         self.forces=ExternalForceAccumulator(n,self.robot.num_bodies,device=dev)
         self.pipeline=ObservationPipeline(n,self.cfg['sensors'],device=dev)
         self.cylinder=EpisodeCylinder(self.index,stage='B',device=dev,seed=self.cfg['seed'],env_origins=env.scene.env_origins)
+        self.person_contacts=PersonContactTracker(n,self.cfg['person_contact']['force_threshold_n'],device=dev)
+        import omni.usd
+        self.reset_overlap_query=IsaacResetOverlapQuery(omni.usd.get_context().get_stage())
+        expected=set(self.cfg['person_contact']['robot_links'])
+        if expected!=set(self.robot.body_names):
+            raise RuntimeError(f'person-contact link coverage mismatch: configured={expected}, actual={set(self.robot.body_names)}')
         self.rng=torch.Generator(device=dev).manual_seed(self.cfg['seed'])
         self.controller=torch.zeros(n,dtype=torch.long,device=dev)
         self.velocity=torch.zeros(n,3,device=dev);self.features=torch.zeros(n,16,device=dev)
@@ -71,12 +78,17 @@ class NavState:
                   self.control.commands.rng[int(i)].random()<self.cfg['inertia']['optional_scene_probability']) for i,t in zip(ids,tiles)],device=env.device)
         self.inertia.reset(ids,enabled & self.cfg['inertia']['enabled'],scale=self.stage['inertia_scale'])
         self.forces.reset(ids);self.pipeline.reset(ids)
+        self.person_contacts.reset(ids)
         self.controller[ids]=0;self.velocity[ids]=0;self.unknown_time[ids]=0;self.positive_yaw[ids]=0
         self.turn_start[ids]=self.robot.data.root_pos_w[ids,:2];self.drift[ids]=0
         randomize_sensor_pattern(env.scene['nav_obstacles'],ids,self.cfg['sensors'],generator=self.rng)
         self.cylinder.env_origins.copy_(env.scene.env_origins)
         self.cylinder.reset(ids,stage='C' if self.stage['moving_cylinder'] else 'B',robot_positions=self.robot.data.root_pos_w)
         self.sync_collider_geometry(ids)
+        # Tensor reset poses must be reflected in articulated link kinematics before querying.
+        env.sim.physics_sim_view.update_articulations_kinematic()
+        initial=reset_overlap_mask(self.cylinder,ids,self.reset_overlap_query)
+        self.person_contacts.mark_invalid(ids[initial],'INITIAL_OVERLAP')
         self.last_capture=-math.inf
 
     def sync_collider_geometry(self,ids):
@@ -94,8 +106,10 @@ class NavState:
         self.cylinder.write_colliders(self.env.scene['nav_cylinder'])
 
     def physics_step(self):
+        self.person_contacts.begin_action()
         a=self.inertia.step(self.env.physics_dt)
         self.forces.apply(self.robot,a)
+        self.cylinder.update(self.env.physics_dt,a[:,:2])
         self.cylinder.step(self.env.physics_dt,self.robot.data.root_pos_w,self.robot.data.root_lin_vel_w)
         self.cylinder.write_colliders(self.env.scene['nav_cylinder'])
 
@@ -249,6 +263,10 @@ class GastNavEnv(ManagerBasedRLEnv):
             with torch.inference_mode():executed[damp]=self.nav.fixed_policy.act_inference(fixed)[damp]
         obs,reward,terminated,truncated,extras=super().step(executed)
         obs=self.nav.prepare(obs)
+        extras['person_contact']=self.nav.person_contacts.last_contact.clone()
+        extras['person_invalid_code']=self.nav.person_contacts.last_invalid_code.clone()
+        extras['person_contact_counters']=self.nav.person_contacts.summary()
+        extras['cylinder_sway_stub']=getattr(self.nav.cylinder,'sway_api_stub',True)
         extras['nav_controller']=controller;extras['nav_executed_action']=executed
         extras['nav_override_reason']=torch.tensor([0 if not x or x=='OK' else 1 for x in reasons],device=self.device);extras['nav_rewards']=dict(self.nav.reward_log)
         self.obs_buf=obs

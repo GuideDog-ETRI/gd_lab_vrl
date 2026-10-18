@@ -18,7 +18,6 @@ from gd_lab.gast_nav.moving_cylinder import MovingCylinder
 def settings_file(tmp_path, mutate=None):
     settings=load_scene_config()
     settings['corridor']['box_count']=[0,0]; settings['corridor']['bend_deg']=[0.,0.]; settings['corridor']['pillar_probability']=0.
-    settings['turn_room']['box_count']=[0,0]; settings['turn_room']['pillar_count']=[0,0]
     settings['stairs']['box_count']=[0,0]
     if mutate: mutate(settings)
     path=tmp_path/'scenes.yaml'; path.write_text(yaml.safe_dump(settings))
@@ -87,7 +86,8 @@ def test_difficulty_monotone_narrowing_and_level_bounds(kind,tmp_path):
     widths=[]; levels=[]
     for d in np.linspace(0.,1.,11):
         _,_,m=build_scene(kind,float(d),cfg)
-        widths.append(min(w for _,w in m.width_profile)); levels.append(m.level)
+        # UPDATE161 turn difficulty is clearance, no longer rectangle width.
+        widths.append(m.turn_spot[1] if kind=='nav_turn_room' else min(w for _,w in m.width_profile)); levels.append(m.level)
     assert all(b<=a+1e-7 for a,b in zip(widths,widths[1:])),widths
     assert levels[0]==0 and levels[-1]==9 and levels==sorted(levels)
 
@@ -167,8 +167,9 @@ def test_turn_feasibility_recomputes_at_current_position(tmp_path):
     cfg,_=settings_file(tmp_path)
     _,_,m=build_scene('nav_turn_room',0.,cfg)
     assert turn_feasible(m).feasible
-    assert not turn_feasible(m,(1.3,0.)).feasible
-    assert m.turn_spot[1]==pytest.approx(min(point_box_distance((0.,0.),b) for b in m.obstacles))
+    obstacle=m.obstacles[0]
+    assert not turn_feasible(m,obstacle.center[:2]).feasible
+    assert m.turn_spot[1]==pytest.approx(min(point_box_distance(m.turn_spot[0],b) for b in m.obstacles))
 
 
 def test_scene_index_lookup_binding_padded_tensors_and_grid(tmp_path):
@@ -179,7 +180,7 @@ def test_scene_index_lookup_binding_padded_tensors_and_grid(tmp_path):
     tensors=index.tensors('cpu')
     assert tensors['route_points'].shape[0]==5 and tensors['landing_mask'].tolist()==[True,False,False,False,False]
     assert tensors['train_inertia'].tolist()==[False,False,True,False,False]
-    assert tensors['spawn_xy'][2].tolist()==[0.,0.]
+    assert tensors['spawn_xy'][2].tolist()==pytest.approx(metas[2].turn_spot[0])
     index.bind([0],[1]); assert index.lookup([0])[0].kind=='nav_door'
     grid=SceneIndex.from_grid({(0,0):metas[0],(0,1):metas[1]},[0,0],[1,0])
     assert [m.kind for m in grid.lookup([0,1])]==['nav_door','nav_corridor']
@@ -279,7 +280,9 @@ def test_cylinder_collider_writer_matches_capsule_pose_and_actual_velocity(tmp_p
 
 def test_cylinder_no_safe_spawn_is_explicit_not_silent_skip(tmp_path):
     cfg,c=settings_file(tmp_path)
-    m=build_scene('nav_turn_room',1.,cfg)[2]
+    # Preserve the NO_PATH regression with an explicitly tiny legacy fixture;
+    # UPDATE161 generated turn workspaces intentionally reserve a cylinder slot.
+    m=replace(simple_meta(.4,turn_radius=.15),route_polyline=((-0.1,0.),(0.1,0.)))
     with pytest.raises(ValueError,match='NO_CYLINDER_PATH'):
         MovingCylinder(SceneIndex([m]),seed=0,config=c)
 

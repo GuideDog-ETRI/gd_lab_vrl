@@ -31,16 +31,31 @@ door:
   route_length: 6.0
   header_height: 0.12
 turn_room:
-  width: [1.1, 2.7]
-  length: [1.4, 3.0]
-  box_count: [0, 4]
-  box_height: [0.4, 0.5]
-  box_depth: [0.15, 0.35]
-  box_length: [0.25, 0.50]
-  pillar_count: [0, 2]
-  pillar_width: [0.10, 0.20]
-  spawn_clearance: 0.30
-  route_length: 0.40
+  # UPDATE161: 3--5m workspace with clutter, NOT a shrinking rectangular room.
+  width: [3.0, 5.0]
+  length: [3.0, 5.0]
+  obstacle_count: [4, 12]  # optional perimeter walls are separate
+  chair_height: [0.4, 0.5]
+  chair_depth: [0.18, 0.35]
+  chair_length: [0.25, 0.60]
+  pillar_height: [0.5, 1.2]
+  pillar_width: [0.12, 0.28]
+  block_height: [0.4, 1.2]
+  block_width: [0.18, 0.45]
+  block_depth: [0.18, 0.40]
+  outer_wall_probability: 0.35
+  spot_jitter_m: 0.05
+  delta_easy_m: 0.30
+  delta_hard_m: -0.10
+  other_clearance_m: [0.05, 0.55]
+  row_jitter_rad: 0.12
+  row_offset_m: [-0.45, 0.45]
+  cylinder_slot_distance_m: 1.15
+  cylinder_path_half_length_m: 0.12
+  route_clearance_m: 0.35
+  placement_attempts: 256
+  polygon_samples: 128
+
 stairs:
   width: [1.2, 3.0]
   rise: [0.10, 0.20]
@@ -70,3 +85,7 @@ cylinder:
   disabled_z_m: -100.0
   endpoint_epsilon_m: 0.000001
   sample_attempts: 64
+  # UPDATE161: vehicle-frame acceleration -> person sway (tunable assumptions).
+  sway_gain_s2: 0.08
+  sway_cutoff_hz: 0.8
+  sway_max_offset_m: 0.12
