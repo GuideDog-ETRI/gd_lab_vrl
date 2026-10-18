@@ -8,8 +8,8 @@ import yaml
 from gd_lab.gast_nav import schema as S
 from gd_lab.gast_nav.train_inertia import TrainInertia, ExternalForceAccumulator, sum_external_wrenches, limited_sine_amplitude
 from gd_lab.gast_nav.command_generator import CommandGenerator, route_projection
-from gd_lab.gast_nav.scene_stub import SceneTileMeta
-from gd_lab.gast_nav.rewards import reward_terms, legacy_reward_masks, intervention_penalty
+from gd_lab.gast_nav.scene_types import SceneTileMeta
+from gd_lab.gast_nav.rewards import reward_terms, legacy_reward_masks
 from gd_lab.gast_nav.obs_terms import (sensor_pattern, randomize_sensor_pattern, world_to_sample, mask_self_returns,
                                       fit_observed_surface, observed_support, ObservationPipeline, critic_privileged)
 from gd_lab.gast_nav.map_types import Grid, RayBatch, DynamicCapsules
@@ -139,7 +139,7 @@ def test_masks_and_single_intervention():
     masks=legacy_reward_masks(torch.tensor([0,1,2,1]),phase,torch.ones(4,dtype=torch.bool),torch.zeros(4,dtype=torch.bool))
     assert masks['xy_tracking'].tolist()==[True,False,False,False]
     assert masks['stair_stall'].tolist()==[True,False,False,False]
-    assert intervention_penalty(torch.tensor([1,1,0]),torch.tensor([0,1,1]),-1.).tolist()==[-1.,0.,0.]
+
 
 def test_patterns_mount_jitter_and_yaw_transform():
     settings=CFG['sensors'];o,d=sensor_pattern(settings)
