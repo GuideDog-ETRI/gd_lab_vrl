@@ -9,6 +9,32 @@ ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/'src'))
 
 def main():
+    import faulthandler, signal, time
+    diagnostic_id=os.environ.get('GAST_RUN_ID','diagnostic')
+    if not __import__('re').fullmatch(r'[a-zA-Z0-9_-]+',diagnostic_id):raise ValueError('run id')
+    diagnostic_dir=ROOT/'logs/gast/nav_v1'/diagnostic_id
+    diagnostic_dir.mkdir(parents=True,exist_ok=True)
+    stack_file=(diagnostic_dir/('rank'+os.environ.get('RANK','0')+'_stacks.txt')).open('ab',buffering=0)
+    faulthandler.enable(file=stack_file,all_threads=True)
+    faulthandler.dump_traceback_later(120,repeat=True,file=stack_file)
+    faulthandler.register(signal.SIGUSR2,file=stack_file,all_threads=True)
+    def stamp(event):
+        row={'event':event,'rank':os.environ.get('RANK','0'),'time':time.time()}
+        with (diagnostic_dir/('rank'+os.environ.get('RANK','0')+'_startup.jsonl')).open('a') as f:f.write(json.dumps(row)+'\n')
+        print(json.dumps(row),flush=True)
+    stamp('python_start')
+    if os.environ.get('GAST_NCCL_PREFLIGHT_ONLY') == '1':
+        import torch
+        import torch.distributed as dist
+        from datetime import timedelta
+        local=int(os.environ['LOCAL_RANK']);world=int(os.environ['WORLD_SIZE'])
+        torch.cuda.set_device(local)
+        stamp('pure_init_before');dist.init_process_group('nccl',timeout=timedelta(seconds=120));stamp('pure_init_after')
+        value=torch.tensor([local+1.],device=f'cuda:{local}')
+        stamp('pure_collective_before');dist.all_reduce(value);torch.cuda.synchronize();stamp('pure_collective_after')
+        assert value.item()==world*(world+1)/2
+        dist.destroy_process_group()
+        return
     parser=argparse.ArgumentParser()
     mode=parser.add_mutually_exclusive_group(required=True)
     mode.add_argument('--smoke',action='store_true');mode.add_argument('--train',action='store_true');mode.add_argument('--pilot',action='store_true')
@@ -27,7 +53,7 @@ def main():
     pilot_settings=yaml.safe_load((ROOT/'configs/gast_nav/pilot.yaml').read_text())
     args.stage=args.stage or ('A0' if args.pilot else 'B')
     if args.pilot_smoke and not args.pilot:parser.error('--pilot-smoke requires --pilot')
-    if args.pilot_smoke:args.total_envs=pilot_settings['smoke_envs_per_rank']*pilot_settings['world_size']
+    if args.pilot_smoke:args.total_envs=pilot_settings['smoke_envs_per_rank']*int(os.environ.get('WORLD_SIZE',pilot_settings['world_size']))
     args.max_iterations=args.max_iterations or (pilot_settings['smoke_iterations'] if args.pilot_smoke else pilot_settings['max_iterations'] if args.pilot else yaml.safe_load((ROOT/f'configs/gast_nav/stage_{args.stage}.yaml').read_text())['max_iterations'])
     args.save_interval=args.save_interval or pilot_settings['save_interval']
     if args.run_id is None:args.run_id='nav_'+__import__('datetime').datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -51,7 +77,22 @@ def main():
     result={'status':'started','optimizer_steps':0 if args.smoke else None,'rollout_steps':0,'stage':args.stage}
     app=None
     try:
-        launcher=AppLauncher(args);app=launcher.app
+        import torch
+        import torch.distributed as dist
+        if args.distributed and not args.smoke:
+            from datetime import timedelta
+            stamp('init_process_group_before')
+            torch.cuda.set_device(local)
+            dist.init_process_group('nccl',timeout=timedelta(seconds=pilot_settings['collective_timeout_s']))
+            stamp('init_process_group_after')
+            stamp('first_collective_before')
+            probe=torch.tensor([rank+1.],device=args.device)
+            dist.all_reduce(probe);torch.cuda.synchronize()
+            assert probe.item()==world*(world+1)/2
+            stamp('first_collective_after')
+        stamp('app_before');launcher=AppLauncher(args);app=launcher.app;stamp('app_after')
+        # Kit may install native signal handlers during startup. Restore our Python trace.
+        faulthandler.enable(file=stack_file,all_threads=True)
         import torch
         import torch.distributed as dist
         import gymnasium as gym
@@ -71,9 +112,6 @@ def main():
                 cls=pending.pop()
                 if cls in seen:continue
                 seen.add(cls);pending.extend(cls.__subclasses__());cls.step=forbidden
-        elif args.distributed:
-            from datetime import timedelta
-            torch.cuda.set_device(local);dist.init_process_group('nccl',timeout=timedelta(seconds=pilot_settings['collective_timeout_s']))
         cfg=GastNavEnvCfg(nav_stage=args.stage)
         cfg.scene.num_envs=16 if args.smoke else rank_env_count(args.total_envs,world,rank)
         cfg.sim.device=args.device;cfg.nav_smoke=args.smoke
@@ -81,7 +119,9 @@ def main():
             cfg.scene.terrain.terrain_generator.num_rows=2
             cfg.scene.terrain.terrain_generator.num_cols=20
             cfg.scene.terrain.max_init_terrain_level=0
+        stamp('env_before')
         env=gym.make('Gd-GastNavV1-Rbq10-Dreamwaq-v0',cfg=cfg).unwrapped
+        stamp('env_after')
         if args.smoke:
             terrain=env.scene.terrain;grid=terrain.cfg.terrain_generator.nav_scene_grid
             # Deterministic scene coverage without replacing actual mesh or metadata.
@@ -98,7 +138,9 @@ def main():
         policy=GastNavActorCritic(**policy_args,nav_privileged_dim=obs['nav_privileged'].shape[-1]).to(args.device)
         checkpoint=ROOT/'checkpoints/teachers/gast/rayir_top5_20261016/3906_gap50_from_dwb38000/best_top5/3906_top1.pt'
         sha='f3e7afe53ea8be0f2dd777f331af417aba20b13b5e5be5470ec3d939470f4d98'
+        stamp('migration_before')
         migration=migrate_checkpoint(policy,checkpoint,expected_sha256=sha)
+        stamp('migration_after')
         fixed.load_state_dict(torch.load(checkpoint,map_location=args.device,weights_only=False)['model_state_dict'],strict=True)
         fixed.eval();fixed.requires_grad_(False);env.nav.fixed_policy=fixed
         phase=cfg.nav_stage_settings
@@ -136,6 +178,17 @@ def main():
             assert force_error<1e-4
         else:
             from gd_lab.gast_nav.pilot_runner import run_training
+            # The host core_pattern is 'core'. Limit core ownership to the previous
+            # crashing rank so a multi-rank failure cannot fill disk with duplicate cores.
+            import resource
+            core_dir=diagnostic_dir/'core'
+            core_dir.mkdir(exist_ok=True)
+            resource.setrlimit(resource.RLIMIT_CORE,
+                (resource.RLIM_INFINITY,resource.RLIM_INFINITY) if rank==1 else (0,resource.RLIM_INFINITY))
+            os.chdir(core_dir)
+            faulthandler.enable(file=stack_file,all_threads=True)
+            faulthandler.register(signal.SIGUSR2,file=stack_file,all_threads=True)
+            stamp('runner_before')
             result.update(run_training(env=env,policy=policy,obs=obs,args=args,root=ROOT,
                                        migration=migration,pilot_settings=pilot_settings))
         env.close()

@@ -79,7 +79,7 @@ def network_inputs(frames, near, current_pose, now_ms, *, config=None):
         elapsed = (now-frame.sample_time_ms).double()/1000
         if bool((elapsed < 0).any()):
             raise ValueError('future snapshot')
-        upper = age_upper_s(age_codes(frame.age_s))
+        upper = age_upper_s(frame.age_s if frame.age_s.dtype == torch.uint8 else age_codes(frame.age_s))
         encoded_state = torch.where((upper <= cfg.ttl_s) & (frame.support[:, None] != S.SUPPORT_UNKNOWN), frame.state, S.UNKNOWN)
         state, age, _ = warp_categorical(encoded_state, upper, frame.sample_pose, current_pose, config=cfg)
         age = age+elapsed[:, None, None, None]
@@ -90,7 +90,7 @@ def network_inputs(frames, near, current_pose, now_ms, *, config=None):
         channels = torch.stack(((state == S.OCCUPIED).float(), (state == S.FREE).float(), normalized_age), 2)
         out.append(channels.flatten(1, 2))
     wide = torch.cat(out, 1)
-    near_raw = NearFrame(near.clearance, near.unknown, age_upper_s(age_codes(near.age_s)))
+    near_raw = NearFrame(near.clearance, near.unknown, age_upper_s(near.age_s if near.age_s.dtype == torch.uint8 else age_codes(near.age_s)))
     aligned = _warp_near(near_raw, latest.sample_pose, current_pose, config=cfg)
     elapsed = ((now-latest.sample_time_ms).double()/1000)[:, None, None]
     unknown = aligned.unknown | (aligned.age_s+elapsed > cfg.ttl_s)
