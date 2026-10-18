@@ -638,6 +638,7 @@ NAV1-ACK(6장)로 다음을 gdm에 돌려준다: 적용된 조건, hold 사유, 
 | 감독기 유무 | shielded와 unshielded를 따로 보고 |
 | 외력 force4 150 N × 2 s | 3906 비열등 |
 | 비교 기준 | 감독기 + 3906 2단 구조 |
+| **sim_docker 지하철 차내 시험 (학습 후)** | 팀원 sim_docker에 이미 모델링된 지하철 차내 장면에서 GAST-Nav v1을 시험한다. 학습에 쓰지 않은 실제 형상이므로 최종 held-out 시험으로 쓴다. 3906 sim_docker 실행기(`feat/gast-teacher-runtime`)를 GAST-Nav 입력으로 확장해야 한다 |
 | **검증 세트와 최종 시험 분리** | C 단계 held-out은 validation이다. 최종 시험은 개발 중 쓰지 않은 별도 layout·seed pool로 하고, 모델 선택에는 쓰지 않는다 |
 
 **V0 상세**
