@@ -37,3 +37,5 @@ ppo:
   max_grad_norm: 1.0
   auxiliary_coef: 0.1
   auxiliary_samples: 2048
+
+  update_chunk_size: 16384

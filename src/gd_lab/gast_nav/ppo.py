@@ -82,6 +82,19 @@ class GastNavPPO(GastPPO):
         self.nav_controller = None
         self.nav_previous = None
         self.nav_normalization_obs = []
+        self.map_source = None
+        self.capture_pool = None
+
+    def init_storage(self, training_type, num_envs, num_transitions_per_env, obs, actions_shape):
+        if self.map_source is not None:
+            from .packed_rollout import CapturePool
+            self.capture_pool = CapturePool(self.map_source)
+            obs = self.capture_pool.references(obs)
+        super().init_storage(training_type,num_envs,num_transitions_per_env,obs,actions_shape)
+        if self.capture_pool is not None:
+            for key in ('nav_capture_ids',):
+                self.storage.observations[key]=torch.zeros(
+                    (num_transitions_per_env,*obs[key].shape),dtype=obs[key].dtype,device=self.device)
 
     def configure_trainable(self, manifest):
         groups, report = apply_manifest(self.policy, manifest, learning_rate=self.learning_rate)
@@ -92,7 +105,10 @@ class GastNavPPO(GastPPO):
     def act_selected(self, obs, controller):
         if bool(((controller < 0) | (controller >= len(schema.CONTROLLERS))).any()): raise ValueError('controller')
         self.nav_controller = controller.detach().clone().reshape(-1)
-        return super().act(obs)
+        action = super().act(obs)
+        if self.capture_pool is not None:
+            self.transition.observations = self.capture_pool.references(obs)
+        return action
 
     def act(self, obs):
         if 'nav_controller' not in obs: raise ValueError('pre-policy controller selection required')
@@ -120,7 +136,7 @@ class GastNavPPO(GastPPO):
         adjusted = intervention_rewards(rewards, executed, self.nav_previous, self.nav_config['intervention_reward'])
         self.nav_previous = torch.where(dones.reshape(-1).bool(), NAV_POLICY, executed).detach().clone()
         # Keep normalization immutable within rollout+PPO replay; update moments only afterwards.
-        self.nav_normalization_obs.append(obs.detach().clone())
+        self.nav_normalization_obs.append(obs.exclude('nav_wide','nav_near').detach().clone())
         flags = self.policy.nav_update_old_stats, self.policy.nav_update_new_stats
         self.policy.nav_update_old_stats = self.policy.nav_update_new_stats = False
         try: super().process_env_step(obs, adjusted, dones, extras)
@@ -147,35 +163,47 @@ class GastNavPPO(GastPPO):
         updates = 0
         for _ in range(self.num_learning_epochs):
             for ids in torch.tensor_split(torch.randperm(len(actions), device=actions.device), self.num_mini_batches):
-                batch = obs[ids]
-                p.act(batch)
-                lp = p.get_actions_log_prob(actions[ids])
-                ratio = torch.exp(lp - old_lp[ids])
-                raw = torch.maximum(-advantage[ids] * ratio,
-                                    -advantage[ids] * ratio.clamp(1 - self.clip_param, 1 + self.clip_param))
-                actor, count = masked_global_mean(raw, mask[ids])
-                entropy, _ = masked_global_mean(p.entropy, mask[ids])
-                with torch.no_grad():
-                    kl_raw = (torch.log(p.action_std / old_sigma[ids]) +
-                              (old_sigma[ids].square() + (old_mu[ids] - p.action_mean).square()) /
-                              (2 * p.action_std.square()) - .5).sum(-1)
-                    kl, _ = masked_global_mean(kl_raw, mask[ids])
-                value = p.evaluate(batch).reshape(-1)
-                vf = (value - returns[ids]).square()
-                if self.use_clipped_value_loss:
-                    clipped = old_v[ids] + (value - old_v[ids]).clamp(-self.clip_param, self.clip_param)
-                    vf = torch.maximum(vf, (clipped - returns[ids]).square())
-                critic, _ = masked_global_mean(vf, torch.ones_like(vf, dtype=torch.bool))
+                # Normalize each chunk by the FULL global minibatch counts.
+                # Exactly one all-reduce/clip/Adam step per original minibatch.
+                count_tensor=summed(mask[ids].sum().double())
+                count=int(count_tensor.item())
+                critic_count=summed(torch.tensor(len(ids),device=actions.device,dtype=torch.float64))
                 self.optimizer.zero_grad(set_to_none=True)
-                loss = self.value_loss_coef * critic
-                if count: loss = loss + actor - self.entropy_coef * entropy
-                else: metrics['actor_skipped'] += 1
-                loss.backward()
+                actor_total=actions.new_zeros(());critic_total=actor_total.clone();kl_total=actor_total.clone()
+                chunk_size=int(self.nav_config.get('update_chunk_size',256))
+                for chunk in ids.split(chunk_size):
+                    batch=obs[chunk]
+                    if self.capture_pool is not None:batch=self.capture_pool.unpack(batch)
+                    p.act(batch)
+                    lp=p.get_actions_log_prob(actions[chunk]);ratio=torch.exp(lp-old_lp[chunk])
+                    raw=torch.maximum(-advantage[chunk]*ratio,
+                        -advantage[chunk]*ratio.clamp(1-self.clip_param,1+self.clip_param))
+                    selected=mask[chunk]
+                    scale=world_size()/count_tensor.clamp_min(1).to(raw.dtype)
+                    actor=raw[selected].sum()*scale
+                    entropy=p.entropy[selected].sum()*scale
+                    with torch.no_grad():
+                        kl_raw=(torch.log(p.action_std/old_sigma[chunk])+
+                            (old_sigma[chunk].square()+(old_mu[chunk]-p.action_mean).square())/
+                            (2*p.action_std.square())-.5).sum(-1)
+                        kl=kl_raw[selected].sum()*scale
+                    value=p.evaluate(batch).reshape(-1)
+                    vf=(value-returns[chunk]).square()
+                    if self.use_clipped_value_loss:
+                        clipped=old_v[chunk]+(value-old_v[chunk]).clamp(-self.clip_param,self.clip_param)
+                        vf=torch.maximum(vf,(clipped-returns[chunk]).square())
+                    critic=vf.sum()*world_size()/critic_count.clamp_min(1).to(vf.dtype)
+                    loss=self.value_loss_coef*critic
+                    if count:loss=loss+actor-self.entropy_coef*entropy
+                    loss.backward()
+                    actor_total+=actor.detach();critic_total+=critic.detach();kl_total+=kl.detach()
+                    del batch,loss,actor,entropy,critic,value,vf,raw,ratio,lp
+                if not count:metrics['actor_skipped']+=1
                 average_gradients(p.parameters())
-                torch.nn.utils.clip_grad_norm_([v for v in p.parameters() if v.requires_grad], self.max_grad_norm)
-                self._finite_step()
-                updates += 1
-                for name, val in [('surrogate', actor), ('value', critic), ('kl', kl)]: metrics[name] += (summed(val) / world_size()).item()
+                torch.nn.utils.clip_grad_norm_([v for v in p.parameters() if v.requires_grad],self.max_grad_norm)
+                self._finite_step();updates+=1
+                for name,val in [('surrogate',actor_total),('value',critic_total),('kl',kl_total)]:
+                    metrics[name]+=(summed(val)/world_size()).item()
         # Original auxiliary semantics: all controllers, terrain reconstruction not actor-masked.
         if p.nav_cenet_step:
             p.cenet.update_bootstrap_from_episode_rewards(self._global_episode_returns())
@@ -194,6 +222,9 @@ class GastNavPPO(GastPPO):
         for snapshot in self.nav_normalization_obs: p.update_normalization(snapshot)
         self.nav_normalization_obs.clear()
         assert_frozen(p, before)
+        if self.capture_pool is not None:
+            metrics['packed_pool_bytes']=self.capture_pool.bytes()
+            self.capture_pool.clear()
         st.clear()
         for name in ('surrogate', 'value', 'kl'): metrics[name] /= max(updates, 1)
         return metrics

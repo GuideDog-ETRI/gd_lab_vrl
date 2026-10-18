@@ -51,13 +51,25 @@ class PhaseTimers:
 def validate_pilot(args,settings,world):
     if not args.pilot:return
     if os.environ.get('GAST_NAV_PILOT')!='1':raise ValueError('GAST_NAV_PILOT=1 required')
-    if os.environ.get('CUDA_VISIBLE_DEVICES')!='0,1,2':raise ValueError('pilot visible GPUs must be exactly 0,1,2')
-    if not args.distributed or world!=settings['world_size']:raise ValueError('pilot requires exactly three ranks')
+    diagnostic = os.environ.get('GAST_NAV_SINGLE_RANK_SMOKE')=='1' and args.pilot_smoke and world==1
+    if os.environ.get('CUDA_VISIBLE_DEVICES')!=('0' if diagnostic else '0,1,2'):raise ValueError('pilot visible GPUs must be exactly 0,1,2')
+    if not args.distributed or (world!=settings['world_size'] and not diagnostic):raise ValueError('pilot requires exactly three ranks')
     if args.stage!='A0':raise ValueError('pilot is A0 only')
     expected=settings['smoke_envs_per_rank']*world if args.pilot_smoke else settings['total_envs']
     if args.total_envs!=expected:raise ValueError('pilot env count outside authorization')
     limit=settings['smoke_iterations'] if args.pilot_smoke else settings['max_iterations']
     if not 1<=args.max_iterations<=limit:raise ValueError('pilot iteration count outside authorization')
+
+
+def transition_trainable(alg, manifest):
+    """Retain Adam moments for existing parameters; new parameters start fresh."""
+    old_state = alg.optimizer.state
+    report = alg.configure_trainable(manifest)
+    for group in alg.optimizer.param_groups:
+        for parameter in group['params']:
+            if parameter in old_state:
+                alg.optimizer.state[parameter] = old_state[parameter]
+    return report
 
 
 def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
@@ -67,9 +79,24 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
     rank=int(os.environ.get('RANK','0'));world=dist.get_world_size() if dist.is_initialized() else 1
     cfg=env.cfg.nav_settings;train=cfg['training'];phase=env.cfg.nav_stage_settings
     runtime=yaml.safe_load((root/'configs/gast_nav/runtime.yaml').read_text())
+    a0_iterations = int(os.environ.get('GAST_NAV_A0_ITERATIONS', '0'))
+    if a0_iterations:
+        if args.pilot or not args.train or args.stage != 'A0' or args.resume:
+            raise ValueError('continuous A requires fresh --train --stage A0')
+        if not 1 <= a0_iterations <= 300 or not a0_iterations < args.max_iterations <= 3000:
+            raise ValueError('continuous A exceeds authorized A0/total bounds')
     policy.train()
+    def startup(event):
+        row={'event':event,'rank':rank,'time':time.time()}
+        with (root/train['log_root']/args.run_id/f'rank{rank}_startup.jsonl').open('a') as f:f.write(json.dumps(row)+'\n')
+        print(json.dumps(row),flush=True)
+    startup('broadcast_before')
     if world>1:
-        for value in policy.state_dict().values():dist.broadcast(value,src=0)
+        for name,value in policy.state_dict().items():
+            startup('broadcast_before:'+name)
+            dist.broadcast(value,src=0)
+            startup('broadcast_after:'+name)
+    startup('broadcast_after')
     alg=GastNavPPO(policy,nav_config=runtime['ppo'],trainable_manifest=root/phase['trainable'],device=args.device,
         schedule='fixed',learning_rate=train['learning_rate'],num_learning_epochs=train['epochs'],num_mini_batches=train['minibatches'])
     install_collective_optimizer_step(alg.optimizer,device=args.device,context='Nav PPO optimizer')
@@ -101,6 +128,15 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
     alg.optimizer.step=counted_step
     assert_synchronized_state(policy,optimizers,context='startup/resume')
     horizon=pilot_settings['smoke_horizon'] if args.pilot_smoke else train['horizon']
+    alg.map_source=env.nav
+    if args.pilot_smoke:
+        from .packed_rollout import CapturePool
+        parity_pool=CapturePool(env.nav)
+        restored=parity_pool.unpack(parity_pool.references(obs))
+        for key in ('nav_wide','nav_near'):
+            torch.testing.assert_close(restored[key],obs[key],rtol=0,atol=0)
+        startup('packed_gpu_observation_parity_passed')
+        del restored,parity_pool
     alg.init_storage('rl',env.num_envs,horizon,obs,[12])
     timing=PhaseTimers();timing.wrap(env.nav,'capture','map');timing.wrap(env.sim,'step','physics')
     stop=False
@@ -121,6 +157,23 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
     iteration=start_iteration;tick=-1
     try:
         for iteration in range(start_iteration,args.max_iterations):
+            if a0_iterations and iteration == a0_iterations:
+                checkpoint(iteration, 'a0_complete.pt')
+                phase = yaml.safe_load((root/'configs/gast_nav/stage_A.yaml').read_text())
+                transition_trainable(alg, root/phase['trainable'])
+                install_collective_optimizer_step(alg.optimizer, device=args.device, context='stage A PPO optimizer')
+                original_step = alg.optimizer.step
+                alg.optimizer.step = counted_step
+                optimizers = [('ppo',alg.optimizer),('cenet',policy.cenet.optimizer)]
+                args.stage = 'A'; env.cfg.nav_stage = 'A'
+                env.cfg.nav_stage_settings = phase; env.nav.stage = phase
+                env.scene.terrain.cfg.terrain_generator.difficulty_range = tuple(phase['difficulty_range'])
+                raw,_ = env.reset(); obs = TensorDict(raw,batch_size=[env.num_envs],device=args.device)
+                assert_synchronized_state(policy,optimizers,context='A0 to A transition')
+                with (log/f'rank{rank}_stage_transition.json').open('w') as f:
+                    json.dump({'iteration':iteration,'from':'A0','to':'A',
+                               'optimizer_state_preserved':True,'new_parameters_fresh':True,
+                               'geometry_note':'prebuilt terrain retained; dynamic stage settings take effect at reset'},f)
             torch.cuda.synchronize();torch.cuda.reset_peak_memory_stats(args.device)
             begin=time.perf_counter();reward_sum=0.;controllers=Counter();rewards=defaultdict(float);valid_rows=0
             terminations=0;timeouts=0;person0=env.nav.person_contacts.summary()['person_contact']
@@ -152,7 +205,13 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
                         checkpoint(iteration,'stopped.pt');return {'status':'stopped','iteration':iteration,'partial_rollout_discarded':True,'optimizer_steps':optimizer_steps}
                 alg.compute_returns(obs)
             torch.cuda.synchronize();rollout_s=time.perf_counter()-begin
-            update_start=time.perf_counter();metrics=alg.update();torch.cuda.synchronize();update_s=time.perf_counter()-update_start
+            update_start=time.perf_counter()
+            if os.environ.get('GAST_PROFILE_UPDATE')=='1' and iteration==start_iteration:
+                from .update_profile import UpdateProfile
+                with UpdateProfile(alg) as profile:metrics=alg.update()
+                (log/f'rank{rank}_update_profile.json').write_text(json.dumps(profile.result,indent=2))
+            else:metrics=alg.update()
+            torch.cuda.synchronize();update_s=time.perf_counter()-update_start
             check_error=None
             try:assert_frozen(policy,alg.nav_frozen)
             except Exception as exc:check_error=str(exc)
