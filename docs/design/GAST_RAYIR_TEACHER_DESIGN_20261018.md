@@ -1,7 +1,7 @@
 # GAST Ray+IR 교사 설계문서 — 원래 3906 기준 (현행 학습, 2026-10-18)
 
 이 문서는 **이미 수행한 학습**(DWB-38000 → Ray+IR gap50 3906 → aug149 파인튠)의 구조와 방법을 정리한다.
-새로 계획 중인 NavSkill 학습은 `GAST_NAVSKILL_DESIGN_20261018.md`에 따로 있다.
+새로 계획 중인 NavSkill 학습은 `GAST_NAV_V1_DESIGN.md`에 따로 있다.
 
 출처:
 - 3906 학습 설정: `checkpoints/teachers/gast/rayir_top5_20261016/3906_gap50_from_dwb38000/params/{env,agent,gast_warm_start}.yaml`
