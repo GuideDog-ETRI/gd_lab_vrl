@@ -1048,7 +1048,9 @@ sim_docker용 계약 <code>simdocker_contract.json</code>(schema <code>simdocker
 <h3>6.4 현재 한계</h3>
 <div class="box warn">
 <ul>
-<li><b>GAST 경로는 시뮬레이션 전용이다.</b> Pilot은 <code>--interface lo --sim</code>이 아니면 GAST 모델을 거부한다. 실기 pose(camel_pilot <code>/odom</code>, 50 Hz) 입력과 실제 D4xx 스트림 → 매퍼 연결은 아직 구현되지 않았다.</li>
+<li><b>GAST 경로는 시뮬레이션 전용이다.</b> Pilot은 <code>--interface lo --sim</code>이 아니면 GAST 모델을 거부한다. 학습·E1·MuJoCo·sim_docker는 모두 정답(GT) pose를 쓴다(2026-10-16 결정).
+실기 pose는 camel_pilot이 발행하는 <code>/odom</code>(nav_msgs/Odometry, odom→base_link, 50 Hz; rosbag에서 확인)을 쓸 예정이며, 모델의 pose 입력 형식(캡처마다 world x, y, yaw)은 이미 맞춰 두었다.
+<b>실기 포팅 때 할 일</b>: Pilot에 <code>/odom</code> 구독 추가, 실기 odom 오차 측정 후 pose 오차 평가(UPDATE157, <code>POSE_ERR</code>)로 민감도 확인, 실제 D4xx 스트림 → 매퍼 연결.</li>
 <li>sidecar의 IR은 코스 GT 기하로 계산한다(실제 IR 영상 아님). depth 잡음에 stereo fill-in 패치는 없다.</li>
 <li>계약은 history 초기값을 <code>zeros</code>로, launcher는 <code>RBQ_VRL_HISTORY_INIT=repeat_first</code>를 쓴다 — 하나로 맞춰야 한다.</li>
 <li>force4_classify의 갭 창과 코스 XML 표식이 약간 다르다 — 정리 필요.</li>
