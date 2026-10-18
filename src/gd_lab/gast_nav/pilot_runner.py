@@ -5,6 +5,24 @@ import signal
 import time
 from pathlib import Path
 from collections import Counter,defaultdict
+# train.py imports this module before AppLauncher/map_cuda: select cache before Triton import.
+def configure_rank_cache():
+    base = os.environ.get('GAST_TRITON_CACHE_ROOT')
+    if not base:
+        return
+    rank = os.environ.get('LOCAL_RANK', 'warmup')
+    if rank not in ('warmup', '0', '1', '2'):
+        raise ValueError('unsupported diagnostic/training rank')
+    cache = Path(base) / rank
+    cache.mkdir(parents=True, exist_ok=True)
+    os.environ['TRITON_CACHE_DIR'] = str(cache)
+    for directory in (Path.home(), cache, Path(os.environ['XDG_CACHE_HOME'])):
+        probe = directory / f'.write_probe_{os.getpid()}'
+        probe.write_text('ok'); probe.unlink()
+    print(json.dumps({'cache_rank': rank, 'triton_cache': str(cache),
+                      'container_home': str(Path.home()), 'writable': True}), flush=True)
+
+configure_rank_cache()
 import torch
 import torch.distributed as dist
 from .runner_support import TopK
@@ -181,3 +199,57 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
         # A second stop request during Isaac close must not restore SIG_DFL
         # and replace the recorded timeout with an unrelated signal exit.
         signal.signal(signal.SIGUSR1,signal.SIG_IGN if previous==signal.SIG_DFL else previous)
+
+
+def warmup_maps(root):
+    """Synthetic inference only; compile actual sensor/grid specializations on GPU0."""
+    import yaml
+    device = 'cuda:' + os.environ.get('LOCAL_RANK', '0')
+    torch.cuda.set_device(device)
+    from .map_cuda import ray_evidence_cuda, clearance_cuda, fit_surface_cuda
+    from .map_types import WIDE_GRID, ResolvedRays
+    from .near_clearance import extended_near_grid
+    from .map_config import load_config
+    from .obs_terms import sensor_pattern
+    settings = yaml.safe_load((root/'configs/gast_nav/environment.yaml').read_text())['sensors']
+    origins, directions = sensor_pattern(settings, device=device)
+    origins = origins.unsqueeze(0); directions = directions.unsqueeze(0)
+    distances = torch.ones(origins.shape[:2], device=device)
+    flag = torch.zeros_like(distances, dtype=torch.bool)
+    rays = ResolvedRays(origins, directions, distances, ~flag, flag)
+    points = origins + directions * distances[..., None]
+    # Inherited 3906 height scanner: 17 x 11 returns, appended by capture().
+    x, y = torch.meshgrid(torch.linspace(-.8,.8,17,device=device),
+                          torch.linspace(-.5,.5,11,device=device), indexing='ij')
+    terrain = torch.stack((x,y,torch.zeros_like(x)),-1).reshape(1,187,3)
+    points = torch.cat((points,terrain),1)
+    surface_valid = torch.ones(points.shape[:2],device=device,dtype=torch.bool)
+    results = []
+    with torch.inference_mode():
+        for label, grid in [('wide', WIDE_GRID), ('extended_near', extended_near_grid()[0])]:
+            height = torch.zeros((1, grid.ny, grid.nx), device=device)
+            for name, operation in [
+                ('surface', lambda: fit_surface_cuda(points, surface_valid, grid, settings)),
+                ('evidence', lambda: ray_evidence_cuda(rays, height, grid, load_config())),
+                ('clearance', lambda: clearance_cuda(torch.zeros((1,3,grid.ny,grid.nx), device=device, dtype=torch.uint8), grid)),
+            ]:
+                durations=[]
+                for attempt in range(2):
+                    print(json.dumps({'starting': label+'/'+name, 'attempt': attempt}), flush=True)
+                    start=time.perf_counter(); operation(); torch.cuda.synchronize()
+                    durations.append(time.perf_counter()-start)
+                row={'kernel': label+'/'+name, 'cold_s': durations[0], 'warm_s': durations[1]}
+                results.append(row); print(json.dumps(row), flush=True)
+    destination=Path(os.environ['GAST_TRITON_CACHE_ROOT']).parent/('warmup_result_'+os.environ.get('LOCAL_RANK','seed')+'.json')
+    destination.write_text(json.dumps({'status':'passed','optimizer_steps':0,'kernels':results},indent=2)+'\n')
+
+if __name__ == '__main__':
+    import argparse
+    parser=argparse.ArgumentParser();parser.add_argument('--warmup',action='store_true',required=True)
+    parser.parse_args()
+    import faulthandler
+    faulthandler.dump_traceback_later(20, repeat=True)
+    try:
+        warmup_maps(Path(__file__).resolve().parents[3])
+    finally:
+        faulthandler.cancel_dump_traceback_later()

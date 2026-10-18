@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 # UPDATE162: pilot is the only currently authorized real Nav training scope.
 set -euo pipefail
-mode="${1:?usage: train_gast_nav_3gpu.sh pilot|train [train.py options]}"
+mode="${1:?usage: train_gast_nav_3gpu.sh pilot|train|warmup [train.py options]}"
 shift
 case "$mode" in
+  warmup) mode_flag=--warmup ;;
   pilot) export GAST_NAV_PILOT=1; mode_flag=--pilot ;;
   train) test "${GAST_NAV_TRAINING_AUTHORIZED:-0}" = 1 || { echo 'training authorization required' >&2; exit 2; }; mode_flag=--train ;;
   *) echo "unsupported mode: $mode" >&2; exit 2 ;;
@@ -27,9 +28,22 @@ sha256sum checkpoints/teachers/gast/rayir_top5_20261016/3906_gap50_from_dwb38000
 printf '%q ' "$mode" "$@" > "$launch/arguments.txt"
 mkdir -p "$launch/runtime/tmp" "$launch/runtime/usd" "$launch/runtime/cache" "$launch/runtime/mpl"
 export TMPDIR="$launch/runtime/tmp" APPTAINER_TMPDIR="$launch/runtime/tmp" XDG_CACHE_HOME="$launch/runtime/cache" MPLCONFIGDIR="$launch/runtime/mpl"
-export TRITON_CACHE_DIR="$launch/runtime/cache/triton" CUDA_CACHE_PATH="$launch/runtime/cache/cuda"
+export GAST_TRITON_CACHE_ROOT="$root/logs/gast/nav_v1/$GAST_RUN_ID/triton_cache"
+export TRITON_CACHE_DIR="$GAST_TRITON_CACHE_ROOT/warmup" CUDA_CACHE_PATH="$launch/runtime/cache/cuda"
 export TORCH_HOME="$launch/runtime/cache/torch" NUMBA_CACHE_DIR="$launch/runtime/cache/numba"
-exec apptainer exec --nv --writable-tmpfs --bind "$launch/runtime/usd:/tmp/IsaacLab" \
+mkdir -p "$launch/runtime/home" "$TRITON_CACHE_DIR"
+# A fresh single-process compile precedes torchrun; bounded and inference-only.
+CUDA_VISIBLE_DEVICES=0 APPTAINERENV_CUDA_VISIBLE_DEVICES=0 \
+ timeout --signal=TERM --kill-after=5s 30s apptainer exec --nv --writable-tmpfs \
+  "${GD_LAB_SIF:?set GD_LAB_SIF}" \
+ "${GD_LAB_PYTHON:?set GD_LAB_PYTHON}" -B -m gd_lab.gast_nav.pilot_runner --warmup \
+ > "$root/logs/gast/nav_v1/$GAST_RUN_ID/warmup.log" 2>&1
+for rank in 0 1 2; do
+ mkdir -p "$GAST_TRITON_CACHE_ROOT/$rank"
+ cp -a "$GAST_TRITON_CACHE_ROOT/warmup/." "$GAST_TRITON_CACHE_ROOT/$rank/"
+done
+if [[ "$mode" = warmup ]]; then exit 0; fi
+exec apptainer exec --nv --writable-tmpfs  --bind "$launch/runtime/usd:/tmp/IsaacLab" \
   "${GD_LAB_SIF:?set GD_LAB_SIF}" "${GD_LAB_PYTHON:?set GD_LAB_PYTHON}" -B \
   -m torch.distributed.run --standalone --nnodes=1 --nproc_per_node=3 \
   scripts/gast_nav/train.py "$mode_flag" --distributed --total_envs 4096 --headless "$@"
