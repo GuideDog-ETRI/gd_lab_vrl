@@ -152,9 +152,9 @@ class RayIrHistory(TerrainHistory):
         super().__init__(env)
         self.frames = torch.zeros(env.num_envs, 49, CHANNELS * CELLS, device=env.device)
 
-    def update(self, env, terrain):
+    def update(self, env, terrain, pose_override=None):
         step = env.common_step_counter
-        pose = pose_xyyaw(env)
+        pose = pose_xyyaw(env) if pose_override is None else pose_override
         capture = step - self.last_capture >= self.capture_every
         if capture.any():
             for value in (self.frames, self.poses, self.steps):
