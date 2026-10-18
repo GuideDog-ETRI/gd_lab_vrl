@@ -109,7 +109,7 @@ gast_history (4496) ──► TemporalTerrainEncoder
     + age 임베딩 (age/5, valid 평균)
     → MultiheadAttention(64, 4 heads) → LayerNorm → GRU(64) → FC 32 + Tanh
     → terrain latent 32  (valid 셀이 하나도 없으면 0)
-actor  : [proprio 46 | z_t 19 | latent 32] → MLP 512-256-128 (ELU) → 12 행동
+actor  : [proprio 46×4 (최근 4 step) | z_t 19 | latent 32] = 235 → MLP 512-256-128 (ELU) → 12 행동
 critic : privileged obs → MLP 512-256-128
 aux    : latent 32 → FC 128 → 187×6 재구성
          (height smooth-L1 + valid/gap BCE, gap 셀 가중 ×5)
