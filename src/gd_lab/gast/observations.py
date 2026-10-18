@@ -29,9 +29,10 @@ class TerrainHistory:
         self.frames[ids] = 0
         self.steps[ids] = self.NEVER
         self.last_capture[ids] = self.NEVER
-    def update(self, env, terrain):
+    def update(self, env, terrain, pose_override=None):
         step = env.common_step_counter
-        pose = pose_xyyaw(env)
+        # UPDATE157 evaluator-only odom; default retains the original GT path.
+        pose = pose_xyyaw(env) if pose_override is None else pose_override
         capture = step - self.last_capture >= self.capture_every
         if capture.any():
             for value in (self.frames, self.poses, self.steps):

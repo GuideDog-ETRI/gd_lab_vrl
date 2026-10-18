@@ -55,11 +55,21 @@ def run(env,teacher,student,attention,transport,args,agent_cfg,env_cfg,teacher_p
     counters={k:0 for k in ['gap_cells','gap_direct','gap_carving','gap_unknown','flat_cells','false_gap_5cm','flat_sensor_beams','flat_sensor_hits','delivered_env_packets','foot_lane_cells','foot_lane_valid','gap_deep','flat_deep','gap_deep_carving','flat_deep_carving']}
     next_capture=transport.next_capture(base.common_step_counter);base._vrl_camera_capture_step=next_capture
     start=int(base.common_step_counter);steps=round(args.replay_seconds/dt);events=[];timing={'mapping':[],'sampling_history_actor':[]}
+    # UPDATE157: no model/RNG/override is active when U157_POSE_ERR is unset.
+    from pose_error157 import from_environ,PoseError,transform_packet
+    pose_cfg=from_environ();pose_model=None;odom=None
+    if pose_cfg is not None:
+        if arm in ('G','GV'):
+            raise ValueError('UPDATE157 requires a sensor mapper arm; G/GV are GT diagnostic paths')
+        pose_model=PoseError(pose_cfg,n,dt,agent_cfg.seed,device)
+        robot=base.scene['robot']
+        odom=pose_model.update(pose_xyyaw(base),robot.data.root_lin_vel_w[:,:2].norm(dim=-1),robot.data.root_ang_vel_w[:,2])
     try:
         for k in range(steps):
             step=int(base.common_step_counter);stamp=step*dt;t=time.perf_counter()
             poses=pose_xyyaw(base).cpu().numpy();scanner=base.scene['height_scanner'].data.pos_w[:,2].cpu().numpy()
-            packed=maps.sample(poses,scanner,stamp)
+            map_poses=poses if pose_model is None else odom.cpu().numpy()
+            packed=maps.sample(map_poses,scanner,stamp)
             if arm in ('G','GV'):
                 # UPDATE129 diagnostics: ground-truth teacher map (G), or the same masked to LiDAR-observed cells (GV).
                 gt_now=clean_terrain(base).cpu().numpy();vis=np.ones((n,187),bool) if arm=='G' else maps.visible(poses,stamp)
@@ -67,7 +77,8 @@ def run(env,teacher,student,attention,transport,args,agent_cfg,env_cfg,teacher_p
                 packed=np.concatenate((np.where(vis,gt_now[:,:187],0.),vis.astype(np.float64)),1).astype(np.float32);maps.last_sources=vis.astype(np.uint8)
             terrain_tensor=torch.as_tensor(packed,device=device)
             if cell_ir is not None:terrain_tensor=torch.cat((terrain_tensor,cell_ir(base,terrain_tensor[:,187:]>0)),-1)
-            view=obs.copy();view['gast_history']=history.update(base,terrain_tensor)
+            view=obs.copy()
+            view['gast_history']=history.update(base,terrain_tensor) if pose_model is None else history.update(base,terrain_tensor,pose_override=odom)
             assert view['gast_history'].shape==(n,frame_width) and torch.isfinite(view['gast_history']).all()
             latent=teacher.terrain_latent(view);assert torch.isfinite(latent).all()
             actions=teacher.act_with_terrain_latent(obs,latent);assert torch.isfinite(actions).all()
@@ -104,9 +115,15 @@ def run(env,teacher,student,attention,transport,args,agent_cfg,env_cfg,teacher_p
             rec.sample();obs,_,done,_=env.step(actions)
             reset=done.reshape(-1).bool();episodes+=reset.long();switch.reset(reset);ids=reset.nonzero().flatten();history.reset(ids);maps.reset(ids.tolist())
             if cell_ir is not None:cell_ir.reset(ids)
+            if pose_model is not None:
+                pose_model.reset(ids)
+                robot=base.scene['robot']
+                odom=pose_model.update(pose_xyyaw(base),robot.data.root_lin_vel_w[:,:2].norm(dim=-1),robot.data.root_ang_vel_w[:,2])
             step=int(base.common_step_counter)
             if step==next_capture:
                 packet=sensor.capture(episodes.cpu().numpy(),step)
+                if pose_model is not None:
+                    packet=transform_packet(packet,odom.cpu().numpy())
                 # Evaluator-only flat classification; never enters sensor or mapper.
                 z=base.scene['height_scanner'].data.ray_hits_w[...,2].cpu().numpy()
                 flat_env=np.isfinite(z).all(1)&(np.ptp(z,axis=1)<.03)
@@ -127,6 +144,8 @@ def run(env,teacher,student,attention,transport,args,agent_cfg,env_cfg,teacher_p
         result=dict(schema='update128_lidar_l2_deep',arm=arm+('x2' if SENSOR_COUNT==2 and sensor_kind=='lidar' else '')+('_cam' if sensor_kind=='cam' else ''),sensor=sensor_kind,condition=args.e1_condition,seed=agent_cfg.seed,num_envs=n,seconds=steps*dt,teacher_sha256=digest(teacher_path),student_sha256=None,initial_state_sha256=initial_hash,initial_terrain=terrain,terrain_grid_sha256=gridsha,initial_environment=initial_environment,gain_control=gain_control,approaches=records,diagnostics=diag.result(),lidar=sensor.report(),mapper=maps.report(),cell_counts=counters,transport_config=transport.config.manifest(dt),transport_counts={key:getattr(transport,key) for key in ('captured','dropped','delivered')},packet_events=events,packet_schedule_sha256=hashlib.sha256(json.dumps(events).encode()).hexdigest(),start_step=start,policy_steps=steps,rollout_wall_seconds=time.perf_counter()-begin,nan_checks_passed=True,timing={name:dict(n=len(v),total_seconds=sum(v),mean_ms=1000*np.mean(v) if v else None,p95_ms=1000*np.quantile(v,.95) if v else None) for name,v in timing.items()},definitions=dict(map='Unchanged h0 5cm reducer, 2s TTL; native 11x17x8 TerrainHistory; L2 same carving certificate, output +5 valid 1; no labels into mapper',self_occlusion='Actual moving URDF collision triangles; foot spheres tessellated subdivision2',flat_false_gap='Known non-gap E1 cells with predicted height more than 5cm below GT; denominator all known non-gap cells, unknown excluded from numerator'))
         if rec.flat is not None:result['update34_flat_pitch']=rec.flat.result()
         result['update136_rayir']=cell_ir.summary() if cell_ir is not None else None
+        if pose_model is not None:
+            result['update157_pose_err']=pose_model.summary()
         Path(args.replay_out).with_name('false_deep_locations.json').write_text(json.dumps(false_deep_locations,indent=2,allow_nan=False))
         np.savez_compressed(Path(args.replay_out).with_name('deep_samples.npz'),samples=np.asarray(deep_samples))
         if getattr(maps,'dump',None):

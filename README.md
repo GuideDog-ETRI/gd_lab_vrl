@@ -19,7 +19,7 @@ RBQ10 안내견 로봇의 비전 보행 학습 저장소다. 블라인드 DreamW
 | 3906 E1 | E1(Isaac 평가, 아래 [E1](#e1-평가의-입력-경로-arm)) 결과다. 수치는 갭을 발 빠짐 없이 깨끗이 넘은 비율이다. v25or 지도 입력 갭 96.8%, 카메라+필터 지도 입력 갭 96.2%, 계단 100% |
 | 배포 후보 | 원래 3906과 A2769_top1 중 최종 선택을 기다리는 중이다. A2769_top1은 Ray+IR 2769를 aug149(매퍼 오차 증강 파인튠, 브랜치 `aug149-mapper-aug`)로 이어 학습한 모델의 Top-1이다 |
 | MuJoCo depth_ir 갭 (12 seed) | MuJoCo 배포 시뮬(실제 Pilot 코드)에서 depth+IR 카메라 → 지형처리기 경로로 갭 구간 12회를 시험해 완주한 횟수다. A2769_top1 11/12, 3906 10/12 |
-| 진행 중 | pose(odom) 오차를 넣고 평가하는 도구 (UPDATE157)<br>NavSkill 설계 v0.2 검토: 좁은 통로 통과, 시계방향 제자리 회전, 계단 정렬을 학습할 다음 교사<br>sim_docker 통합: 팀원 Isaac 시뮬레이터에 3906 실행기를 구현했고, in-sim smoke와 PR은 전이다<br>UPDATEnnn은 검토자 작업 지시 번호이며, 문서는 `notes/`에 있다 |
+| 진행 중 | pose(odom) 오차 평가 도구는 완료 (UPDATE157, [결과](https://github.com/GuideDog-ETRI/gd_rbq10_deploy_vrl/blob/main/docs/experiments/POSE_ERR_ODOM_20261018.md))<br>NavSkill 설계 v0.2 검토: 좁은 통로 통과, 시계방향 제자리 회전, 계단 정렬을 학습할 다음 교사<br>sim_docker 통합: 팀원 Isaac 시뮬레이터에 3906 실행기를 구현했고, in-sim smoke와 PR은 전이다<br>UPDATEnnn은 검토자 작업 지시 번호이며, 문서는 `notes/`에 있다 |
 | 실기 | GAST 경로는 아직 시뮬레이션 전용이다. Pilot `/odom` 구독과 실기 odom 오차 측정은 포팅할 때 한다 ([실기 포팅 때 할 일](#실기-포팅-때-할-일-아직-구현-안-됨)) |
 
 **계보** (숫자는 iteration 번호, 화살표는 이어 학습함)
@@ -92,7 +92,7 @@ E1은 Isaac에서 정책을 고정하고, 같은 seed와 같은 초기 상태에
 | 할 일 | 내용 |
 |---|---|
 | **Pilot에 `/odom` 구독 추가** | camel_pilot이 발행하는 `/odom`(nav_msgs/Odometry, odom→base_link, 50 Hz)을 받아 지형 기억 warp와 매퍼의 pose로 쓴다. 현재 MuJoCo의 가짜 odom 패킷(ODM1, UPDATE157) 자리를 바꾸면 된다. 모델 입력 형식(캡처마다 world x, y, yaw)은 이미 맞춰 두었다 |
-| **실기 odom 오차 측정** | 실기 `/odom`과 실제 이동을 비교해 drift, 미끄러짐, 계단의 z·pitch 오차, 지연을 잰다. 그 값을 pose 오차 평가(`POSE_ERR`)에 넣어 3906의 민감도를 확인하고, 필요하면 pose 노이즈 파인튠을 한다 |
+| **실기 odom 오차 측정** | 실기 `/odom`과 실제 이동을 비교해 drift, 미끄러짐, 계단의 z·pitch 오차, 지연을 잰다. 그 값을 pose 오차 평가(MuJoCo `POSE_ERR`, E1 `tools/rl_replay/run_pose_error157.sh`)에 넣어 3906의 민감도를 확인하고, 필요하면 pose 노이즈 파인튠을 한다. 가정 레벨 결과(4.8 s 상대오차 약 3 cm까지 저하 없음, 약 8 cm부터 30 cm 갭 실패 증가): [POSE_ERR_ODOM_20261018.md](https://github.com/GuideDog-ETRI/gd_rbq10_deploy_vrl/blob/main/docs/experiments/POSE_ERR_ODOM_20261018.md) |
 | 실제 D4xx 스트림 → 매퍼 | 시뮬레이션 sidecar 대신 실제 depth+IR을 camfilter136 → v25or로 연결한다 |
 | Pilot `--sim` 제한 해제 조건 | Pilot은 지금 `--interface lo --sim`에서만 GAST 모델을 받는다. pose, 접지, 센서 시계, hold 동작을 확인한 뒤 해제한다 |
 | history 초기값 통일 | 계약은 `zeros`, 실행기는 `RBQ_VRL_HISTORY_INIT=repeat_first`를 쓴다. 하나로 맞춘다 |
