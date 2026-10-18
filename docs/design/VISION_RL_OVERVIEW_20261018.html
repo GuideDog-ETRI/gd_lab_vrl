@@ -47,10 +47,9 @@
 </p>
 
 <div class="box">
-<span class="t">이 문서가 다루지 않는 것 — 블라인드 문서 참조</span>
-블라인드 보행 공통 사항은 <code>gd_lab/gd_lab_training_v2.pdf</code>(gd_lab 학습 파이프라인 총정리 v2)에 있으며 여기서 반복하지 않는다:
-용어(step·iteration·배치) 0.2절 · CENet 구조 1.2절 · AdaBoot 1.3절 · PD/액션 경로 1.4절 · GAE 3.2절 · PPO 손실 3.3절 · CENet 손실 3.4절 · 좌우 대칭 증강 3.6절 · camel.policy.v1 계약 4.1절.
-블라인드 문서 6부(9월 초기 비전 설계: 렌더 카메라 학생 80×45)는 <b>현행이 아니다</b> — 현행은 아래 "교사 직결" 구조다.
+<span class="t">구성</span>
+본편 1–7부는 현행 비전 RL(Ray+IR 교사 직결)이다. 그 바탕인 블라인드 보행의 개념·용어·CENet·AdaBoot·데이터수집·GAE·PPO·대칭 증강·배포 계약·실험 구성은 <b>기초편 A0–A5</b>에 함께 실었다(원래 <code>gd_lab/gd_lab_training_v2.pdf</code>).
+처음 읽는 사람은 1부 → 기초편 A0–A3 → 2부 이후 순서를 권한다. 2026-09 초기 비전 설계(렌더 카메라 학생 80×45)는 현행이 아니다.
 </div>
 
 <div class="toc">
@@ -66,7 +65,9 @@
 5.1 E1 · 5.2 RL Replay · 5.3 MuJoCo 배포 검증<br>
 <b>6부. 배포</b><br>
 6.1 export · 6.2 번들·계약 · 6.3 Pilot 런타임 · 6.4 한계<br>
-<b>7부. 현재 결과와 과제</b> · <b>부록</b> 코드 위치
+<b>7부. 현재 결과와 과제</b> · <b>부록</b> 코드 위치<br>
+<b>기초편 A. 블라인드 보행 공통 기반</b><br>
+A0 개념·용어·규모·3대 신경망 · A1 액션(Actor 입력·CENet·AdaBoot·PD) · A2 데이터수집(관측·롤아웃·보상·커리큘럼·지형·랜덤화) · A3 학습(텐서 매핑·GAE·PPO 손실·CENet 손실·KL LR·대칭 증강) · A4 배포(계약·export·백엔드) · A5 실험(TRAIN_ARM·성능)
 </div>
 
 <!-- ============================================================ -->
@@ -111,16 +112,705 @@
 </pre>
 
 <!-- ============================================================ -->
+<h2 class="pb" id="base">기초편 A. 블라인드 보행 공통 기반 (gd_lab 학습 파이프라인 총정리 v2에서 옮김)</h2>
+<p>비전 교사는 블라인드 DreamWaQ 구조 위에 지형 경로를 붙인 것이다. 아래 A0–A5는 <code>gd_lab/docs/gd_lab_training_v2.html</code>(2026-09-20, gd_lab main 50b848b)의 개념·용어·액션·데이터수집·학습·배포·실험 내용을 그대로 옮겼다(원문 6부 "비전 RL 확장"은 현행이 아니어서 제외).
+원문의 수치는 <b>블라인드 ARM1(50 Hz) 기준</b>이다. 비전 교사(3906)와 다른 값은 아래 표에 모았고, 본편(2–7부)이 현행 값이다.</p>
+<table>
+<tr><th>항목</th><th>기초편 A (블라인드 ARM1, 09-20)</th><th>비전 교사 3906 (현행)</th></tr>
+<tr><td>정책 주기</td><td>sim dt 0.005 × decimation 4 = 0.02 s (50 Hz), 에피소드 1000 step</td><td>decimation 2 = 0.01 s (<b>100 Hz, ARM4</b>), 에피소드 20 s = 2000 step</td></tr>
+<tr><td>PD 게인</td><td>ARM1 현재 게인 hip 88.14 / knee 102.22, kd 1.99</td><td>ARM4 nominal hip 123.39 / knee 127.77, kd 2.4 (A5.1의 ARM 4)</td></tr>
+<tr><td>Actor 입력</td><td>46 × 4프레임 + CENet code 19 = 203</td><td>203 + terrain latent 32 = <b>235</b> (2.1절)</td></tr>
+<tr><td>Critic 입력</td><td>298</td><td>298 (같은 특권 관측, 높이맵 포함)</td></tr>
+<tr><td>병렬 env</td><td>4096</td><td>1024 (3906 학습), DDP 시 <code>--total_envs</code></td></tr>
+<tr><td>지형</td><td>10종</td><td>11종, <b>platform_gap 50%</b> (4.3절)</td></tr>
+<tr><td>보상</td><td>21항목</td><td>v2.1 기본 + 갭·계단·핸들 외란 항목 (4.4절)</td></tr>
+<tr><td>학습률</td><td>adaptive KL, 하한 3e-5</td><td>fixed: policy 1e-4 / terrain 1e-3 (warm start 설정)</td></tr>
+<tr><td>추가 신경망</td><td>Actor · Critic · CENet</td><td>+ GAST 지형 encoder(시간 기억) + 재구성 decoder (4.1절)</td></tr>
+<tr><td>배포</td><td>camel.policy.v1 계약 (Meta 백엔드)</td><td>GAST 전용 2-ONNX 번들(actor + encoder) + manifest, 계약 밖 VRL 백엔드 (6부)</td></tr>
+</table>
+<h2 id="a0">A0. 개념 — 전체 그림</h2>
+
+<h3>A0.1 gd_lab이 하는 일</h3>
+<p>
+IsaacLab(시뮬레이터) + <code>rsl-rl-lib 3.0.1</code>(PPO 구현) 위에 DreamWaQ 스타일 blind 사족보행 정책을
+학습시킨다. <b>blind</b>란 배포되는 Actor가 시각·거리 센서 없이 자기수용감각만으로 걷는다는 뜻이고,
+학습 중에만 존재하는 Critic은 지형 높이·접촉력 등 특권정보를 추가로 본다. 이 저장소의 독자 설계는
+커리큘럼이 아니라 <b>CENet</b>(맥락 추정 네트워크)과 <b>AdaBoot</b>(적응형 부트스트랩)이다.
+</p>
+<div class="box">
+<span class="t">왜 Critic만 특권정보를 보는가 — 비대칭 Actor-Critic</span>
+Critic은 <b>학습 중에만</b> 쓰이고 로봇에 실리지 않는다. 그러니 실기에 없는 정보(지형 높이맵, 마찰계수,
+접촉력)를 마음껏 줘도 배포에 문제가 없다. 가치추정이 정확해지면 advantage가 정확해지고, 그 결과
+Actor의 경사가 덜 흔들린다. "배포될 쪽만 제약을 지키면 된다"는 것이 비대칭 구조의 요지다.
+</div>
+
+<h3>A0.2 용어 — 스텝 / 에피소드 / 이터레이션 / 배치</h3>
+<table>
+<tr><th style="width:22%">개념</th><th>정의</th></tr>
+<tr><td>스텝(step)</td><td>정책이 1번 행동하는 단위. <code>sim.dt</code>(0.005 s) × <code>decimation</code>(4) = <b>0.02 s (50 Hz)</b>.
+  물리는 200 Hz로 돌지만 정책 출력은 4틱 동안 유지된다</td></tr>
+<tr><td>에피소드</td><td>로봇 1마리의 리셋~종료(낙상 또는 타임아웃). <code>episode_length_s</code>=20 s = 최대 1000스텝</td></tr>
+<tr><td><code>num_envs</code></td><td>병렬 로봇 수(4096). GPU 병렬도일 뿐 난이도와 무관</td></tr>
+<tr><td>iteration</td><td>(전 env가 <code>num_steps_per_env</code>=100스텝 수집) + (5 epoch × 4 minibatch 갱신) 1사이클.
+  정책은 100스텝 내내 <b>고정</b>, 끝난 뒤 한 번만 갱신 </td></tr>
+<tr><td>배치</td><td>4096 × 100 = <b>409,600</b> transition / iteration </td></tr>
+</table>
+<div class="box">
+<span class="t">1 iteration ≠ 1 episode</span>
+100스텝 iteration과 최대 1000스텝 episode는 단위가 다르다. 넘어지지 않으면 한 에피소드가 약 10 iteration에
+걸쳐 이어진다(v1의 48스텝 기준으로는 20.8이었다). 4096마리의 리셋 시점은 완전히 비동기라서, 어느
+iteration에도 "막 리셋된 로봇"과 "900스텝째 걷는 로봇"이 섞여 있다.
+</div>
+
+<h3>A0.3 학습 규모 파라미터</h3>
+<table>
+<tr><th style="width:28%">항목</th><th class="num" style="width:13%">값</th><th>비고</th></tr>
+<tr><td><code>num_envs</code></td><td class="num">4096</td><td>play 태스크는 축소</td></tr>
+<tr><td><code>num_steps_per_env</code></td><td class="num">100</td><td>롤아웃 horizon  (v1: 48, 벤더: 60)</td></tr>
+<tr><td><code>num_learning_epochs</code></td><td class="num">5</td><td>롤아웃 1회당 반복 학습</td></tr>
+<tr><td><code>num_mini_batches</code></td><td class="num">4</td><td>→ iteration당 경사 갱신 20회</td></tr>
+<tr><td><code>max_iterations</code></td><td class="num">40000</td><td>4-arm 실험 기준  (기본 cfg 50000)</td></tr>
+<tr><td><code>save_interval</code></td><td class="num">1000</td><td>체크포인트 주기</td></tr>
+<tr><td><code>episode_length_s</code></td><td class="num">20.0 s</td><td>= 1000 스텝</td></tr>
+<tr><td><code>seed</code></td><td class="num">42</td><td>4-arm 고정</td></tr>
+</table>
+<p class="small">
+<code>num_envs</code>를 늘리면 iteration당 데이터는 늘지만 iteration 자체도 길어져서 총 학습시간이 오히려
+늘 수 있다(v1 실측: 4096→8192에서 2.35 s→2.90 s). 학습시간을 줄이는 레버는 <code>num_envs</code>가 아니라
+<code>max_iterations</code>다.
+</p>
+
+<h3>A0.4 3대 신경망</h3>
+<table>
+<tr><th style="width:11%"></th><th style="width:29%">Actor</th><th style="width:26%">Critic</th><th>CENet</th></tr>
+<tr><td>정규화</td><td>EmpiricalNormalization(230)</td><td>EmpiricalNormalization(298)</td><td>Actor 정규화기 공유</td></tr>
+<tr><td>입력</td><td>46×4 + code 19 = <b>203</b> </td><td>298</td><td>230 (46×5, term-major)</td></tr>
+<tr><td>은닉</td><td>203→512→256→128 (ELU)</td><td>298→512→256→128 (ELU)</td><td>encoder 230→128→64 (ELU)</td></tr>
+<tr><td>출력</td><td>128→12, 활성화 없음 = μ</td><td>128→1 = V(s)</td>
+    <td>head 3개: 64→16(mean) / 64→16(logvar) / 64→3(velocity)<br>decoder 19→64→128→46</td></tr>
+<tr><td>분포</td><td>Normal(μ, σ), σ는 학습되는 스칼라 1개 (<code>init_noise_std</code>=1.0)</td>
+    <td>Actor와 몸통 공유 없음</td><td>배포 시 decoder 출력은 버려진다</td></tr>
+</table>
+
+<h3>A0.5 전체 파이프라인</h3>
+<pre>
+┌────────────────────────────────────────────────────────────────────┐
+│ ① 액션 (A1부)      Actor(+CENet code) → 관절 오프셋 12 → PD → 토크         │
+│      ↓ IsaacSim  물리 200 Hz × 4틱                                    │
+│ ② 데이터수집 (A2부) obs / action / reward / done / value / log_prob      │
+│      ↑↓ 이 스텝에 리셋된 로봇만 커리큘럼(7종) 갱신                          │
+│      │ (100스텝 반복 — 정책 고정)                                       │
+├────────────────────────────────────────────────────────────────────┤
+│ ③ 학습 (A3부)      GAE → 미니배치 20회                                   │
+│      Actor: surrogate / Critic: value / 공통: entropy                 │
+│      CENet: 별도 optimizer 로 velocity + recon + β·KL (PPO와 분리)      │
+├────────────────────────────────────────────────────────────────────┤
+│ ④ 다음 iteration — 갱신된 Actor 로 다시 ①                                │
+└────────────────────────────────────────────────────────────────────┘
+          ⑤ 배포 (A4부)  체크포인트 → export → camel.policy.v1 → 로봇
+</pre>
+
+<h2 class="pb" id="a1">A1. 액션 — Actor가 무엇을 어떻게 산출하는가</h2>
+
+<h3>A1.1 Actor 입력 203 </h3>
+<p>
+v1에서는 최신 1프레임(45) + code(19) = 64였다. 지금은 <code>actor_history_steps=4</code>로
+<b>최근 4프레임을 최신순</b>으로 받는다.
+</p>
+<div class="eq">
+actor_input = concat( frame[t], frame[t−1], frame[t−2], frame[t−3], code )<br>
+&nbsp;&nbsp;= 46 × 4 + 19 = <b>203</b><br><br>
+code = concat( velocity.detach(), z ) = 3 + 16 = <b>19</b>
+</div>
+<p>
+정규화된 history에서 <code>frames_idx</code>로 뽑는다. history는 <b>term-major</b>로 저장되므로
+(항목별 5스텝 뭉치를 이어붙인 배치), 특정 시점의 한 프레임을 꺼내려면 항목마다 흩어진 위치를 모아야 한다.
+그 인덱스를 <code>__init__</code>에서 한 번 계산해 버퍼로 등록해 둔다.
+</p>
+<pre>
+term-major 배치 (46 × 5 = 230)
+  [ang_vel  t-4 t-3 t-2 t-1 t] [gravity t-4 … t] [cmd …] [joint_pos …] [joint_vel …] [actions …] [payload …]
+   └─ 3×5=15 ─┘                 └─ 15 ─┘          15       60            60            60          5
+
+frames_idx = 각 term 의 "t" 위치 → 그다음 "t-1" 위치 → … (최신 먼저, K=4)
+latest_idx = frames_idx[:46]  (최신 1프레임만)
+</pre>
+<div class="box">
+<span class="t">왜 계약은 바뀌지 않는가, 그리고 왜 체크포인트는 깨지는가</span>
+4프레임은 이미 저장 중인 5프레임 안에 들어가므로 <b>관측 규격과 ONNX 계약은 그대로</b>다.
+반면 Actor 1층의 입력 폭이 <code>K×46+19</code>이므로 <b>K를 바꾸면 체크포인트를 이어받을 수 없다</b>.
+K=4가 K=1보다 낫다는 실험 근거는 저장소에 없다(4-arm 문서도 K를 다루지 않는다) — 현재로서는
+"blind 기준선과 맞춘 값"으로 이해하는 것이 정확하다.
+</div>
+
+<h3>A1.2 CENet — 맥락 추정 네트워크</h3>
+<p>
+Actor는 자기 몸의 상태만 본다. 그런데 "지금 밟고 있는 바닥이 미끄러운가", "짐이 실려 무거운가" 같은
+<b>관측되지 않는 맥락</b>은 걸음을 크게 좌우한다. CENet은 관측 <b>히스토리</b>에서 그 맥락을 추정해
+잠재벡터로 압축하고, 동시에 몸통 선속도를 회귀한다.
+</p>
+<pre>
+  obs_history 230        encoder(공유 몸통)             mean_latent   Linear(64→16)  ┐ 정답 없음
+  (46×5, term-major) ─→  230→128→64 (ELU) ─┬─→                                      │ (자기지도)
+                              feat(64)     ├─→  logvar_latent Linear(64→16)         ┘ ±10 clamp
+                                           └─→  mean_velocity Linear(64→3)  ← 지도학습(정답 있음)
+
+   z 샘플링   학습: z = mean + randn × exp(0.5 · logvar)     ← 재매개변수화 트릭
+              추론: z = mean_latent                           ← 결정론적
+
+   code = concat( velocity.detach(), z )  19차원  →  Actor 입력 / decoder 입력
+   decoder 19→64→128(ELU)→46  →  o(t+1) 재구성 시도
+</pre>
+
+<h4>세 개의 헤드</h4>
+<p>
+"헤드"란 비싼 특징추출(encoder)을 한 번만 하고 그 결과 <code>feat</code>를 재사용해 각자 다른 걸 내는
+얇은 마지막 층이다. 여기서는 셋 다 <code>Linear</code> 한 층씩이다.
+</p>
+<table>
+<tr><th style="width:24%">헤드</th><th style="width:16%">출력</th><th>학습 신호</th></tr>
+<tr><td><code>mean_velocity</code></td><td>3</td><td><b>지도학습</b>. Critic 관측의 진짜 <code>base_lin_vel</code>과 MSE</td></tr>
+<tr><td><code>mean_latent</code></td><td>16</td><td><b>자기지도</b>. 재구성 손실 + KL로만 형태가 잡힘</td></tr>
+<tr><td><code>logvar_latent</code></td><td>16</td><td>불확실성. ±10으로 clamp — 없으면 <code>exp()</code>가 발산</td></tr>
+</table>
+<div class="box">
+<span class="t">재매개변수화 트릭이 필요한 이유</span>
+z를 분포에서 그냥 뽑으면 그 표집 연산에 경사가 흐르지 않아 encoder를 학습시킬 수 없다.
+<code>z = mean + randn × exp(0.5·logvar)</code>로 쓰면 무작위성이 <code>randn</code>(경사 불필요)에
+격리되고, <code>mean</code>과 <code>logvar</code>는 곱셈·덧셈으로 연결돼 경사가 그대로 통과한다.
+추론 시에는 표집을 끄고 <code>z = mean</code>을 쓴다 — 배포에서 같은 입력에 같은 출력이 나와야 하기 때문이다.
+</div>
+<p class="small">
+<code>velocity.detach()</code>에 주목. code에 들어가는 velocity는 <b>경사를 끊어서</b> 넣는다. Actor가
+"속도 추정을 자기에게 편한 방향으로 왜곡"하지 못하게 하려는 것이다. 속도 헤드는 오직 진짜 속도와의
+MSE로만 학습된다.
+</p>
+
+<h3>A1.3 AdaBoot — 속도를 참값으로 줄지 추정값으로 줄지</h3>
+<p>
+학습 초기에는 CENet의 속도 추정이 부정확하다. 그 값을 그대로 Actor에 넣으면 정책이 잘못된 속도 인식 위에
+올라선다. AdaBoot는 <b>동전을 던져</b> 일정 확률로 Critic 관측의 진짜 <code>base_lin_vel</code>을 대신 주입한다.
+</p>
+<div class="eq">
+CV = std(에피소드 총보상) / |mean(에피소드 총보상)|&nbsp;&nbsp;&nbsp;(변동계수)<br>
+p_boot = 1 − tanh(CV)&nbsp;&nbsp;&nbsp;← <b>추정을 믿을 확률</b><br>
+p_boot ← ema × p_boot_prev + (1−ema) × p_boot_new,&nbsp;&nbsp;ema = 0.8
+</div>
+<p>
+성능이 들쭉날쭉하면(CV 큼) <code>tanh(CV)</code>가 1에 가까워져 p_boot이 0으로 내려가고 → <b>참값을 더 자주
+주입</b>한다. 학습이 안정되면 CV가 작아져 p_boot이 1에 가까워지고 → 자기 추정을 쓴다.
+</p>
+<table>
+<tr><th style="width:32%">파라미터</th><th class="num" style="width:10%">값</th><th>의미</th></tr>
+<tr><td><code>adaboot_enabled</code></td><td class="num">true</td><td>on/off</td></tr>
+<tr><td><code>adaboot_min_updates</code></td><td class="num">10</td><td>이 횟수 전에는 통계를 믿지 않음</td></tr>
+<tr><td><code>adaboot_ema</code></td><td class="num">0.8</td><td>p_boot의 지수이동평균 계수</td></tr>
+</table>
+<div class="box">
+<span class="t">동전은 iteration당 한 번만 던진다</span>
+<code>notify_iteration_done()</code>이 플래그를 세우고, 다음 롤아웃의 <b>첫 <code>act</code></b>에서
+한 번 재표집한다. 롤아웃 중간에 바뀌면 같은 배치 안에 "참값을 본 transition"과 "추정값을 본 transition"이
+섞여서, PPO가 일관되지 않은 입력 규약으로 학습하게 된다.
+</div>
+
+<h3>A1.4 액션 → PD 제어 → 시뮬레이션</h3>
+<div class="eq">
+target_joint_pos = default_joint_pos + 0.25 × action&nbsp;&nbsp;&nbsp;(action_scale = 0.25)<br>
+τ = kp × (target − q) − kd × q̇
+</div>
+<table>
+<tr><th style="width:22%">단계</th><th>내용</th></tr>
+<tr><td>액션 의미</td><td>관절 오프셋 12차원(절대각 아님). 활성화 없음 — 무한대 범위지만 clamp 5.0</td></tr>
+<tr><td>하드리밋</td><td>관절 한계 5° 이내 진입 시 saturation 블렌딩(<code>JointPositionActionWithLimitCfg</code>)</td></tr>
+<tr><td>PD 게인</td><td>드라이브 게인 <b>양자의 정수배</b>로만 지정. <code>RBQ_DRIVE_KP_STEP</code> = {hip 17.62734, knee 25.55443}<br>
+  기본(ARM 1·2): hip 5 step = <b>88.1367</b>, knee 4 step = <b>102.2177</b>, kd ≈ 1.99<br>
+  nominal(ARM 3·4): hip 7 step = <b>123.39</b>, knee 5 step = <b>127.77</b>, kd 2.4 </td></tr>
+<tr><td>게인 랜덤화</td><td>리셋마다 기준값의 0.85~1.15배</td></tr>
+</table>
+<p class="small">
+게인을 양자 정수배로만 쓰는 이유는 실제 모터 드라이버가 이산적인 게인 설정만 받기 때문이다 — 학습이
+하드웨어가 구현할 수 없는 값을 쓰지 않게 한다.
+</p>
+<div class="box warn">
+<span class="t">게인은 배포에 그대로 실린다</span>
+학습에 쓴 게인이 ONNX 메타데이터에 기록되어 로봇 액추에이터로 전달된다(A4부). 즉 게인 선택은 시뮬 내부
+설정이 아니라 <b>실기에 박히는 값</b>이고, 4-arm 실험이 이것을 축으로 삼은 이유다.
+</div>
+
+<h2 class="pb" id="a2">A2. 데이터수집 — 무엇이, 어떤 난이도에서 모이는가</h2>
+
+<h3>A2.1 관측 항목</h3>
+<h4>Policy 관측 — 1-step 46 × history 5 = 230 </h4>
+<table>
+<tr><th style="width:30%">항목</th><th class="num" style="width:9%">차원</th><th style="width:26%">노이즈</th><th>물리적 의미</th></tr>
+<tr><td><code>base_ang_vel</code></td><td class="num">3</td><td>U(−0.2, 0.2), scale 0.25</td><td>몸통 각속도</td></tr>
+<tr><td><code>projected_gravity</code></td><td class="num">3</td><td>U(−0.05, 0.05)</td><td>중력벡터의 몸체좌표 투영 — 자세</td></tr>
+<tr><td><code>velocity_commands</code></td><td class="num">3</td><td>없음</td><td>명령 (v<sub>x</sub>, v<sub>y</sub>, ω<sub>z</sub>)</td></tr>
+<tr><td><code>joint_pos</code></td><td class="num">12</td><td>U(−0.01, 0.01)</td><td>기본자세 대비 관절 위치</td></tr>
+<tr><td><code>joint_vel</code></td><td class="num">12</td><td>U(−1.5, 1.5), scale 0.05</td><td>관절 속도</td></tr>
+<tr><td><code>actions</code></td><td class="num">12</td><td>없음</td><td>직전 액션</td></tr>
+<tr><td><code>payload</code> </td><td class="num">1</td><td><b>없음</b></td>
+    <td>운용자 입력 하중 × 0.2. 추정이 아니라 알려진 값이라 노이즈를 주지 않는다</td></tr>
+</table>
+<p class="small">
+<code>payload</code>는 proprio 블록 <b>뒤에</b> 선언된다 — 앞 45차원이 배포 계약상 안정된 접두사이므로,
+이 항을 켜고 꺼도 그 순서가 흔들리지 않는다.
+</p>
+
+<h4>Critic 관측 — 298 </h4>
+<p>앞 45는 policy와 동일한 proprio(노이즈 없는 깨끗한 값)이고, 그 뒤에 특권정보가 붙는다.</p>
+<table>
+<tr><th style="width:34%">추가 항목</th><th class="num" style="width:9%">차원</th><th>의미</th></tr>
+<tr><td><code>base_lin_vel</code></td><td class="num">3</td><td>실제 선속도 — <b>CENet 속도 헤드의 정답</b></td></tr>
+<tr><td><code>feet_around_height_from_terrain</code></td><td class="num">16</td><td>발 4개 × 2×2 ray, 지형 대비 발 높이</td></tr>
+<tr><td><code>feet_contact</code></td><td class="num">4</td><td>발별 접촉 이진값</td></tr>
+<tr><td><code>feet_contact_forces</code></td><td class="num">12</td><td>발별 접촉력 벡터</td></tr>
+<tr><td><code>friction_coeff</code></td><td class="num">2</td><td>(정적, 동적) 마찰계수</td></tr>
+<tr><td><code>base_mass_offset</code></td><td class="num">1</td><td>도메인 랜덤화 질량 오프셋</td></tr>
+<tr><td><code>actuator_gain_scale</code></td><td class="num">24</td><td>PD 게인 스케일(kp×12, kd×12)</td></tr>
+<tr><td><code>push_delta_v</code> </td><td class="num">3</td><td>외란 push가 준 속도 변화량</td></tr>
+<tr><td><code>height_scan</code></td><td class="num">187</td><td>지형 스캔 그리드 <code>GridPatternCfg</code> 17×11, clip ±1, scale 5</td></tr>
+<tr><td><code>payload</code> </td><td class="num">1</td><td>policy와 동일</td></tr>
+</table>
+<pre>
+배치:  45 + 3 + 16 + 4 + 12 + 2 + 1 + 24 + 3 + 187 + 1 = 298
+       base_lin_vel  구간 [45, 48)      ← CENet 타깃 슬라이스
+       height_scan   구간 [110, 297)    ← 비전 teacher 의 terrain encoder 입력
+       payload       구간 [297, 298)
+</pre>
+<div class="box warn">
+<span class="t">height_scan은 더 이상 마지막이 아니다</span>
+v1에서는 <code>height_scan</code>이 Critic 관측의 끝이라 "offset부터 끝까지"로 잘라 쓰는 코드가 있었다.
+지금은 뒤에 <code>payload</code>가 붙어서 그렇게 자르면 188개를 가져오고 11×17 격자 재구성이 깨진다.
+반드시 <b>시작·끝을 모두 지정</b>해야 한다.
+</div>
+
+<h3>A2.2 롤아웃 — 100스텝 × 4096로봇</h3>
+<table>
+<tr><th style="width:20%">분류</th><th style="width:28%">생성 주체</th><th>수집 텐서</th></tr>
+<tr><td>관측</td><td>ObservationManager</td><td>policy (100, 4096, 230) / critic (100, 4096, 298)</td></tr>
+<tr><td>액션</td><td>Actor</td><td>(100, 4096, 12)</td></tr>
+<tr><td>다음 관측</td><td>IsaacSim(물리 후 재계산)</td><td>(100, 4096, 46) — CENet 재구성 타깃용 최신 프레임만</td></tr>
+<tr><td>종료</td><td>TerminationManager</td><td>(100, 4096, 1) + <code>time_outs</code>(별도)</td></tr>
+<tr><td>리워드</td><td>RewardManager(21항목 × weight)</td><td>(100, 4096, 1)</td></tr>
+<tr><td>가치</td><td>Critic</td><td>(100, 4096, 1)</td></tr>
+<tr><td>μ, σ, log_prob</td><td>Actor 분포</td><td>PPO ratio 계산용</td></tr>
+</table>
+<p class="small">
+환경이 "관측·피드백·리워드"를, 정책이 "액션·확률정보"를 만들고, <code>RolloutStorage</code>가 전부를
+(100, 4096, ·) 텐서로 모은다. 학습은 이 창고가 다 찬 뒤에 시작된다.
+</p>
+
+<h3>A2.3 리워드 21항목 </h3>
+<p>총 보상은 항목별 값 × weight의 합이고, 각 항목은 스텝마다 계산된 뒤 <code>step_dt</code>가 곱해진다.</p>
+<table>
+<tr><th style="width:30%">항목</th><th class="num" style="width:11%">weight</th><th>정의 / 물리적 의미</th></tr>
+<tr><td colspan="3" style="background:#eef2f7"><b>추종 (양수)</b></td></tr>
+<tr><td><code>track_lin_vel_xy_exp</code></td><td class="num">+1.0</td><td>exp(−‖cmd<sub>xy</sub> − v<sub>xy</sub>‖² / σ) — 명령 선속도 추종</td></tr>
+<tr><td><code>track_ang_vel_z_exp</code></td><td class="num">+0.8</td><td>exp(−(cmd<sub>ω</sub> − ω<sub>z</sub>)² / σ)  (v1: 0.5)</td></tr>
+<tr><td colspan="3" style="background:#eef2f7"><b>자세·안정</b></td></tr>
+<tr><td><code>lin_vel_z_l2</code></td><td class="num">−2.0</td><td>v<sub>z</sub>² — 수직 출렁임 억제</td></tr>
+<tr><td><code>ang_vel_xy_l2</code></td><td class="num">−0.15</td><td>ω<sub>x</sub>²+ω<sub>y</sub>² — roll/pitch 각속도 억제</td></tr>
+<tr><td><code>base_height</code></td><td class="num">−15.0</td><td>(z − (0.52 + mean(ray_z)))² — <b>지형 상대</b> 몸통높이 유지</td></tr>
+<tr><td><code>flat_orientation_roll_l2</code></td><td class="num">−2.0</td><td>g<sub>y</sub>² — 롤은 지형과 무관하게 항상 flat</td></tr>
+<tr><td><code>flat_orientation_pitch_l2</code></td><td class="num">−1.0</td><td>피치는 <b>지형 경사에 정렬된 목표</b>와 비교 — 경사로에서 몸을 기울여도 벌하지 않는다</td></tr>
+<tr><td colspan="3" style="background:#eef2f7"><b>보행 품질</b></td></tr>
+<tr><td><code>feet_cadence_overrun</code></td><td class="num">−1.0</td><td>스윙 0.4 s / 스탠스 0.6 s <b>초과분만</b> 과금(단측)  (v1: 0.3/0.4)</td></tr>
+<tr><td><code>foot_clearance</code></td><td class="num">−1.0</td><td>스윙 중 지형 대비 높이 미달분². 계단 라이저에서 요구치가 자동으로 올라간다</td></tr>
+<tr><td><code>feet_slipping</code></td><td class="num">−0.1</td><td>접촉 중 발 수평속도</td></tr>
+<tr><td><code>feet_touchdown</code></td><td class="num">−1.0</td><td>착지 순간 발 속도 — 충격 완화  (v1: −0.5)</td></tr>
+<tr><td><code>joint_deviation_hip_l1</code></td><td class="num">−0.3</td><td>고관절 외전 |Δq| — 보폭 폭을 기본 발자국 안에 유지 </td></tr>
+<tr><td colspan="3" style="background:#eef2f7"><b>정지 명령</b></td></tr>
+<tr><td><code>stand_still</code></td><td class="num">−0.5</td><td>명령 ≈0일 때 기본자세 이탈 L1 </td></tr>
+<tr><td><code>stand_still_feet_contact</code> </td><td class="num">−1.0</td><td>정지 시 네 발 접지 유지 — 서 있을 때 발을 들지 않게</td></tr>
+<tr><td colspan="3" style="background:#eef2f7"><b>액추에이터 부담</b></td></tr>
+<tr><td><code>dof_torques_l2</code></td><td class="num">−2.5e−5</td><td>Στ²</td></tr>
+<tr><td><code>joint_power</code> </td><td class="num">−2e−5</td><td>Σ|τ·q̇| — 에너지 소모를 직접 과금(토크²와 달리 방향 고려)</td></tr>
+<tr><td><code>dof_acc_l2</code></td><td class="num">−2.5e−7</td><td>Σq̈²</td></tr>
+<tr><td><code>dof_vel</code></td><td class="num">−5e−4</td><td>Σq̇²</td></tr>
+<tr><td><code>dof_pos_limits</code></td><td class="num">−2.0</td><td>관절 한계 초과분. <b>커리큘럼 램프 제외</b> — 항상 풀 weight</td></tr>
+<tr><td><code>action_rate_l2</code></td><td class="num">−0.02</td><td>‖a<sub>t</sub> − a<sub>t−1</sub>‖²</td></tr>
+<tr><td><code>smoothness</code></td><td class="num">−0.02</td><td>‖a<sub>t</sub> − 2a<sub>t−1</sub> + a<sub>t−2</sub>‖² (jerk). 리셋 직후 2스텝 면제</td></tr>
+<tr><td colspan="3" style="background:#eef2f7"><b>안전</b></td></tr>
+<tr><td><code>undesired_contacts</code></td><td class="num">−1.0</td><td>허벅지·종아리 접촉력 &gt;1 N. <b>몸통은 제외</b> — 낙상은 종료로 이미 과금되므로 이중 과금이 된다</td></tr>
+<tr><td><code>termination_penalty</code></td><td class="num">−2.0</td><td>낙상 종료 자체. <b>v1에서는 0.0(비활성)</b> </td></tr>
+</table>
+<div class="box">
+<span class="t">가중치가 크다고 지배적인 것은 아니다</span>
+<code>base_height</code>는 −15.0으로 최대 가중치지만 실측 기여도는 21항목 중 하위권이다
+(ARM 1: Episode_Reward −0.018 vs 1위 <code>track_lin_vel_xy_exp</code> +0.695). 정책이 이미 높이를
+RMS 3.8 cm 이내로 지켜 제곱항이 작기 때문이다. <b>weight는 "얼마나 비싼가", 실현 기여도는 거기에
+"실제로 얼마나 틀리는가"를 곱한 값</b>이다.
+</div>
+<div class="box warn">
+<span class="t">base_height의 숨은 함정</span>
+기준면이 <code>mean(ray_z)</code> — 몸통 아래 1.6 m × 1.0 m 187개 레이의 <b>평균</b> 지면 높이다.
+계단 모서리를 걸치면 이 평균이 아랫단과 윗단의 혼합값이 되어, 윗단에 서 있는데도 "더 낮게 앉아라"는
+신호가 나온다. 일정한 경사로에서는 평균이 몸통 중심 높이와 거의 같아 이 편향이 생기지 않는다.
+</div>
+
+<h3>A2.4 커리큘럼 7종 </h3>
+<p>
+커리큘럼은 리워드 <b>공식</b>을 바꾸지 않는다. 공식이 받는 <b>입력</b>(환경·명령)을 바꾸거나,
+공식에 곱해지는 <b>weight</b>를 바꾼다. 갱신은 <b>리셋된 env에 대해서만</b> 일어난다.
+</p>
+<table>
+<tr><th style="width:5%">#</th><th style="width:32%">이름</th><th style="width:18%">층위</th><th>바꾸는 것</th></tr>
+<tr><td>1</td><td><code>terrain_levels_vel_cmd_aware</code> </td><td>환경(World)</td>
+    <td>지형 난이도(행). <b>업스트림이 아니라 자체 구현</b> — <code>min_moving_time=2.0</code>초 이상 실제로
+    움직인 env만 승급 판정 대상. 서 있으라는 명령을 받은 env가 "못 걸었다"고 강등되는 것을 막는다</td></tr>
+<tr><td>2</td><td><code>command_levels_lin_vel</code></td><td>과제(Task)</td><td>명령 선속도 샘플링 범위</td></tr>
+<tr><td>3</td><td><code>command_levels_ang_vel</code></td><td>과제(Task)</td><td>명령 각속도 샘플링 범위</td></tr>
+<tr><td>4</td><td><code>penalty_terrain_schedule</code></td><td>평가 기준</td><td>6개 리워드 weight 배수 κ (0.5 → 1.0). 초반에 페널티를 절반으로 깎아 탐색을 허용</td></tr>
+<tr><td>5</td><td><code>pulse_prob_schedule</code> </td><td>과제(Task)</td>
+    <td>명령 급변(pulse) 발생 확률. <b>4-arm 실험에서는 0으로 꺼둔다</b></td></tr>
+<tr><td>6</td><td><code>terrain_levels_per_family</code> </td><td>모니터링</td>
+    <td>지형 종류별 평균 레벨. 값을 바꾸지 않고 기록만 한다</td></tr>
+<tr><td>7</td><td><code>termination_per_family</code> </td><td>모니터링</td>
+    <td>지형 종류별 낙상 종료율</td></tr>
+</table>
+
+<h4>지형 커리큘럼의 승급·강등 규칙</h4>
+<div class="eq">
+move_up&nbsp;&nbsp; = 이동거리 &gt; terrain.size[0] / 2 = <b>4.0 m</b><br>
+move_down = 이동거리 &lt; ‖cmd<sub>xy</sub>‖ × episode_length_s × 0.5&nbsp;&nbsp;(그리고 move_up이 아닐 때)<br>
+최고 레벨(15) 초과 시 → <b>0~14 중 무작위 레벨로 재배치</b>
+</div>
+<div class="box new">
+<span class="t">6·7번이 왜 필요했는가</span>
+IsaacLab의 커리큘럼은 env마다 <b>레벨(행) 하나</b>만 추적한다. 지형 종류(열)는 <code>arange(num_envs) //
+(num_envs/num_cols)</code>로 초기에 결정론적으로 배정된 뒤 <b>학습 내내 바뀌지 않는다</b>. 그래서 전체 평균
+레벨만 보면 <i>"특정 지형이 4레벨에 멈춰 있는데 평균은 9"</i> 인 상황이 보이지 않는다. 6·7번이 그 사각지대를 없앤다.
+</div>
+<div class="box">
+<span class="t">실패율은 0으로 수렴하지 않는다 — 설계상 그렇다</span>
+승급 조건이 "4 m를 갔는가"이므로, 커리큘럼은 <b>실패할 때까지 계속 난이도를 올리는 자기균형 장치</b>다.
+실패율은 최소화 대상이 아니라 <b>제어 신호</b>이고, 평형은 0이 아닌 값에 잡힌다. 게다가 최고 레벨 도달 시
+무작위 재배치가 있어 평균 레벨이 최대치로 수렴할 수도 없다 — 정복한 지형의 env도 계속 아래로 떨어졌다
+다시 올라온다.
+</div>
+
+<h3>A2.5 지형 10종 </h3>
+<p>격자는 <b>12열(종류) × 15행(난이도)</b> = 180타일, 타일 하나 8 m × 8 m, 테두리 30 m.
+행 r의 난이도는 <code>(r + U(0,1)) / 15</code>로 결정되어, 같은 행이라도 열마다 값이 조금씩 다르다.</p>
+<table>
+<tr><th style="width:28%">종류</th><th class="num" style="width:11%">proportion</th><th>파라미터</th></tr>
+<tr><td><code>pyramid_stairs</code></td><td class="num">0.1</td><td>step_width 0.25, height 0.05~0.20</td></tr>
+<tr><td><code>pyramid_stairs_wide</code> </td><td class="num">0.1</td><td>step_width 0.30, height 0.05~<b>0.25</b></td></tr>
+<tr><td><code>pyramid_stairs_inv</code></td><td class="num">0.1</td><td>step_width 0.25, height 0.05~0.20</td></tr>
+<tr><td><code>pyramid_stairs_inv_wide</code> </td><td class="num">0.1</td><td>step_width 0.30, height 0.05~<b>0.25</b></td></tr>
+<tr><td><code>pyramid_stairs_nose</code></td><td class="num">0.1</td><td>노징(오버행) 깊이·두께 3 cm — <b>이 저장소 고유</b>, 벤더에 없음</td></tr>
+<tr><td><code>pyramid_stairs_inv_nose</code></td><td class="num">0.1</td><td>동상</td></tr>
+<tr><td><code>ring_fence</code></td><td class="num">0.1</td><td>동심원 4겹 턱, 두께 0.06, 높이 0.03~0.15</td></tr>
+<tr><td><code>random_rough</code></td><td class="num">0.1</td><td>noise 0.01~0.10</td></tr>
+<tr><td><code>hf_pyramid_slope</code></td><td class="num">0.1</td><td>slope 0.1~0.5 (최대 26.6°)</td></tr>
+<tr><td><code>hf_pyramid_slope_inv</code></td><td class="num">0.1</td><td>slope 0.1~0.5</td></tr>
+</table>
+<div class="box warn">
+<span class="t">proportion과 실제 배정은 다르다</span>
+12열에 10종을 누적합으로 나누므로 양자화 오차가 생긴다. 설정은 전부 0.1(=10%)이지만 실제로는 일부 종류가
+2열(16.7%), 나머지가 1열(8.3%)을 받는다. 지형별 통계를 해석할 때 이 불균형을 감안해야 한다.
+열 수를 10의 배수로 두면 사라지는 문제다.
+</div>
+<p class="small">
+env는 열에 결정론적으로 배정되고 초기 레벨만 무작위인데, 그것도 <code>max_init_terrain_level=3</code>이라
+<b>0~3행에서만 시작</b>한다. 높은 레벨에서 시작하면 학습 안 된 정책이 바로 자빠져 회복하지 못하기 때문이다.
+</p>
+
+<h3>A2.6 도메인 랜덤화 — 무엇을 흔드는가</h3>
+<table>
+<tr><th style="width:26%">이벤트</th><th style="width:14%">시점</th><th>범위</th></tr>
+<tr><td>마찰계수</td><td>startup</td><td>정적/동적, 64 버킷</td></tr>
+<tr><td><code>add_base_mass</code></td><td>startup</td><td>trunk ±2.0 kg</td></tr>
+<tr><td><code>base_com</code></td><td>startup</td><td>x,y ±0.05 m / z ±0.01 m</td></tr>
+<tr><td>관성 대각</td><td>startup</td><td>IsaacLab이 안 흔드는 항 — 질량만 바꾸면 회전 응답이 그대로 남아서</td></tr>
+<tr><td><code>randomize_actuator_gains</code></td><td>reset</td><td>kp·kd 각각 0.85~1.15배</td></tr>
+<tr><td><code>randomize_payload</code> </td><td>reset</td>
+    <td><b>0 kg 20% / 6 kg 80%</b>, 위치 x ∈ [−0.05, 0.05] m, y=0, z=0.07 m</td></tr>
+<tr><td><code>reset_base</code></td><td>reset</td><td>x,y ±0.5 m, yaw ±π</td></tr>
+<tr><td>push</td><td>interval</td><td>명령 위상과 무관하게 — 특정 국면에 묶이면 그 국면만 대비하게 된다</td></tr>
+</table>
+<p class="small">
+payload는 점질량으로 질량·CoM·관성을 평행축 정리로 재계산한다(<code>core/payload_math.py</code>).
+장착 <b>위치</b>는 무작위지만 정책에게 알려주지 않는다 — 관측은 질량 스칼라 하나뿐이고, 위치 변동은
+proprioception으로 감당해야 하는 외란으로 남긴 설계다.
+</p>
+
+<h2 class="pb" id="a3">A3. 학습 — 모은 데이터로 무엇을 하는가</h2>
+
+<h3>A3.1 롤아웃 → 신경망 텐서 매핑</h3>
+<pre>
+RolloutStorage (100, 4096, ·)
+   │
+   ├─ policy obs (230) ─→ actor_obs_normalizer ─┬─→ CENet encoder ─→ code(19) ─┐
+   │                                            │      └ z 는 학습 시 표집        │
+   │                                            └─→ frames_idx → 최근 4프레임 ───┤
+   │                                                    (46 × 4 = 184)          │
+   │                                                                            ↓
+   │                                                              Actor(203) → μ → Normal(μ,σ)
+   │
+   ├─ critic obs (298) ─→ critic_obs_normalizer ─→ Critic(298) → V(s)
+   │        ├─ [45:48]   base_lin_vel  ──────────→ CENet velocity 손실의 정답
+   │        └─ [110:297] height_scan   ──────────→ (비전 teacher 의 terrain encoder, 본편 4.1절)
+   │
+   └─ next latest (46) ──────────────────────────→ CENet decoder 재구성의 정답
+</pre>
+<p class="small">
+정규화기(<code>EmpiricalNormalization</code>)는 관측의 이동평균·분산을 계속 갱신한다. CENet의 재구성
+타깃도 <b>정규화된 공간</b>에서 비교해야 한다 — 원시값은 범위가 제각각이라 특정 항목이 손실을 독점한다.
+</p>
+
+<h3>A3.2 GAE — advantage와 return</h3>
+<p>먼저 리턴과 가치의 정의:</p>
+<div class="eq">
+G<sub>t</sub> = Σ<sub>k≥0</sub> γ<sup>k</sup> r<sub>t+k</sub>&nbsp;&nbsp;&nbsp;(할인 누적보상)<br>
+V(s<sub>t</sub>) ≈ E[ G<sub>t</sub> | s<sub>t</sub> ]&nbsp;&nbsp;&nbsp;(Critic이 근사하는 값)
+</div>
+<p>한 스텝의 예측 오차(TD error)와 그것을 지수가중으로 누적한 GAE:</p>
+<div class="eq">
+δ<sub>t</sub> = r<sub>t</sub> + γ V(s<sub>t+1</sub>) − V(s<sub>t</sub>)<br>
+Â<sub>t</sub><sup>GAE(γ,λ)</sup> = Σ<sub>l≥0</sub> (γλ)<sup>l</sup> δ<sub>t+l</sub><br><br>
+γ = 0.99&nbsp;&nbsp;λ = 0.95&nbsp;&nbsp;→&nbsp;&nbsp;return<sub>t</sub> = Â<sub>t</sub> + V(s<sub>t</sub>)
+</div>
+<p>
+λ는 <b>편향-분산 손잡이</b>다. λ=0이면 δ<sub>t</sub> 하나만 써서 분산은 작지만 Critic 오차에 직접
+휘둘린다(편향 큼). λ=1이면 몬테카를로에 가까워 편향은 없지만 분산이 크다. 0.95는 그 사이다.
+</p>
+<div class="box">
+<span class="t">타임아웃은 실패가 아니다</span>
+에피소드가 <code>time_outs</code>(20초 경과)로 끝난 것은 <b>실패가 아니라 관측 중단</b>이다. 그 시점의
+미래 가치는 실제로 존재하므로 <code>V(s_last)</code>로 부트스트랩해서 보정한다. 반면 낙상 종료는
+부트스트랩하지 않는다 — 넘어진 상태의 미래 가치는 정말로 없다. 이 구분을 놓치면 "20초를 버틴 좋은
+에피소드"가 "넘어진 에피소드"와 같은 취급을 받는다.
+</div>
+
+<h3>A3.3 PPO 손실</h3>
+<p>세 항의 합을 최소화한다. r은 정책 확률비, Â는 정규화된 advantage다.</p>
+<div class="eq">
+r<sub>t</sub>(θ) = π<sub>θ</sub>(a<sub>t</sub>|s<sub>t</sub>) / π<sub>θ_old</sub>(a<sub>t</sub>|s<sub>t</sub>)<br><br>
+L<sup>surrogate</sup> = −E[ min( r<sub>t</sub>Â<sub>t</sub>,&nbsp; clip(r<sub>t</sub>, 1−ε, 1+ε)·Â<sub>t</sub> ) ]&nbsp;&nbsp;&nbsp;ε = 0.2<br>
+L<sup>value</sup> = E[ max( (V−G)², (V<sub>clip</sub>−G)² ) ]&nbsp;&nbsp;&nbsp;(clipped value loss)<br>
+L<sup>entropy</sup> = −E[ H(π) ]<br><br>
+<b>L = L<sup>surrogate</sup> + 1.0 · L<sup>value</sup> + 0.01 · L<sup>entropy</sup></b>
+</div>
+<table>
+<tr><th style="width:26%">항</th><th class="num" style="width:12%">계수</th><th>역할</th></tr>
+<tr><td>surrogate (clip)</td><td class="num">ε = 0.2</td><td>확률비를 [0.8, 1.2]로 잘라 한 번에 너무 멀리 가는 것을 차단</td></tr>
+<tr><td>value loss</td><td class="num">1.0</td><td>Critic 회귀. clip을 쓰는 이유는 가치 추정이 한 번에 크게 튀는 것을 막기 위함</td></tr>
+<tr><td>entropy</td><td class="num">0.01</td><td>탐색 유지 — 실질적으로 <b>액션 노이즈 σ의 평형값</b>을 정한다</td></tr>
+<tr><td><code>max_grad_norm</code></td><td class="num">1.0</td><td>경사 노름 클리핑</td></tr>
+</table>
+<div class="box">
+<span class="t">entropy 계수의 물리적 의미</span>
+대각 가우시안의 엔트로피는 H = Σ log σ<sub>i</sub> + 상수이므로 <code>∂H/∂log σ = 1</code>이다. 즉 이 항은
+<b>매 갱신 log σ를 계수 크기만큼 일정하게 밀어올리는 힘</b>이고, surrogate loss가 노이즈가 성능을 깎는
+만큼 반대로 당긴다. σ는 그 평형점에 정착한다.<br><br>
+ARM 1 실측 σ ≈ 0.33. <code>action_scale 0.25</code>를 곱하면 관절 목표각에 1σ ≈ 4.7°이고,
+다리 길이 0.4 m 기준 <b>발 착지 위치가 약 ±3 cm 흩어진다</b>. 14 cm 단차나 계단 노징 앞에서 결코
+작지 않은 산포다.
+</div>
+<div class="box warn">
+<span class="t">base_contact은 노이즈가 섞인 값이다</span>
+로그의 <code>Episode_Termination/base_contact</code>은 <b>탐색 노이즈가 들어간 rollout</b>에서 측정된다.
+배포되는 결정론적 정책(<code>act_inference</code>, σ 미적용)의 실패율은 이보다 낮다. 두 수치를 직접
+비교하면 안 된다 — v1에서 결정론적 진단이 12%, 같은 시점 학습 로그가 27%였던 것이 이 차이다.
+</div>
+
+<h3>A3.4 CENet 손실 — PPO와 완전히 분리</h3>
+<div class="eq">
+L<sup>CENet</sup> = 1.0 · MSE(velocity, base_lin_vel.detach())<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+ 1.0 · MSE(decode, next_obs.detach())&nbsp;&nbsp;← 비종료 행만(valid_mask)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;+ β · KL,&nbsp;&nbsp;β = 1.0<br><br>
+KL = −0.5 · mean( 1 + logvar − mean² − exp(logvar) )
+</div>
+<p>
+별도 Adam(lr 1e-3)으로 <b>독립적으로</b> 갱신하고, Actor로 가는 code는 <code>detach()</code>되어 PPO
+경사가 CENet에 닿지 않는다. 설계 의도는 "정책이 걷기 편한 잠재변수"가 아니라 "관측 히스토리를 잘
+설명하는 잠재변수"를 만드는 것이다.
+</p>
+<div class="box">
+<span class="t">valid_mask가 왜 필요한가</span>
+재구성 타깃은 <b>다음 스텝의 관측</b>인데, 이번 스텝에서 에피소드가 끝났다면 그 "다음"은 리셋된 새
+에피소드의 첫 관측이다. 이어져 있지 않은 두 상태를 예측하라고 시키는 꼴이라, 종료 행은 재구성 손실에서
+제외한다. velocity 손실은 현재 스텝만 쓰므로 이 문제가 없다.
+</div>
+<p class="small">
+KL은 배치·잠재차원에 대해 <b>평균</b>으로 축약한다(합이 아니라). 합으로 두면 latent_dim에 따라 β의
+실질 세기가 달라진다.
+</p>
+
+<h3>A3.5 적응형 KL 학습률 </h3>
+<p>학습률은 고정 곡선이 아니라 <b>KL을 목표 구간에 묶는 피드백 제어기</b>다.</p>
+<pre>
+if kl_mean &gt; desired_kl * 2.0:      # 0.02 초과 — 정책이 너무 많이 움직임
+    learning_rate = max(1e-5, learning_rate / 1.5)
+elif kl_mean &lt; desired_kl / 2.0:    # 0.005 미만 — 너무 안 움직임
+    learning_rate = min(1e-2, learning_rate * 1.5)
+</pre>
+<p>
+<code>desired_kl = 0.01</code>이므로 KL을 0.005~0.02에 묶는다. 조절이 iteration당 한 번이 아니라
+<b>미니배치마다</b>(5 epoch × 4 minibatch = 최대 20회) 일어나므로, 한 iteration 안에서도 이론상
+1.5<sup>20</sup> ≈ 3,300배까지 움직일 수 있다 — 붕괴가 아주 빠르다.
+</p>
+<div class="box new">
+<span class="t">min_learning_rate = 3e-5 가 해결한 것</span>
+rsl-rl에는 <code>1e-5</code> 바닥이 하드코딩돼 있다. KL이 계속 크면 LR이 여기까지 밀려 내려와 주차되는데,
+<b>주차되면 정책이 안 움직이니 KL이 저절로 작아져 계기판은 정상으로 보인다</b> — 학습은 멎었는데 경고가
+없다. v1 실측에서 한 런이 15,038~26,316 iteration 구간 약 11,000회를 이 상태로 보냈다(전체의 16%).<br><br>
+현재는 <code>learning_rate</code> setter를 가로채 <code>max(min_lr, value)</code>를 적용한다 —
+업스트림 코드를 고치지 않고 끼워 넣는 방식이다. ARM 1 실측: <b>1e-5 접촉 0회</b>, 3e-5 하한 접촉 1,196회.
+LR을 내리려는 압력 자체는 여전하지만 학습이 멎지 않는다.
+</div>
+
+<h3>A3.6 좌우 대칭 데이터 증강</h3>
+<p>
+사족보행은 좌우 대칭이므로, 한 transition을 좌우 반전하면 물리적으로 타당한 또 하나의 transition이 된다.
+관측·액션의 각 항목을 대응하는 반대쪽으로 바꾸는 순열을 정의해두고 배치를 2배로 불린다
+(<code>use_data_augmentation=True</code>). mirror loss(대칭성을 손실로 강제)는 쓰지 않는다 —
+증강만으로 충분하고, 손실로 걸면 비대칭이 필요한 상황에서 방해가 된다.
+</p>
+
+<h2 class="pb" id="a4">A4. 배포 — 학습 결과를 로봇으로 </h2>
+
+<h3>A4.1 camel.policy.v1 계약</h3>
+<p>
+v1에서는 관측 조립·스케일·관절 순서가 배포 코드(C++)에 하드코딩돼 있었다. 지금은 <b>정책이 자기 규격을
+스스로 기술</b>한다 — ONNX 메타데이터에 JSON 계약이 실리고 로봇이 그것을 읽어 관측을 조립한다.
+정책을 추가할 때 C++을 고칠 일이 없다.
+</p>
+<table>
+<tr><th style="width:24%">계약 항목</th><th>내용</th></tr>
+<tr><td>관측 term</td><td>이름 · 소스 · 크기 · history</td></tr>
+<tr><td>transform</td><td>term별 <code>clip</code> / <code>scale</code> / <code>offset</code> — 전처리가 코드가 아니라 데이터가 된다</td></tr>
+<tr><td>입력 텐서</td><td>이름 · 형상 · layout: <code>latest</code>(최신 1프레임) / <code>term_major</code> / <code>step_major</code></td></tr>
+<tr><td>출력 텐서</td><td><code>actions</code> 필수, 나머지는 auxiliary</td></tr>
+<tr><td>action</td><td>type · scale · offset · clip · previous_action · <b>gains</b></td></tr>
+<tr><td>joint_names</td><td>12개 → 로봇 모터 순서 [HR, HL, FR, FL] × (R, P, K)로 매핑</td></tr>
+<tr><td><code>policy_dt</code></td><td>추론 주기. RlWalker 500 Hz 루프의 정수배여야 한다(0.02 → decimation 10)</td></tr>
+<tr><td><code>states</code></td><td>순환 상태 입출력 바인딩 — 매 tick 출력을 입력으로 복사(비전 학생 GRU용)</td></tr>
+</table>
+<div class="box new">
+<span class="t">전처리 불일치가 구조적으로 불가능해진다</span>
+예전에는 학습 쪽(Python)과 배포 쪽(C++)이 각자 같은 전처리를 구현하고 사람이 동기화를 지켰다.
+지금은 <code>clip → offset → scale</code>이 계약에 선언되고 로봇이 그대로 적용한다. 학습이 쓴 스케일이
+곧 로봇이 쓰는 스케일이다.
+</div>
+
+<h3>A4.2 export 흐름</h3>
+<pre>
+학습 중  train.py → capture_context(env, policy) → runner.deploy_context
+                 → 모든 체크포인트의 infos["gd_lab"]["deploy_context"] 에 저장
+                   (캡처 실패는 학습을 멈추지 않는다 — 나중에 export 가 거부할 뿐)
+
+export   scripts/export.py <model_N.pt>
+                 → params/agent.yaml 로 네트워크 재구성   ← Kit 불필요, 순수 torch
+                 → policy.pt(TorchScript) + policy.onnx + deploy.json
+                 → bind_graph() 가 그래프와 계약의 일치를 검증한 뒤 메타데이터 기록
+
+검증     policy-check <policy.onnx>
+                 → 로봇이 실제로 쓰는 PolicyBackend/PolicyRuntime 코드로 계약을 검사
+                 → 소스가 하나이므로 "검사 통과"와 "로봇에서 동작"이 같은 질문이 된다
+</pre>
+<div class="box warn">
+<span class="t">계약은 체크포인트 안에 있다</span>
+학습 시점에 실제 env에서 캡처하므로, 계약이 없는 구버전 체크포인트는 export가 거부한다.
+<code>--no-metadata</code>로 강제하면 계약 없는 맨 그래프가 되어 레거시 경로로만 로드된다.
+</div>
+
+<h3>A4.3 로봇 쪽 백엔드 선택</h3>
+<table>
+<tr><th style="width:20%">백엔드</th><th style="width:34%">선택 조건</th><th>비고</th></tr>
+<tr><td>Vendor</td><td>디렉터리에 <code>info.json</code></td><td>벤더 SDK 규격</td></tr>
+<tr><td><b>Meta</b></td><td>ONNX에 <code>camel.policy.v1</code></td><td>권장 경로. <code>PolicyRuntime</code>이 계약을 파싱</td></tr>
+<tr><td>DreamVrl</td><td>계약 없음 + ONNX 입력 <b>3개</b></td><td>비전 RL 레거시 경로(현행 GAST 경로는 본편 6부)</td></tr>
+<tr><td>Dream</td><td>그 외</td><td>계약 없는 blind 정책. 입력 폭 45/46으로 payload 유무 자동 감지</td></tr>
+</table>
+<p class="small">
+계약이 있는데 깨졌다면 폴백하지 않고 <b>에러</b>다. 조용히 다른 규격으로 도는 것보다 기동 실패가 낫다는 원칙이다.
+</p>
+
+<h2 class="pb" id="a5">A5. 실험 구성 </h2>
+
+<h3>A5.1 TRAIN_ARM — 2×2 요인설계</h3>
+<p>
+"arm"은 임상시험 용어의 <b>실험군</b>이다. <code>TRAIN_ARM</code> 환경변수로
+<code>configs/experiment/arm_N.yaml</code>을 선택한다.
+</p>
+<table>
+<tr><th></th><th>50 Hz (decimation 4)</th><th>100 Hz (decimation 2)</th></tr>
+<tr><td><b>현재 게인</b><br>hip 88.14 / knee 102.22, kd 1.99</td><td>ARM 1 (기준군)</td><td>ARM 2</td></tr>
+<tr><td><b>nominal 게인</b><br>hip 123.39 / knee 127.77, kd 2.4</td><td>ARM 3</td><td>ARM 4</td></tr>
+</table>
+<p>
+공통: command pulse OFF, payload ON(0/6 kg), 게인 랜덤화 0.85~1.15배, 지형 10종,
+cadence swing 0.4 / stance 0.6, 4096 env, seed 42, 40,000 iteration.
+</p>
+<div class="box warn">
+<span class="t">설계상의 교란 요인</span>
+<code>num_steps_per_env</code>가 네 arm 모두 같아서 <b>100 Hz arm은 같은 iteration 수에서 시뮬레이션
+시간이 절반</b>이다. 100 Hz가 나쁘게 나와도 제어 주기 탓인지 경험량 부족 탓인지 이 실험만으로는 구분되지 않는다.
+</div>
+
+<h3>A5.2 실측 성능 (RTX 5090, 4096 env)</h3>
+<table>
+<tr><th style="width:28%"></th><th class="num">v1 (48 step)</th><th class="num">v2 / ARM 1 (100 step)</th><th class="num">배율</th></tr>
+<tr><td>collection (물리)</td><td class="num">2.088 s</td><td class="num">6.637 s</td><td class="num">3.18×</td></tr>
+<tr><td>learning (PPO)</td><td class="num">0.263 s</td><td class="num">0.555 s</td><td class="num">2.11×</td></tr>
+<tr><td><b>iteration 합계</b></td><td class="num">2.35 s</td><td class="num">7.19 s</td><td class="num">3.06×</td></tr>
+<tr><td>처리량</td><td class="num">83,635 step/s</td><td class="num">56,955 step/s</td><td class="num">0.68×</td></tr>
+<tr><td>40,000 iteration</td><td class="num">≈26 시간</td><td class="num">≈80 시간</td><td></td></tr>
+</table>
+<p>
+분해하면 <b>스텝 수 2.083배 × 처리량 저하 1.468배 = 3.06배</b>로 실측과 정확히 맞는다.
+처리량 저하는 커리큘럼 난이도와 무관하다 — 첫 iteration부터 이미 56k이고 terrain_level이 올라가도
+변동이 없다(ARM 1: 56,436 @ lv 2.4 → 57,250 @ lv 9.3). 센서 주기·<code>dt</code>·<code>decimation</code>·
+<code>render_interval</code>이 v1과 동일함을 확인했으므로 남은 후보는 지형 10종화에 따른 레이캐스트 비용이지만,
+<b>측정으로 확정하지는 않았다</b>.
+</p>
+<div class="box">
+<span class="t">GPU 선택에 주는 함의</span>
+시간의 <b>93%가 물리 시뮬</b>이고 신경망 학습은 7%다. PhysX는 텐서코어를 쓰지 않고 CUDA 코어·클럭에
+민감한 <b>레이턴시 바운드</b> 워크로드라, 데이터센터 GPU로 바꿔도 배수가 잘 안 나온다. 이 연구처럼
+독립적인 실험군이 여럿일 때는 <b>카드 성능보다 카드 개수</b>가 효과적이다 — 느린 카드 4장이 빠른 카드
+1장보다 낫다.
+</div>
+
+<h3>A5.3 ARM 1 진행 중 관측 (iteration ≈ 7,600)</h3>
+<table>
+<tr><th style="width:36%">지형</th><th class="num" style="width:18%">평균 레벨</th><th class="num" style="width:18%">낙상 종료율</th></tr>
+<tr><td><code>pyramid_stairs_inv_wide</code></td><td class="num">10.02</td><td class="num">0.170</td></tr>
+<tr><td><code>hf_pyramid_slope_inv</code></td><td class="num">9.61</td><td class="num">0.116</td></tr>
+<tr><td><code>pyramid_stairs_inv</code></td><td class="num">9.45</td><td class="num">0.119</td></tr>
+<tr><td><code>random_rough</code></td><td class="num">9.41</td><td class="num">0.008</td></tr>
+<tr><td><code>hf_pyramid_slope</code></td><td class="num">9.09</td><td class="num">0.047</td></tr>
+<tr><td><code>pyramid_stairs_inv_nose</code></td><td class="num">9.09</td><td class="num">0.125</td></tr>
+<tr><td><code>pyramid_stairs_wide</code></td><td class="num">9.09</td><td class="num">0.050</td></tr>
+<tr><td><code>pyramid_stairs</code></td><td class="num">8.98</td><td class="num">0.040</td></tr>
+<tr><td><code>ring_fence</code></td><td class="num">8.94</td><td class="num">0.000</td></tr>
+<tr><td><code>pyramid_stairs_nose</code></td><td class="num">8.85</td><td class="num">0.085</td></tr>
+</table>
+<p>
+10종이 <b>8.85~10.02로 촘촘히 모여 있다</b> — 뒤처진 지형이 없다. A2.4절에서 설명한 대로 커리큘럼은
+모든 env를 능력 한계선에 세워두는 자기균형 장치이므로, 평균 레벨이 9 언저리에서 평평해지는 것은
+<b>병목이 아니라 설계된 평형점</b>으로 읽는 것이 맞다.
+</p>
+<p class="small">
+v1 말기에는 같은 지표가 <code>hf_pyramid_slope</code> 43.8%, <code>pyramid_stairs_nose</code> 37.5%로
+크게 뒤처져 있었다. 현재는 각각 4.7%, 8.5%다 — LR 하한·롤아웃 길이·cadence·리워드가 동시에 바뀌어서
+어느 것의 기여인지는 분리되지 않는다.
+</p>
+
+<!-- ============================================================ -->
 <h2 class="pb">2부. 입출력 구조</h2>
 
-<h3>2.1 Actor 입력 (총 97 + 지형 4496)</h3>
+<h3>2.1 Actor 입력 (MLP 235 + 지형 4496)</h3>
 <table>
 <tr><th>입력</th><th>크기</th><th>내용</th></tr>
 <tr><td>direct_obs</td><td class="num">46</td><td>ang_vel 3, projected_gravity 3, command(vx,vy,ωz) 3, joint_pos_rel 12, joint_vel 12, last_action 12, payload 1</td></tr>
 <tr><td>cenet_obs</td><td class="num">230</td><td>위 46 × 최근 5 step(step-major) → CENet → z_t 19 (속도 추정 3 + latent 16, detach)</td></tr>
 <tr><td>terrain_latent</td><td class="num">32</td><td>GAST encoder 출력. 현재 스캔에 valid 셀이 하나도 없으면 정확히 0</td></tr>
 </table>
-<p>actor MLP 입력 = 46 + 19 + 32 = 97. 배포 스케일(계약): ang_vel ×0.25, command ×(2, 2, 0.25), joint_vel ×0.05, payload ×0.2, 정규화는 그래프 안.
+<p>actor MLP 입력 = <b>최근 4프레임 46×4 = 184</b>(cenet_obs의 최신 4 step, A1.1절과 같은 방식) + z_t 19 + terrain latent 32 = <b>235</b> (3906 체크포인트 <code>actor.0.weight</code> 512×235로 확인). 배포 스케일(계약): ang_vel ×0.25, command ×(2, 2, 0.25), joint_vel ×0.05, payload ×0.2, 정규화는 그래프 안.
 학습 노이즈: ang_vel ±0.2, gravity ±0.05, joint_pos ±0.01, joint_vel ±1.5 (배포는 노이즈 off).</p>
 
 <h3>2.2 지형 프레임과 시간 기억</h3>
@@ -213,8 +903,8 @@ TemporalTerrainEncoder (src/gd_lab/gast/temporal.py), 입력 8 × (3·187 + 1)
   → MultiheadAttention(64, 4 heads)  [math SDPA 강제]  → LayerNorm(residual)
   → GRU(64) → FC 64→32 + Tanh  = terrain latent 32   (valid 셀 0개면 0)
 보조 decoder : latent 32 → FC 128 → 187×6  (깨끗한 높이·valid·semantic gap·gap-known 재구성)
-CENet        : 블라인드와 동일 (enc 128-64, dec 64-128, latent 16, β 1.0, AdaBoot) — 블라인드 문서 1.2–1.3절
-actor        : 97 → 512 → 256 → 128 → 12 (ELU),  critic: 특권 obs → 512-256-128 → 1
+CENet        : 블라인드와 동일 (enc 128-64, dec 64-128, latent 16, β 1.0, AdaBoot) — 기초편 A1.2–A1.3절
+actor        : 235 (46×4 + 19 + 32) → 512 → 256 → 128 → 12 (ELU),  critic: 특권 298 → 512-256-128 → 1
 </pre>
 <p>terrain latent는 <b>detach하지 않는다</b> — PPO 경사가 encoder를 직접 학습시킨다. 보조 재구성 손실(height smooth-L1 + valid/gap BCE, gap 셀 가중 ×5)은 업데이트마다 2048 샘플, 계수 0.1, PPO와 같은 Adam으로 한 번 더 step한다.</p>
 
@@ -241,7 +931,7 @@ actor        : 97 → 512 → 256 → 128 → 12 (ELU),  critic: 특권 obs → 
 </table>
 
 <h3>4.4 보상 — 비전에서 추가된 항목</h3>
-<p>기본 locomotion 항목(속도 추종, 자세, 토크·가속·action rate, 발 clearance·slip·cadence 등)은 블라인드 문서 2.3절과 같은 계열이며 가중치만 v2.1 값이다(전체 목록: <code>GAST_RAYIR_TEACHER_DESIGN_20261018.md</code> 6.4절).</p>
+<p>기본 locomotion 항목(속도 추종, 자세, 토크·가속·action rate, 발 clearance·slip·cadence 등)은 기초편 A2.3절과 같은 계열이며 가중치만 v2.1 값이다(전체 목록: <code>GAST_RAYIR_TEACHER_DESIGN_20261018.md</code> 6.4절).</p>
 <table>
 <tr><th>보상</th><th class="num">가중치</th><th>의도</th></tr>
 <tr><td>platform_gap_foot_drop</td><td class="num">−2.0</td><td>갭 안으로 발이 떨어짐</td></tr>
