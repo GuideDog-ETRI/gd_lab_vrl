@@ -1,0 +1,66 @@
+{
+  "nav_corridor": {
+    "difficulty": 0.5,
+    "seed": 160,
+    "mesh_count": 5,
+    "obstacles": 4,
+    "all_components_watertight": true,
+    "available": 0.9913284306383601,
+    "required": 0.7,
+    "feasible": true,
+    "origin": [
+      8.0,
+      6.0,
+      0.0
+    ],
+    "route_length": 5.631676405737753
+  },
+  "nav_door": {
+    "difficulty": 0.5,
+    "seed": 160,
+    "mesh_count": 9,
+    "obstacles": 4,
+    "all_components_watertight": true,
+    "available": 0.9500000000000002,
+    "required": 0.7,
+    "feasible": true,
+    "origin": [
+      8.0,
+      6.0,
+      0.0
+    ],
+    "route_length": 6.0
+  },
+  "nav_turn_room": {
+    "difficulty": 0.5,
+    "seed": 160,
+    "mesh_count": 6,
+    "obstacles": 5,
+    "all_components_watertight": true,
+    "available": 0.6768354769758772,
+    "required": 0.75,
+    "feasible": false,
+    "origin": [
+      8.0,
+      6.0,
+      0.0
+    ],
+    "route_length": 0.4
+  },
+  "nav_stair_landing": {
+    "difficulty": 0.5,
+    "seed": 160,
+    "mesh_count": 39,
+    "obstacles": 38,
+    "all_components_watertight": true,
+    "available": 1.815009902089104,
+    "required": 0.7,
+    "feasible": true,
+    "origin": [
+      8.0,
+      6.0,
+      0.0
+    ],
+    "route_length": 4.933959550717219
+  }
+}

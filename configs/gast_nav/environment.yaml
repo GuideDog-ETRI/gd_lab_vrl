@@ -1,0 +1,84 @@
+seed: 42
+physics_dt: 0.005
+policy_decimation: 2
+capture_period_s: 0.1
+legacy_fraction: 0.25
+scene_mix: {nav_corridor: 0.15, nav_door: 0.15, nav_turn_room: 0.20, nav_stair_landing: 0.25, legacy: 0.25}
+commands:
+  task_probabilities: {passage: 0.25, turn: 0.20, stairs: 0.20, stop_start: 0.10, legacy: 0.25}
+  default_conditions_fraction: 0.30
+  go_probability: 0.80
+  resample_s: 5.0
+  condition_change_probability: 0.1
+  condition_rate_per_s: {y_off: 0.02, margin: 0.01, turn_cap: 0.1}
+  stop_start_toggle_s: 1.0
+  brake_distance_m: 0.5
+  brake_deceleration_mps2: 0.5
+  # Development simulation command cap; not a physical safety certification.
+  simulation_turn_cap_radps: 0.2
+inertia:
+  enabled: true
+  optional_scene_probability: 0.3
+  acceleration_mps2: [0.6, 1.2]
+  rare_acceleration_mps2: [1.8, 3.0]
+  rare_probability: 0.05
+  rise_s: [1.0, 2.0]
+  hold_s: [1.0, 3.0]
+  delay_s: [0.0, 0.5]
+  lateral_amplitude_mps2: [0.0, 1.5]
+  lateral_frequency_hz: [0.1, 2.0]
+  jerk_max_mps3: 10.0
+  gravity_bias_per_mps2: 0.01
+  gravity_bias_limit: 0.05
+  gravity_mps2: 9.81
+sensors:
+  azimuth_count: 24
+  elevation_count: 8
+  elevation_deg: [-75.0, 75.0]
+  front_mounts_m: [[0.30, 0.0, 0.22], [0.10, 0.0, 0.18]]
+  rear_mounts_m: [[-0.31, 0.16, 0.10], [-0.31, -0.16, 0.10]]
+  mount_jitter_m: 0.015
+  angle_jitter_rad: 0.03
+  max_range_m: 6.0
+  fit_chunk: 128
+  normal_min_points: 3
+  support_body_radius_m: 0.45
+  contact_threshold_n: 5.0
+  support_normal_radius_m: 0.2
+  support_min_scatter: 1.0e-6
+  ray_max_distance_m: 6.0
+rewards:
+  progress: 1.0
+  overspeed: -1.0
+  clearance: -2.0
+  offset: -1.0
+  stop_success: 1.0
+  false_stop: -1.0
+  forbidden_entry: -2.0
+  turn_tracking: -1.0
+  reverse_rate: -1.0
+  reverse_accumulation: -1.0
+  turn_drift: -1.0
+  stair_alignment: -1.0
+  dwell_motion: -1.0
+  contact: -5.0
+  stopped_speed_mps: 0.05
+  swept_width_m: 0.50
+smoke:
+  envs: 16
+  steps: 200
+  stage: B
+  force_fault_steps: [80, 81]
+  fault_env_id: 0
+  reset_steps: [100]
+  require_all_four_scenes: true
+  optimizer_steps_allowed: 0
+training:
+  total_envs: 4096
+  horizon: 100
+  epochs: 5
+  minibatches: 4
+  learning_rate: 0.001
+  checkpoint_interval: 250
+  top_k: 5
+  log_root: logs/gast/nav_v1
