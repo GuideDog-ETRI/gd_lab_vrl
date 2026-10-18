@@ -1,0 +1,394 @@
+<!-- 인쇄용 문서. google-chrome --headless --print-to-pdf 로 렌더한다. -->
+<meta charset="utf-8">
+<title>RBQ10 비전 RL 구현 총정리</title>
+<style>
+  @page { size: A4; margin: 15mm 13mm; }
+  :root { --ink:#16181d; --mute:#5b6270; --line:#d7dbe2; --bg:#f6f7f9;
+          --accent:#1f4e79; --warn:#8a4b00; --new:#0b6b3a; }
+  * { box-sizing: border-box; }
+  body { font-family:"Noto Sans CJK KR","Noto Sans KR",-apple-system,"Segoe UI",sans-serif;
+         font-size:9.4pt; line-height:1.6; color:var(--ink); margin:0; }
+  code,.mono { font-family:"D2Coding","Noto Sans Mono CJK KR",ui-monospace,Menlo,monospace; font-size:8.6pt; }
+  h1 { font-size:20pt; margin:0 0 2mm; letter-spacing:-.4px; }
+  h2 { font-size:13.5pt; margin:8mm 0 3mm; padding-bottom:1.5mm;
+       border-bottom:2px solid var(--accent); color:var(--accent); page-break-after:avoid; }
+  h3 { font-size:10.8pt; margin:5.5mm 0 2mm; color:#243447; page-break-after:avoid; }
+  h4 { font-size:9.6pt; margin:3.5mm 0 1.4mm; color:#3a4757; page-break-after:avoid; }
+  p { margin:0 0 2.2mm; }
+  ul,ol { margin:0 0 2.4mm; padding-left:5mm; }
+  li { margin-bottom:.9mm; }
+  table { width:100%; border-collapse:collapse; margin:2mm 0 3.6mm; font-size:8.7pt; page-break-inside:avoid; }
+  th { background:var(--bg); text-align:left; font-weight:600; color:#2c3444; }
+  th,td { border:1px solid var(--line); padding:1.4mm 1.9mm; vertical-align:top; }
+  td.num,th.num { text-align:right; font-variant-numeric:tabular-nums; }
+  .lead { color:var(--mute); margin-bottom:4mm; }
+  .box { border:1px solid var(--line); border-left:3px solid var(--accent); background:var(--bg);
+         padding:2.2mm 2.8mm; margin:2.6mm 0; page-break-inside:avoid; }
+  .box.warn { border-left-color:var(--warn); }
+  .box.new { border-left-color:var(--new); }
+  .box .t { font-weight:600; display:block; margin-bottom:.9mm; }
+  .tag { display:inline-block; font-size:7.4pt; font-weight:600; padding:.2mm 1.3mm;
+         border-radius:2px; vertical-align:1px; margin-left:1mm; }
+  .tag.new { background:#e3f3ea; color:var(--new); border:1px solid #b9dfca; }
+  .tag.chg { background:#fdf1e0; color:var(--warn); border:1px solid #f0d5ac; }
+  pre { background:#f2f4f7; border:1px solid var(--line); padding:2mm 2.4mm; margin:1.8mm 0 2.8mm;
+        white-space:pre; overflow-x:hidden; font-size:8.1pt; line-height:1.42; page-break-inside:avoid; }
+  .eq { background:#fbfcfd; border:1px solid var(--line); padding:2mm 3mm; margin:2mm 0 3mm;
+        font-family:"D2Coding",ui-monospace,monospace; font-size:8.7pt; page-break-inside:avoid; }
+  .toc { columns:2; column-gap:8mm; font-size:8.9pt; }
+  .small { font-size:8.4pt; color:var(--mute); }
+  .pb { page-break-before:always; }
+  hr { border:0; border-top:1px solid var(--line); margin:4mm 0; }
+</style>
+<h1>RBQ10 비전 RL 구현 총정리 <span class="small">GAST Ray+IR 교사 직결 구조 · 2026-10-18</span></h1>
+<p class="lead">
+목적 → 방법 → 입출력 → 지형처리기 → Actor-Critic·PPO 학습 → 평가 도구(E1·RL Replay·MuJoCo) → 배포 순서로 정리한 전달용 문서.
+기준 모델은 <b>Ray+IR 3906</b>(sha f3e7afe5)이고, 2026-10-18 기준 <code>gd_lab_vrl</code> main(8c61d0d)과 <code>gd_rbq10_deploy_vrl</code> main(f0109e0)의 코드·설정 파일에서 확인한 값만 담았다.
+</p>
+
+<div class="box">
+<span class="t">이 문서가 다루지 않는 것 — 블라인드 문서 참조</span>
+블라인드 보행 공통 사항은 <code>gd_lab/gd_lab_training_v2.pdf</code>(gd_lab 학습 파이프라인 총정리 v2)에 있으며 여기서 반복하지 않는다:
+용어(step·iteration·배치) 0.2절 · CENet 구조 1.2절 · AdaBoot 1.3절 · PD/액션 경로 1.4절 · GAE 3.2절 · PPO 손실 3.3절 · CENet 손실 3.4절 · 좌우 대칭 증강 3.6절 · camel.policy.v1 계약 4.1절.
+블라인드 문서 6부(9월 초기 비전 설계: 렌더 카메라 학생 80×45)는 <b>현행이 아니다</b> — 현행은 아래 "교사 직결" 구조다.
+</div>
+
+<div class="toc">
+<b>1부. 목적과 전체 구조</b><br>
+1.1 목적 · 1.2 방법의 변천 · 1.3 현행 구조 한 장 요약<br>
+<b>2부. 입출력 구조</b><br>
+2.1 Actor 입력 · 2.2 지형 프레임과 기억 · 2.3 출력 · 2.4 Critic<br>
+<b>3부. 지형처리기</b><br>
+3.1 학습 쪽: Ray+IR 관측 · 3.2 배포 쪽: depth+IR 매퍼 · 3.3 버전 이력 · 3.4 알려진 오차<br>
+<b>4부. Actor-Critic·PPO 학습</b><br>
+4.1 네트워크 · 4.2 초기화 · 4.3 환경 · 4.4 보상 · 4.5 PPO와 안정성 · 4.6 모델 선택 · 4.7 파인튠(aug149) · 4.8 학생(보류)<br>
+<b>5부. 평가 도구</b><br>
+5.1 E1 · 5.2 RL Replay · 5.3 MuJoCo 배포 검증<br>
+<b>6부. 배포</b><br>
+6.1 export · 6.2 번들·계약 · 6.3 Pilot 런타임 · 6.4 한계<br>
+<b>7부. 현재 결과와 과제</b> · <b>부록</b> 코드 위치
+</div>
+
+<!-- ============================================================ -->
+<h2>1부. 목적과 전체 구조</h2>
+
+<h3>1.1 목적</h3>
+<p>RBQ10 안내견 로봇이 <b>시각장애인을 하네스로 이끌며</b> 지하철 승강장 갭(2–26 cm, 단차 0–16 cm), 계단(5–25 cm), 경사·거친 바닥을 넘도록 한다.
+블라인드 정책은 갭 앞에서 발이 빠지고 계단 앞에서 걸려 넘어진다 — 몸 앞·아래 지형을 보는 정책이 필요하다. 추가 요구:</p>
+<ul>
+<li><b>페이로드</b> 0/6 kg(실사양 5 kg: 머리 2 + 중앙 2.5 + 후방 0.5)에서 같은 성능.</li>
+<li><b>핸들 외력</b>: 계단에서 사람이 하네스를 당기거나 미는 힘(오르막 ≤200 N, 내리막 ≤150 N)을 견딘다.</li>
+<li><b>실제 센서</b>: 로봇 하부 RealSense D4xx 4대(depth + IR). LiDAR는 내년 탑재 예정이며, 지금 구조는 LiDAR 경로도 같은 지도 형식으로 받는다.</li>
+<li><b>실시간</b>: 정책 100 Hz, 지형 캡처 10 Hz, 로봇 CPU에서 ONNX 추론.</li>
+</ul>
+
+<h3>1.2 방법의 변천 — 왜 "교사 직결"인가</h3>
+<table>
+<tr><th>세대</th><th>방식</th><th>결과 / 버린 이유</th></tr>
+<tr><td>CVTT (09-23~10-01)</td><td>렌더 카메라 가시성 교사 + 카메라 학생(RVLD/GAVD)</td><td>학생이 갭·계단 미통과. 렌더 비용 큼</td></tr>
+<tr><td>BIVT-Ray (09-30~10-04)</td><td>블라인드 시작 + 레이캐스트 가시성 높이맵 교사</td><td>교사는 좋아졌지만 카메라 학생 증류가 병목</td></tr>
+<tr><td>GAST v1 → v2.1 (10-01~10-13)</td><td>시간 기억(8프레임, pose warp) 지형 encoder</td><td>v1 NaN 실패, v2.1(math SDPA)로 해결. 학생 B3 E1 72.6%가 상한</td></tr>
+<tr><td><b>Ray+IR (10-14~)</b></td><td>교사 입력 자체를 <b>배포 매퍼가 만들 수 있는 지도</b>(레이캐스트 가시 셀 + 노이즈 + IR)로 학습</td><td>학생 없이 매퍼 지도를 교사에 직접 넣음. E1 카메라+필터 갭 96.2%(3906)</td></tr>
+</table>
+<div class="box new">
+<span class="t">핵심 결정</span>
+카메라 영상 → latent를 배우는 학생 대신, <b>센서 → 지형처리기(매퍼) → 11×17 지도</b>를 사람이 만든 처리기로 고정하고,
+교사가 그 지도 형식(가시 셀만, 노이즈·결측·blackout 포함)으로 직접 학습하도록 했다. 증류 손실이 사라지고, 센서가 바뀌어도 처리기만 바꾸면 된다.
+</div>
+
+<h3>1.3 현행 구조 한 장 요약</h3>
+<pre>
+[학습: Isaac Lab, gd_lab_vrl]
+ GT 지형 메시 → RaycastIrTerrain (4카메라 가시성 · 노이즈 · dropout · blackout · IR 프록시)
+   → 8프레임 기억 [h, valid, IR] × 187 × 8 → GAST encoder → terrain latent 32 ─┐
+ 고유감각 46 × 5 → CENet → z_t 19 ─────────────────────────────────────────────┼→ actor → 관절 12 (100 Hz)
+ 고유감각 46 ──────────────────────────────────────────────────────────────────┘
+ critic (특권: 전체 높이맵 · 접촉 · 마찰 · 질량 …) → PPO
+
+[배포: gd_rbq10_deploy_vrl]
+ D4xx × 4 (depth + IR) → camfilter136 → L0S 매퍼 (v25or) → 11×17 [h, valid, IR] 프레임, 10 Hz
+   → UDP GSC2 → Pilot: 49슬롯 ring → 8프레임 → gast_encoder.onnx → policy_vrl.onnx → PD
+</pre>
+
+<!-- ============================================================ -->
+<h2 class="pb">2부. 입출력 구조</h2>
+
+<h3>2.1 Actor 입력 (총 97 + 지형 4496)</h3>
+<table>
+<tr><th>입력</th><th>크기</th><th>내용</th></tr>
+<tr><td>direct_obs</td><td class="num">46</td><td>ang_vel 3, projected_gravity 3, command(vx,vy,ωz) 3, joint_pos_rel 12, joint_vel 12, last_action 12, payload 1</td></tr>
+<tr><td>cenet_obs</td><td class="num">230</td><td>위 46 × 최근 5 step(step-major) → CENet → z_t 19 (속도 추정 3 + latent 16, detach)</td></tr>
+<tr><td>terrain_latent</td><td class="num">32</td><td>GAST encoder 출력. 현재 스캔에 valid 셀이 하나도 없으면 정확히 0</td></tr>
+</table>
+<p>actor MLP 입력 = 46 + 19 + 32 = 97. 배포 스케일(계약): ang_vel ×0.25, command ×(2, 2, 0.25), joint_vel ×0.05, payload ×0.2, 정규화는 그래프 안.
+학습 노이즈: ang_vel ±0.2, gravity ±0.05, joint_pos ±0.01, joint_vel ±1.5 (배포는 노이즈 off).</p>
+
+<h3>2.2 지형 프레임과 시간 기억</h3>
+<table>
+<tr><th>항목</th><th>값</th></tr>
+<tr><td>격자</td><td>몸 yaw 정렬 11(y)×17(x) = 187셀, 10 cm, x −0.8…+0.8 m, y −0.5…+0.5 m, x-fastest</td></tr>
+<tr><td>높이 인코딩</td><td><code>h = 5·clip(scanner_z − z − 0.5, −1, 1)</code> (기준 = base 원점), 무효 셀 h=0·valid=0. 깊은 갭은 h≈+5</td></tr>
+<tr><td>프레임</td><td>[h 187 | valid 187 | IR 187] = 561 (+age 1). IR 없는 구버전(oracle)은 374</td></tr>
+<tr><td>IR 인코딩</td><td>유효·카메라 가시 셀만 0.05 + 0.95·I (I∈[0,1]), 나머지 0</td></tr>
+<tr><td>기억</td><td>캡처 0.1 s, 8프레임 offset (48, 32, 16, 8, 4, 2, 1, 0) step → 최대 4.8 s 과거. 각 프레임은 캡처 pose와 age를 가지며 <b>현재 pose로 warp</b></td></tr>
+<tr><td>학습 텐서</td><td>gast_history = 8 × (3·187 + age) = 4496</td></tr>
+<tr><td>배포 텐서</td><td>frames[1,8,561], poses[1,8,3], pose[1,3], ages[1,8](0–5 s, 빈 슬롯 5) → warp는 encoder ONNX 내부</td></tr>
+</table>
+
+<h3>2.3 출력</h3>
+<ul>
+<li><b>actions[12]</b>: 관절 목표 오프셋. 목표 = default + 0.25·a (soft limit 5°). 관절 순서 FL/FR/HL/HR × HIP/THIGH/KNEE, default (0, 0.76, −1.45).</li>
+<li><b>PD</b>: ARM4 — Kp hip·thigh 123.39 / knee 127.77, Kd 2.4, 토크 한계 93.6 / 126 N·m, 100 Hz(sim dt 0.005 × decimation 2), DelayedDCMotor 0–1 step 지연.</li>
+<li><b>z_t[19]</b>: 보조 출력(속도 추정 + 맥락 latent), 진단용.</li>
+</ul>
+
+<h3>2.4 Critic (학습 전용, 특권 정보)</h3>
+<p>고유감각 전부 + base_lin_vel, 발 주변 높이, 발 접촉·접촉력, 마찰계수, 몸통 질량 오프셋, 액추에이터 게인 배율, push Δv, <b>전체 높이맵(가림·노이즈 없음)</b>, payload. MLP 512-256-128.</p>
+
+<!-- ============================================================ -->
+<h2 class="pb">3부. 지형처리기</h2>
+<p>"지형처리기"는 센서 측정을 2.2절의 11×17 프레임으로 바꾸는 부분이다. 학습 쪽(Isaac, GPU 텐서)과 배포 쪽(매퍼, CPU)이 <b>같은 프레임 의미</b>를 만들도록 설계했다.</p>
+
+<h3>3.1 학습 쪽: RaycastIrTerrain (<code>src/gd_lab/gast/rayir.py</code>)</h3>
+<pre>
+GT 높이 스캔 히트 (11×17)
+  → 가시성: 장착 카메라 4대(camera contract vendor_new)에서 각 히트점까지 레이캐스트, 다리 캡슐 가림 → 보이는 셀만
+  → 높이 노이즈 N(0, 1 cm) + 에피소드 bias N(0, 1.5 cm)
+  → dropout 3%
+  → blackout: 스텝당 시작확률 0.001, 길이 50–300 step, 에피소드 전체 5% (IR 포함 전부 0)
+  → 무효 셀 h=0 / valid=0 / IR=0
+  → 카메라 계약 시계에 맞춰 캡처, 다음 캡처까지 hold (height·mask·IR이 같은 캡처 pose 공유)
+</pre>
+<p><b>IR 프록시</b>(셀 단위, gap/지형 라벨 미사용):
+<code>I = clip(a + g·ρ(x,y)·max(0, n·l)·(r0/r)^0.5 + N(0,σ), 0, 1)</code>,
+a 0.05 · gain 0.57 · r0 0.6 m · σ 0.03 · IR dropout 3%.
+n = GT 표면 법선, l·r = 그 셀을 보는 가장 가까운 카메라 방향·거리, ρ = 월드 고정 재질장(어두운 패치 약 10%, 밝은 패치 약 15%, 저반사 띠), g = 에피소드 노출.
+noen rosbag 실측 IR(평균 0.34, p10 0.22, p90 0.46, 포화 없음, 거리 감쇠 (r0/r)^0.5)에 맞췄다.</p>
+
+<h3>3.2 배포 쪽: depth+IR → L0S 매퍼 (현행 경로)</h3>
+<p>현재는 MuJoCo sensor sidecar(<code>simulation/mujoco/sensor_sidecar/sidecar.py --mode depth_ir</code>)에서 동작하며, Isaac E1과 <b>같은 매퍼 코드</b>(<code>gd_lab_vrl/tools/rl_replay/</code>)를 import한다.</p>
+<table>
+<tr><th>단계</th><th>모듈</th><th>내용</th></tr>
+<tr><td>① depth</td><td>sidecar / cam130</td><td>하부 카메라 4대 160×90, 0.15–5 m. sensor121 잡음: σ 1 cm, flying(모서리) 0.15, spike 0.6%, dropout 3%, 다리 FK 가림</td></tr>
+<tr><td>② 이상치 제거</td><td><code>camfilter136.py</code></td><td>3×3 이웃(중심 제외) median m, τ = max(0.10 m, 0.05·m), c = τ 안 이웃 수. 유지: (n≥3 이고 (|d−m|≤τ 또는 c≥2)) 또는 (n==2 이고 c==2). 제거 픽셀은 unknown(채우지 않음)</td></tr>
+<tr><td>③ 직접 높이</td><td><code>heightmap119z.py</code> h0d</td><td>5 cm 월드 맵, 국소 평면 패치(±0.25 m), DEEP 0.10 m. 정책 셀은 <b>deepest-of-5</b>: 중심 + (±2.5, ±2.5) cm 4점 중 가장 낮은 유효 z</td></tr>
+<tr><td>④ 구조 갭</td><td><code>structure130.py</code></td><td>yaw 정렬 5 cm 레인(±0.55 m), 2 cm bin. 지지 세그먼트를 이어 외삽한 지지면 아래로 레이가 떨어지고 0.25 m 안에 디딤면이 없으면 "빈 공간 증명". no-return은 증거로 쓰지 않음. GAP 셀 → h = 5·clip(scanner_z − (support_z − d_deep) − 0.5), valid=1; pending → 무효. 후방 x < −0.45 또는 10 s 지나면 만료</td></tr>
+<tr><td>⑤ 결합</td><td><code>lidar126.Maps("L0S")</code></td><td><b>DUAL=2 (v2.5-OR)</b>: 2.5 cm 어긋난 두 격자 중 하나라도 중심이 GAP이면 GAP. <b>DDEEP=0.7</b>(d_deep). sidecar가 이 값을 강제(불일치 시 종료)</td></tr>
+<tr><td>⑥ IR</td><td>sidecar <code>cell_ir</code></td><td>3.1과 같은 식(현재 시뮬에서는 코스 GT 기하로 계산). 유효·가시·비드롭 셀만</td></tr>
+<tr><td>⑦ 전송</td><td>UDP GSC2</td><td>"GSC2" | width | stamp_ms | seq | sample x,y,z,yaw | float[561]. 캡처 10 Hz, 전송 지연 0–150 ms, 5% drop, 지도 샘플 100 Hz</td></tr>
+</table>
+<p>LiDAR 경로(<code>--mode lidar</code>)는 ①만 다르다: 120×90 빔(0.5°), 피치 50°, 0.1–10 m, 1 cm 잡음, 1% drop, URDF 자기 가림. IR=0.</p>
+
+<h3>3.3 매퍼 버전 이력</h3>
+<table>
+<tr><th>버전</th><th>추가된 것</th></tr>
+<tr><td>116</td><td>CPU 5 cm 월드 맵(80×80, TTL 2 s), 법선 기반 지지점, IR 어두운 띠(h1) 갭 투표, 센서 오류 모델 <code>corrupt()</code></td></tr>
+<tr><td>117 / 118</td><td>벡터화 BatchMap / 16 프로세스 병렬 shard, IR 독립 잡음(sensor118)</td></tr>
+<tr><td>119z</td><td>h0 계열 직접 높이, deepest-of-5(h0d) — 이후 LiDAR에서도 재사용</td></tr>
+<tr><td>121</td><td>IR-PCA 갭 후보(H3Map), 투표·시간·운동 조건 latch, 출처(UNKNOWN/OBSERVED/INFERRED_GAP), 특권 기하 센서 생성기 sensor121</td></tr>
+<tr><td>126 / 127</td><td>Isaac/Warp LiDAR(움직이는 URDF 가림) / 2센서</td></tr>
+<tr><td>128 / 129</td><td>free-space carving(L1/L2), G·GV 진단 arm, L0M</td></tr>
+<tr><td><b>130</b></td><td><b>structure130 L0S</b>, cam130 카메라 경로</td></tr>
+<tr><td><b>136</b></td><td>Ray+IR 교사 지원, <b>camfilter136</b>, IR on/zero 스위치</td></tr>
+<tr><td>145</td><td>매퍼 provenance 기록(opt-in, 5.2절)</td></tr>
+</table>
+
+<h3>3.4 알려진 오차</h3>
+<table>
+<tr><th>문제 정의</th><th>결과</th><th>반영 방향</th></tr>
+<tr><td>카메라 spike(0.6%) + min-z 축약기</td><td>평지 셀이 "깊음"으로 보여 카메라 갭 성공 20.6%</td><td>camfilter136 적용 → 91.8–94.3% (2769), 3906 96.2%</td></tr>
+<tr><td>deepest-of-5 샘플링</td><td>pit이 5–10 cm 넓게 보임(MuJoCo: 근측 약 5 cm, 착지측 0–10 cm)</td><td>aug149에서 이 오차를 증강으로 학습(4.7절). 착지측 오차를 GT로 바꾼 진단 arm E에서 2769 6/6</td></tr>
+<tr><td>캡처 지연</td><td>LiDAR capture end→통합 p95 126–140 ms, 최신 캡처 age p95 222–242 ms</td><td>학습 지연 0–150 ms보다 큼 — depth 캡처를 별도 프로세스로 분리(p95 55–67 ms, late 0)</td></tr>
+<tr><td>pose</td><td>Pilot이 쓰는 pose와 샘플 pose 차 p95 1.5–2.7 cm, yaw ≤0.2°</td><td>보정 불필요</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2 class="pb">4부. Actor-Critic·PPO 학습</h2>
+
+<h3>4.1 네트워크 (<code>GastRayIrActorCritic</code>)</h3>
+<pre>
+TemporalTerrainEncoder (src/gd_lab/gast/temporal.py), 입력 8 × (3·187 + 1)
+  프레임별 CNN : Conv(3→8,3×3) ELU → Conv(8→16,3×3) ELU → AdaptiveAvgPool(5×8) → FC 640→64 ELU
+  + age 임베딩 : Linear(2→64) of (age/5, valid 평균)
+  → MultiheadAttention(64, 4 heads)  [math SDPA 강제]  → LayerNorm(residual)
+  → GRU(64) → FC 64→32 + Tanh  = terrain latent 32   (valid 셀 0개면 0)
+보조 decoder : latent 32 → FC 128 → 187×6  (깨끗한 높이·valid·semantic gap·gap-known 재구성)
+CENet        : 블라인드와 동일 (enc 128-64, dec 64-128, latent 16, β 1.0, AdaBoot) — 블라인드 문서 1.2–1.3절
+actor        : 97 → 512 → 256 → 128 → 12 (ELU),  critic: 특권 obs → 512-256-128 → 1
+</pre>
+<p>terrain latent는 <b>detach하지 않는다</b> — PPO 경사가 encoder를 직접 학습시킨다. 보조 재구성 손실(height smooth-L1 + valid/gap BCE, gap 셀 가중 ×5)은 업데이트마다 2048 샘플, 계수 0.1, PPO와 같은 Adam으로 한 번 더 step한다.</p>
+
+<h3>4.2 초기화 — 3906 = blind_init</h3>
+<table>
+<tr><th>항목</th><th>값</th></tr>
+<tr><td>출처</td><td>DWB-38000 (우리 ARM4 블라인드 DreamWaQ, onvlm2, 4096 env, 0→38000, sha c6cfe178)</td></tr>
+<tr><td>복사 / 새로</td><td>45개 텐서 복사(actor·CENet·normalizer) / 지형 24개 새로(encoder·decoder)</td></tr>
+<tr><td>latent head</td><td>actor의 latent 입력 열 0 → 시작 행동 = 블라인드</td></tr>
+<tr><td>optimizer</td><td>PPO 새로, CENet optimizer 복원 안 함. lr policy 1e-4 / terrain 1e-3, fixed</td></tr>
+<tr><td>스크립트</td><td><code>scripts/gast/train_rayir_gap50_1gpu.sh dwb train</code> → <code>train_teacher.py --warm_start_dwb --warm_start_sha256 …</code></td></tr>
+</table>
+<p>다른 줄기: 2769 = GAST v2.1 2000에서 warm start(첫 conv 2→3채널, IR 가중치 새로) — 그 계보는 b1_18 ONNX → 17206 → 21068 → GAST 2000. 계보도: <code>docs/lineage/records_20261016/rbq10_lineage.html</code>.</p>
+
+<h3>4.3 환경 (<code>Gd-GastRayIrV21Gap50-Rbq10-Dreamwaq-v0</code>)</h3>
+<table>
+<tr><th>항목</th><th>값</th></tr>
+<tr><td>지형</td><td>curriculum 15 rows × 20 cols, 타일 8 m. <b>platform_gap 10/20 = 50%</b>(폭 0.02–0.26 m, 단차 0–0.16 m) + 계단 6종(0.05–0.25 m, wide/nose/inv) + rough + 경사 2종 + ring_fence</td></tr>
+<tr><td>명령</td><td>V21VelocityCommand: heading 명령 100%(stiffness 0.5), standing 20%, vx ±1.2, vy ±1.0, ωz ±1.0, 3–7 s 재샘플. 계단·갭에서 heading을 지형 방향으로 맞춤</td></tr>
+<tr><td>도메인 랜덤화</td><td>마찰 0.2–1.25, 몸통 질량 ±2 kg·COM·관성, 게인 ×0.85–1.15, push 10–15 s마다 ±0.5 m/s</td></tr>
+<tr><td>페이로드</td><td>0 kg 20% / 6 kg 80% (x ±5 cm, z +7 cm), 관측에 포함</td></tr>
+<tr><td>핸들 외란</td><td>계단 오르막 0–200 N·0.3–1.0 s·20–45°(가끔 300–400 N 저크), 내리막 0–150 N·0.1–0.5 s. 작용점 hip handle (−0.33, 0, 0.12)</td></tr>
+<tr><td>종료</td><td>time_out(20 s), base_contact, nonfinite_state</td></tr>
+</table>
+
+<h3>4.4 보상 — 비전에서 추가된 항목</h3>
+<p>기본 locomotion 항목(속도 추종, 자세, 토크·가속·action rate, 발 clearance·slip·cadence 등)은 블라인드 문서 2.3절과 같은 계열이며 가중치만 v2.1 값이다(전체 목록: <code>GAST_RAYIR_TEACHER_DESIGN_20261018.md</code> 6.4절).</p>
+<table>
+<tr><th>보상</th><th class="num">가중치</th><th>의도</th></tr>
+<tr><td>platform_gap_foot_drop</td><td class="num">−2.0</td><td>갭 안으로 발이 떨어짐</td></tr>
+<tr><td>platform_gap_intrusion</td><td class="num">−3.0</td><td>갭 영역 침범</td></tr>
+<tr><td>platform_gap_crossing / clean</td><td class="num">+0.5 / +0.5</td><td>통과 / 침범 없는 깨끗한 통과</td></tr>
+<tr><td>gap_foothold_margin · gap_slot_probe</td><td class="num">−0.25 · −1.0</td><td>모서리 가까운 착지, 갭 더듬기</td></tr>
+<tr><td>gap_hind_hop · gap_overlift · gap_foot_clean</td><td class="num">−1.0 · −0.25 · +0.25</td><td>뒷발 점프, 과도한 발 들기, 깨끗한 발 궤적</td></tr>
+<tr><td>stair_foothold_margin · stair_stall</td><td class="num">−0.2 · −0.5</td><td>계단 모서리 착지, 계단 앞 멈춤</td></tr>
+<tr><td>stair_handle_disturbance · push_fall · push_slip</td><td class="num">−1.0 · −3.0 · −0.2</td><td>핸들 외력 중 자세·넘어짐·미끄러짐</td></tr>
+</table>
+
+<h3>4.5 PPO와 수치 안정성 (<code>GastPPO</code>)</h3>
+<p>horizon 100, 5 epoch × 4 minibatch, lr 1e-3 fixed(하한 3e-5), γ 0.99, λ 0.95, clip 0.2, entropy 0.01, desired_kl 0.01, max_grad_norm 1.0, 대칭 데이터 증강(<code>mirror_gast</code>, mirror loss 0). 3906 규모: 1024 env × 5000 iter, 1 GPU(90.111). DDP는 <code>--distributed --total_envs N</code>(rank별 divmod 분할).</p>
+<div class="box warn">
+<span class="t">안정성 교훈 (코드에 반영됨)</span>
+<ul>
+<li><b>fused SDPA backward가 inf gradient의 원인</b>(GAST v2.1 8016/8148 정지) → <code>GAST_MATH_SDPA=1</code>로 math kernel 강제. 대칭 증강으로 배치가 2배가 되면 CUDA attention grid 한계를 넘으므로 encoder를 8192 chunk + checkpoint로 실행.</li>
+<li><b>비유한값 가드</b>: rollout·상태·optimizer에 NaN/inf → 업데이트 skip 후 마지막 정상 스냅샷 복원. 보조 손실은 fp64 norm 검사 후 정상일 때만 rank 평균.</li>
+<li><b>CENet 이상치</b>: 타깃(velocity/recon/history) clamp로 방어. gradient clipping은 측정상 효과 없음.</li>
+</ul>
+</div>
+
+<h3>4.6 모델 선택 — online Top-5 (<code>rl/online_top5.py</code>)</h3>
+<p>학습 rollout 통계로 후보를 뽑는다(held-out 평가 아님). 조건: iter ≥500, 간격 ≥500, 지형 평균 레벨 ≥9, platform_gap 평균 레벨 ≥8, base contact·gap 종료·계단 종료율 ≤9%, 현 Top-1 대비 gap 성공·contact 회귀 ≤1.0 pp. 점수는 (family, level) 그룹별 가중 macro 평균. 기준 파일: <code>configs/gast/online_top5_rayir.json</code>(hot reload). 최종 선택은 E1과 MuJoCo로 한다(5부) — online 점수 1위가 MuJoCo에서 무너진 사례가 있다(A3906 5737: 1/5).</p>
+
+<h3>4.7 파인튠: aug149 매퍼 오차 증강 (브랜치 <code>aug149-mapper-aug</code>)</h3>
+<p>목적: Isaac의 깨끗한 Ray 입력과 실제 매퍼(3.2절) 출력 차이를 actor가 견디게 한다. <b>actor 입력에만</b> 적용, critic은 clean.</p>
+<ul>
+<li>deepest-of-5 footprint + 에피소드 고정 pit 확장(최종 반경 ≤10 cm), gap 타일에서만 support-0.7 m pit 깊이.</li>
+<li>군집형 unknown: valid의 5–15%를 blob + 맵 경계 띠로 제거. IR은 유지(무효 셀 0).</li>
+<li>25% clean 에피소드, 국소 500 업데이트 ramp, 별도 RNG(기존 노이즈 난수열 불변).</li>
+<li><b>strict resume</b>(<code>--resume_rayir149</code>): SHA·task 일치 검사, PPO·CENet optimizer와 family 레벨 복원, 조용한 fallback 없음. 주의: <code>--max_iterations</code>는 추가분.</li>
+<li>규모 +2000 iter: A3906(90.111), A2769·C2769 대조(onvlm2).</li>
+</ul>
+
+<h3>4.8 카메라 학생 (보류 — 참고)</h3>
+<p>Ray+IR 이전에는 교사 latent를 카메라 학생으로 증류했다. 최종 학생 GAST-S/B3: 4×80×45 depth+IR → 공유 CNN → 보정된 격자 cross-attention(187셀) → 시간 attention·age 임베딩·셀별 GRU(pose warp) → latent 32. 손실 = 고정 actor를 통한 행동 MSE + 0.5·기하(가시 셀 높이·가시성 BCE) + 0.1·품질 BCE, DAgger식 혼합(학생 구동 확률 ramp). 최고 B3 s42 58084: E1 72.6%. 교사 직결(카메라+필터 96.2%)보다 낮아 배포 경로에서 제외했다. 코드: <code>src/gd_lab/gast/{student,distillation,b3_objective}.py</code>.</p>
+
+<!-- ============================================================ -->
+<h2 class="pb">5부. 평가 도구</h2>
+
+<h3>5.1 E1 — Isaac 폐루프 평가 (<code>experiments/e1/</code>, <code>tools/rl_replay/e1_*</code>)</h3>
+<p><b>목적</b>: 정책은 고정한 채 지형 입력 경로만 바꿔(arm), 같은 초기 상태에서 갭·계단 결과를 비교한다. "정책 문제인지 지도 문제인지"를 분리하는 도구다.</p>
+<table>
+<tr><th>항목</th><th>값</th></tr>
+<tr><td>규모</td><td>32 env × 30 s, seed 42–45, vx 1.0 고정(speed ramp 0), dt 0.01 단언, 학생 없음</td></tr>
+<tr><td>고정</td><td>지형 curriculum off(최고 레벨 고정), 게인 재샘플 동결, 카메라 전송 100 ms 캡처·0–150 ms 지연·5% drop</td></tr>
+<tr><td>짝 맞춤</td><td>결과마다 initial_state / terrain_grid / packet_schedule SHA 기록. 다른 교사·경로라도 같은 seed면 같은 초기 상태 — 불일치면 요약 거부</td></tr>
+<tr><td>지형 family</td><td>gap(platform_gap 20열), stdown(pyramid_stairs_inv = pit 탈출), stup(pyramid_stairs)</td></tr>
+<tr><td>카메라 프로파일 검사</td><td>가중치 옆 <code>params/env.yaml</code>의 camera_profile이 env와 같아야 실행(다르면 RuntimeError)</td></tr>
+</table>
+<table>
+<tr><th>arm</th><th>교사에 들어가는 지도</th></tr>
+<tr><td>G</td><td>GT 깨끗한 높이(valid = GT valid) — 정책 상한</td></tr>
+<tr><td>GV</td><td>GT를 센서가 2 s TTL 안에 본 셀로 마스크 — 가시성만의 영향</td></tr>
+<tr><td><b>v25or</b> (L0S, DUAL=2, DDEEP=0.7)</td><td>배포 매퍼. <code>U130_SENSOR=lidar|cam</code>, <code>U136_CAM_FILTER=1</code>(camfilter136), <code>U136_IR=native|zero</code></td></tr>
+<tr><td>기타</td><td>L0/L0D/L0P/L0M/L1/L2(매퍼 변형), h0…h3u(구 카메라 높이맵), <code>U136_CAM_OFF=spike,…</code>(잡음 항목별 진단)</td></tr>
+</table>
+<p><b>지표</b> (<code>e1_metrics.py</code>): 접촉 = 발 힘 &gt;15 N. reached = 앞발이 갭 근측 도달, crossed = base가 원측 +0.8 m·높이 &gt;0.3 m·|pitch|,|roll|&lt;0.5 rad, foot_drop = 발 중심이 갭 안에서 deck 아래, <b>clean = crossed &amp; foot_drop 없음</b>. fall(높이 &lt;0.3 m 또는 기울기 &gt;0.5 rad)·stall(2 s에 &lt;5 cm) 이후는 채점 중단, 창 끝까지 못 넘으면 censored. 계단: passed = 외곽 +0.2 m 직립 도달, body_contact = 몸통 힘 &gt;15 N. 지도 진단: 높이 MAE, false-valid, false_gap_5cm, gap recall, 발 레인 유효율.</p>
+<p><b>실행</b>: 단일 <code>UPDATE116_GPU_LOCK_HELD=1 U130_TEACHER=… U129_FAMILY=gap U130_SENSOR=cam U136_CAM_FILTER=1 bash experiments/e1/run_trial128.sh L0S 42 32 out.json</code>, 큐 <code>E1_GPUS="0 1" bash experiments/e1/e1_136.sh jobs.txt 2</code>(job: name family arm teacher seed ir_mode [sensor] [camoff], 2400 s timeout, result.json 있으면 skip). 출력 <code>outputs/&lt;name&gt;/result.json</code>(덮어쓰기 금지 모드). 요약 예: <code>checkpoints/teachers/gast/rayir_top5_20261016/e1/SUMMARY.md</code>.</p>
+
+<h3>5.2 RL Replay — 보상 해석 뷰어 (<code>tools/rl_replay/</code>)</h3>
+<p><b>목적</b>: 짧은 rollout(기본 4 s = 400 step) 하나를 녹화해 브라우저에서 로봇 동작과 <b>보상 분해</b>를 같이 돌려 본다. "이 상태에서 왜 이 행동을 했나"를 보상·가치로 설명한다. 대량 통계(MuJoCo eval)와 학습 모니터링(TensorBoard)은 대상이 아니다.</p>
+<table>
+<tr><th>구성</th><th>내용</th></tr>
+<tr><td>녹화</td><td><code>record_rollout.py</code>(Isaac, 교사 구동) / <code>train_student_live.py --replay_out</code>(학생 구동, no_grad). step·env마다 base pose·속도·명령·전 링크 위치·관절·action mean/std·V(s)·latent·보상 항목별 값·접촉·GT 스캔·교사 지형 입력·(선택) 지형 기억·점군. <code>RolloutLog.finish</code>가 G_t, 항목별 G_t^k, TD δ, GAE A_t(γ 0.99, λ 0.95, V(s_T) bootstrap)를 계산</td></tr>
+<tr><td>형식</td><td>압축 JSON(<code>logs/rl_replay/&lt;name&gt;.json</code>, NaN→null, 덮어쓰기 거부) + live NDJSON 스트림. 8 env·4 s ≈ 16 MB</td></tr>
+<tr><td>서버</td><td><code>server.py</code>: stdlib HTTP, 127.0.0.1:8765. <code>/api/recordings</code>, <code>/api/sources</code>, <code>POST /api/record</code>(apptainer로 녹화 실행), <code>/api/live</code>. 작업 1개씩, 대상 GPU에 다른 프로세스가 있으면 거부(fail closed)</td></tr>
+<tr><td>뷰어</td><td><code>viewer.html</code>(한국어): three.js + RBQ10 URDF 3D(발 접촉 색), 지형 오버레이(GT / 교사 입력 / 학생 점군), 항목별 보상 막대, G_t 지분, V·G·A·r 타임라인, "지배 보상 항목" 히트맵 + 행동 이벤트(foot_drop, high_lift, hind_hop, fall), 관절별 action ±std·교사 action</td></tr>
+<tr><td>매퍼 provenance (145)</td><td>sidecar <code>--provenance FILE</code>: 매퍼 결정 이벤트(통합·갭 표시 시도·철회 사유·만료·정책 셀 샘플) JSONL. <code>--raw FILE</code>: 무손실 원시 스트림(R145NPZ1, 프레임별 npz). 기본 off, 켜도 결과 bit 동일(960회 비교)</td></tr>
+</table>
+<p><b>실행</b>: <code>TRAIN_ARM=4 python3 tools/rl_replay/server.py --port 8767</code> → <code>http://127.0.0.1:8767/tools/rl_replay/viewer.html</code>. 시뮬레이터 없이 확인: <code>python3 tools/rl_replay/make_demo.py</code>.</p>
+
+<h3>5.3 MuJoCo 배포 검증 (<code>gd_rbq10_deploy_vrl/evaluation/</code>)</h3>
+<p>Isaac과 다른 물리엔진에서 <b>실제 배포 바이너리</b>(Pilot C++ + ONNX)와 센서 sidecar로 시험한다. 최종 모델 선택은 여기를 통과해야 한다.</p>
+<table>
+<tr><th>코스 / 도구</th><th>내용</th></tr>
+<tr><td>gap_stairs_force4</td><td>폭 1.8 m, pit 0.65 m. 갭 5/10/15/20/25/30 cm(x 2.0–10.25) → 20 cm 계단 20단 오르기(14.55) → 꼭대기 → 내리기(22.55–28.55) → 25 cm 계단 10단 → 끝 41.55</td></tr>
+<tr><td>force4.sh / _repeat / _sensor / _depthir_repeat</td><td>4지점 자동 핸들 외력(오르막 당김 15.3, 밂 18.0, 내리막 당김 23.3, 밂 26.0; 당김 뒤 30° 아래, 밂 앞 10° 아래), 1회·반복·센서 경로·고정 seed N회 + PASS/FAIL 영상</td></tr>
+<tr><td>gapprefix.sh</td><td>갭 구간만(완주 x 12). arm A oracle 전체 잡음 / B 지형 잡음 off / C sidecar 센서 지도 / D 같은 일정의 GT 패킷 / E 착지측 오차만 GT(<code>--map s_landing</code>). <code>SENSOR=lidar|depth_ir</code>, <code>RAW=1</code></td></tr>
+<tr><td>force4_classify.py</td><td>궤적 전체에서 첫 사건: FALL(기울기 &gt;70°), GAP-PIT(갭 안 z &lt;0.3 m 1 s 이상), FINISH(x ≥ 40.9), STOP, INVALID. 구역(gapN, up-pull … after)과 통과 갭 수</td></tr>
+<tr><td>fall_watch.py</td><td>FALL / PIT / STUCK(20 s에 &lt;0.2 m) 즉시 종료 → 반복 시험 가속</td></tr>
+<tr><td>진단</td><td>pilot_scan_report(패킷 age·pose 차), sidecar_trace_report(캡처 지연 p50/p95), sidecar_map_vs_gt(지도 vs GT: false-gap/false-ground)</td></tr>
+<tr><td>리뷰 패키지</td><td><code>deploy/mujoco_review_20261018/&lt;모델&gt;/run_sim.sh [course|--check|stop]</code>: 조이스틱 주행 + 자동 외력. 변수 <code>PAYLOAD_KG</code>(6), <code>FORCE</code>(1), <code>UP_PULL_N/UP_PUSH_N/DOWN_PULL_N/DOWN_PUSH_N</code>(150), <code>FORCE_SEC</code>(2.0), <code>SEED</code>(42)</td></tr>
+</table>
+<p>기록: <code>records/&lt;실험&gt;/runs/&lt;run&gt;/</code>(manifest, state.jsonl 150 Hz, pushes.json, sidecar_*.jsonl/bin, pilot_scan.log, walk.mp4 = MuJoCo 창 + 비전 뷰어 나란히). mp4는 git에 넣지 않는다.</p>
+
+<!-- ============================================================ -->
+<h2 class="pb">6부. 배포</h2>
+
+<h3>6.1 export (<code>gd_rbq10_deploy_vrl/export/gast_teacher_oracle.py</code>)</h3>
+<pre>
+--checkpoint X.pt --sha256 H --name NAME [--params DIR] --ir_input
+  → 학습 코드(GD_LAB_TRAIN_ROOT=../gd_lab_vrl)로 정책 재구성, 체크포인트 SHA·클래스(GastRayIrActorCritic) 검사
+  → policy_vrl.onnx/.pt (actor: direct 46, cenet 230, latent 32 → actions 12, z_t 19)
+  → gast_encoder.onnx (frames[1,8,561], poses[1,8,3], pose[1,3], ages[1,8] → latent 32; warp 포함)
+  → 학습 TerrainHistory + encoder와 무작위 궤적 parity (예: 최대 오차 1.56e-5), blackout 시 latent 0 확인
+  → deployment_manifest.json
+</pre>
+
+<h3>6.2 번들과 계약</h3>
+<p>번들 <code>resources/policy/gast/&lt;name&gt;/</code> = 두 ONNX + <code>params/{agent,env,gast_warm_start}.yaml</code> + manifest(교사 SHA, iteration, ONNX SHA, parity, history offsets, capture 0.1 s, camera contract). 실행기: <code>scripts/gast/teacher/&lt;name&gt;/run_sim_ir.sh</code>.
+sim_docker용 계약 <code>simdocker_contract.json</code>(schema <code>simdocker.gast.oracle.v1</code>, <code>tools/write_simdocker_contract.py</code>)에는 관절 순서·default·policy_dt 0.01·action scale 0.25/clip ±5·게인·격자·높이 인코딩·관측 스케일이 들어 있다. camel.policy.v1 GAST runtime은 sim_docker 브랜치 <code>feat/gast-teacher-runtime</code>(offline parity ~1e-6, 시뮬 내 smoke 미실시).</p>
+
+<h3>6.3 Pilot 런타임 (시뮬레이션)</h3>
+<table>
+<tr><th>구성</th><th>내용</th></tr>
+<tr><td>정책 주기</td><td>500 Hz 기준 decimation 5 = 100 Hz (<code>PolicyBackendVrl.cpp</code>), 게인은 컴파일 상수(계약과 동일)</td></tr>
+<tr><td>encoder 스레드</td><td><code>VisionStudentThread::gastStep</code>: 10 ms마다 최신 sim pose(50 ms 넘으면 drop) + 최신 GSC2 패킷(300 ms 넘으면 빈 스캔 → latent 0) → <code>GastTerrainMemory</code>(49슬롯 ring, 100 ms push, offset 48…0, 마지막 슬롯 = 현재) → ONNX Runtime CPU 1 thread</td></tr>
+<tr><td>latent 신선도</td><td>250 ms 이내 정상, 1000 ms 넘으면 fault → Damp. 0 latent로 추론하지 않음</td></tr>
+<tr><td>실행 체인</td><td><code>run_sim_ir.sh</code> → <code>scripts/common/launch.sh</code> → <code>run_sim_vrl.sh</code>: Docker MuJoCo(MujocoGastSync, 외력 UDP :19150) + <code>CAMEL-Pilot --interface lo --sim</code> + 비전 뷰어 + CAMEL-Console</td></tr>
+</table>
+
+<h3>6.4 현재 한계</h3>
+<div class="box warn">
+<ul>
+<li><b>GAST 경로는 시뮬레이션 전용이다.</b> Pilot은 <code>--interface lo --sim</code>이 아니면 GAST 모델을 거부한다. 실기 pose(camel_pilot <code>/odom</code>, 50 Hz) 입력과 실제 D4xx 스트림 → 매퍼 연결은 아직 구현되지 않았다.</li>
+<li>sidecar의 IR은 코스 GT 기하로 계산한다(실제 IR 영상 아님). depth 잡음에 stereo fill-in 패치는 없다.</li>
+<li>계약은 history 초기값을 <code>zeros</code>로, launcher는 <code>RBQ_VRL_HISTORY_INIT=repeat_first</code>를 쓴다 — 하나로 맞춰야 한다.</li>
+<li>force4_classify의 갭 창과 코스 XML 표식이 약간 다르다 — 정리 필요.</li>
+</ul>
+</div>
+
+<!-- ============================================================ -->
+<h2 class="pb">7부. 현재 결과와 과제</h2>
+<table>
+<tr><th>문제 정의</th><th>결과</th><th>반영 방향</th></tr>
+<tr><td>3906 Isaac 성능 (E1, seed 42–45)</td><td>v25or LiDAR 갭 90/93 = 96.8%, 카메라+필터 76/79 = 96.2%, 계단 100%</td><td>현재 기준선</td></tr>
+<tr><td>매퍼 오차 증강 효과 (aug149)</td><td>A3906 E1 카메라+필터 갭 98.7–100%. A2769 ≈ C2769(대조)</td><td>Isaac 개선이 MuJoCo로 그대로 이어지지 않음 → MuJoCo 필수</td></tr>
+<tr><td>MuJoCo depth_ir 갭 (12 seed)</td><td>A2769_top1 11/12, 원래 3906 10/12, A3906 l2000 10/12, A3906 5737 1/5</td><td>최종 배포 후보: A2769_top1 vs 원래 3906 (결정 대기)</td></tr>
+<tr><td>핸들 외력 (force4, 200 N × 2 s)</td><td>학습 범위(≤1 s) 초과 조건. 3906은 오르막 당김에 약함(센서 10/20)</td><td>150 N × 2 s로 재측정 예정(100회 반복은 중단 상태)</td></tr>
+<tr><td>실기 배포</td><td>시뮬레이션 전용 경로</td><td>실기 pose·센서 연결, sim_docker runtime smoke 후 PR</td></tr>
+<tr><td>다음 기능</td><td>좁은 통로·시계방향 회전·계단 정렬 NavSkill 설계 v0.2 검토 중</td><td><code>GAST_NAVSKILL_DESIGN_20261018.md</code></td></tr>
+</table>
+
+<h2>부록. 코드 위치</h2>
+<table>
+<tr><th>영역</th><th>경로</th></tr>
+<tr><td>교사 관측·모델·PPO</td><td><code>gd_lab_vrl/src/gd_lab/gast/{rayir,temporal,teacher,observations,geometry,warm_start,tasks}.py</code></td></tr>
+<tr><td>CENet·runner·Top-5·DDP</td><td><code>gd_lab_vrl/src/gd_lab/rl/{cenet,actor_critic,ppo,runner,online_top5,distributed}.py</code></td></tr>
+<tr><td>갭·계단 MDP</td><td><code>gd_lab_vrl/src/gd_lab/mdp/{gap_stair_v21,platform_gap*}.py</code></td></tr>
+<tr><td>카메라 계약</td><td><code>gd_lab_vrl/src/gd_lab/core/camera_{contract,geometry,timing}.py</code> (vendor_new 기본, vendor_legacy는 학습 금지)</td></tr>
+<tr><td>학습 실행기</td><td><code>gd_lab_vrl/scripts/gast/{train_teacher.py, train_rayir_gap50_1gpu.sh, train_rayir_from2000_1gpu.sh}</code></td></tr>
+<tr><td>지형처리기·E1·Replay</td><td><code>gd_lab_vrl/tools/rl_replay/</code>, <code>gd_lab_vrl/experiments/e1/</code></td></tr>
+<tr><td>가중치·E1 결과</td><td><code>gd_lab_vrl/checkpoints/teachers/gast/rayir_top5_20261016/</code></td></tr>
+<tr><td>설계·계보</td><td><code>gd_lab_vrl/docs/design/GAST_RAYIR_TEACHER_DESIGN_20261018.md</code>, <code>docs/lineage/records_20261016/</code></td></tr>
+<tr><td>export·번들·Pilot</td><td><code>gd_rbq10_deploy_vrl/{export, resources/policy/gast, perception/common/VisionStudentThread.cpp, perception/oracle/GastTerrainMemory.hpp}</code></td></tr>
+<tr><td>sidecar·MuJoCo 평가</td><td><code>gd_rbq10_deploy_vrl/simulation/mujoco/sensor_sidecar/sidecar.py</code>, <code>gd_rbq10_deploy_vrl/evaluation/</code></td></tr>
+</table>
+<p class="small">근거: 위 경로의 소스와 3906 <code>params/{env,agent,gast_warm_start}.yaml</code>, E1 SUMMARY.md, <code>docs/experiments/RAYIR_MUJOCO_SENSOR_20261016.md</code>, MuJoCo 기록. 학습 장비: 로컬 RTX 5090, 90.111(RTX 5090), onvlm2(다중 GPU).</p>
