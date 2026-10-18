@@ -19,7 +19,7 @@ RBQ10 안내견 로봇의 비전 보행 학습 저장소다. 블라인드 DreamW
 | 3906 E1 | E1(Isaac 평가, 아래 [E1](#e1-평가의-입력-경로-arm)) 결과다. 수치는 갭을 발 빠짐 없이 깨끗이 넘은 비율이다. v25or 지도 입력 갭 96.8%, 카메라+필터 지도 입력 갭 96.2%, 계단 100% |
 | 배포 후보 | 원래 3906과 A2769_top1 중 최종 선택을 기다리는 중이다. A2769_top1은 Ray+IR 2769를 aug149(매퍼 오차 증강 파인튠, 브랜치 `aug149-mapper-aug`)로 이어 학습한 모델의 Top-1이다 |
 | MuJoCo depth_ir 갭 (12 seed) | MuJoCo 배포 시뮬(실제 Pilot 코드)에서 depth+IR 카메라 → 지형처리기 경로로 갭 구간 12회를 시험해 완주한 횟수다. A2769_top1 11/12, 3906 10/12 |
-| 진행 중 | pose(odom) 오차 평가 도구는 완료 (UPDATE157, [결과](https://github.com/GuideDog-ETRI/gd_rbq10_deploy_vrl/blob/main/docs/experiments/POSE_ERR_ODOM_20261018.md))<br>NavSkill 설계 v0.2 검토: 좁은 통로 통과, 시계방향 제자리 회전, 계단 정렬을 학습할 다음 교사<br>sim_docker 통합: 팀원 Isaac 시뮬레이터에 3906 실행기를 구현했고, in-sim smoke와 PR은 전이다<br>UPDATEnnn은 Codex 작업 지시 번호이며, 문서는 `claude_handoff/`에 있다 |
+| 진행 중 | pose(odom) 오차 평가 도구는 완료 (UPDATE157, [결과](https://github.com/GuideDog-ETRI/gd_rbq10_deploy_vrl/blob/main/docs/experiments/POSE_ERR_ODOM_20261018.md))<br>GAST-Nav v1 (다음 교사: 좁은 통로 통과, 시계방향 제자리 회전, 계단 정렬) 구현 착수<br>sim_docker 통합: 팀원 Isaac 시뮬레이터에 3906 실행기를 구현했고, in-sim smoke와 PR은 전이다<br>UPDATEnnn은 Codex 작업 지시 번호이며, 문서는 `claude_handoff/`에 있다 |
 | 실기 | GAST 경로는 아직 시뮬레이션 전용이다. Pilot `/odom` 구독과 실기 odom 오차 측정은 포팅할 때 한다 ([실기 포팅 때 할 일](#실기-포팅-때-할-일-아직-구현-안-됨)) |
 
 **계보** (숫자는 iteration 번호, 화살표는 이어 학습함)
@@ -145,7 +145,7 @@ logs/                학습 로그 (git 밖)
 
 - [비전 RL 구현 총정리 (PDF)](docs/design/VISION_RL_OVERVIEW_20261018.pdf)
 - [Ray+IR 교사 설계 (3906 기준)](docs/design/GAST_RAYIR_TEACHER_DESIGN_20261018.md)
-- [NavSkill 설계 v0.2 (검토 중)](docs/design/GAST_NAVSKILL_DESIGN_20261018.md)
+- [GAST-Nav v1 설계 (v0.3.1, 구현 착수)](docs/design/GAST_NAV_V1_DESIGN.md)
 - [sim_docker GAST 교사 통합 현황](docs/design/SIMDOCKER_GAST_INTEGRATION_STATUS_20261018.md)
 - [정책 계보](docs/lineage/records_20261016/LINEAGE_20261016.md)
 - [E1 평가](experiments/e1/README.md), [RL Replay](tools/rl_replay/README.md)

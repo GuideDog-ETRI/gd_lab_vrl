@@ -1,11 +1,14 @@
-# GAST-NavSkill 기본 설계서 (v0.3, 2026-10-18)
+# GAST-Nav v1 기본 설계서 (v0.3.1, 2026-10-18)
+
+모델 이름: **GAST-Nav v1** (작업명이던 "GAST-Nav"을 대체). 학습 코드는 `src/gd_lab/gast_nav/`, 실행기는 `scripts/gast_nav/`, 시험은 `tests/gast_nav/`, 설정은 `configs/gast_nav/`, 브랜치는 `feat/gast-nav-v1`이다.
 
 좁은 공간 통과, 시계방향 제자리 회전, 계단 정렬을 학습하는 교사 정책의 기본 설계다. 백본은 Ray+IR 3906이다.
 
 **상태**
 - 설계 검토 단계다. 구현·학습은 하지 않는다.
 - 검토 이력: v0.1 → UPDATE155, v0.2 → UPDATE156. 두 번 모두 Codex 두 세션이 "조건부"로 판정했다.
-- v0.3은 UPDATE156 지적과 2026-10-18 사용자 결정을 반영했다. UPDATE158 교차 검증은 아직 받지 않았다.
+- v0.3은 UPDATE156 지적과 2026-10-18 사용자 결정을 반영했다. UPDATE158에서 두 Codex 모두 "조건부: 코드·CPU fixture 착수 가능, 계약 4개를 먼저 고정"으로 판정했다.
+- **v0.3.1**은 그 계약 4개를 부록 C에 고정했다. 이 계약을 기준으로 구현(UPDATE159)을 시작한다. 학습은 하지 않는다.
 - 현행 학습(3906) 구조는 `GAST_RAYIR_TEACHER_DESIGN_20261018.md`에 있다. 이 문서는 바뀌는 점만 적는다.
 
 **v0.2 → v0.3 변경**
@@ -42,10 +45,10 @@
 | 권한 경계 | **gdm**: 목적지, 경로, 갈림길, 다음 계단, 회전 시작·종료, 조건 c, 하강 승인(선택)<br>**정책**: 주어진 단일 경로 안에서 장애물 회피, 중앙·오프셋 정렬, 계단 정렬, 불가 시 정지<br>**감독기 (RL 밖)**: 명령 중재, mode 전환, 계단참 FSM, 안전 감시, hold 전환 |
 | 정책 형태 | 관절을 직접 출력하는 단일 정책. 비교 기준은 "감독기 + 기존 3906 보행" 2단 구조 |
 | 기존 입력 | 고유감각 46(명령 3칸 포함) ×4 + CENet 230 + 하방 지형 [h, valid, IR] 187×8. 의미, 단위, 순서를 유지한다 |
-| 새 입력 | ① 넓은 장애물 지도<br>② 근거리 clearance 지도<br>③ NavSkill 명령 (mode, go, 상한)<br>④ 계단참 phase<br>⑤ 조건 c |
+| 새 입력 | ① 넓은 장애물 지도<br>② 근거리 clearance 지도<br>③ GAST-Nav 명령 (mode, go, 상한)<br>④ 계단참 phase<br>⑤ 조건 c |
 | 학습 규모 | onvlm2 GPU 0·1·2 DDP, `--total_envs 4096` (rank당 1366/1365/1365), horizon 100 |
 | iteration | 기대 **약 6k** (pilot + A 1k + B 3k + C 2k). 상한 15k (A ≤3k, B ≤7k, C ≤5k). 단계 gate를 통과해야 다음 단계로 간다 (7.6) |
-| 시간 | 기대 약 2–2.5일 (학습 1.5–1.8일 + 단계 평가). 상한 15k면 약 3.6–4.5일. pilot에서 다시 산정한다 |
+| 시간 | 기대 약 2–2.8일 (학습 1.5–1.8일 + 평가 13–24 h, 부록 C4.5). 상한 15k면 학습만 약 3.6–4.5일 + 평가. pilot에서 다시 산정한다 |
 
 **보장에 대한 원칙**
 - 학습은 행동 경향만 만든다.
@@ -108,9 +111,9 @@
 새로 추가 (additive adapter, 7.1)                                           │      +
   넓은 장애물 지도 (3.2a) → 장애물 CNN → 32 ─┐                              │ actor 새 열 (W_new, 0 초기화)
   근거리 clearance (3.2b) → 작은 CNN → 16 ───┼── concat ────────────────────┘      → MLP → 관절 12
-  NavSkill 명령 (3.4) + phase (3.5) + 조건 c (4) ┘
+  GAST-Nav 명령 (3.4) + phase (3.5) + 조건 c (4) ┘
 critic: 위 전부 + 특권(GT SDF, 물리적 feasibility, 관측 가능성, 차량 가속도, 감독기 개입 상태)
-감독기 (RL 밖): 명령 어댑터 → mode handshake → 계단참 FSM → 안전 감시 → [NavSkill | hold 제어기]
+감독기 (RL 밖): 명령 어댑터 → mode handshake → 계단참 FSM → 안전 감시 → [GAST-Nav | hold 제어기]
 ```
 
 - 조건 c는 **concat으로 시작**한다. FiLM은 ablation으로 필요성을 확인한 뒤 별도 계약으로 추가한다. v0.2 그림의 FiLM은 뺐다.
@@ -185,7 +188,7 @@ critic: 위 전부 + 특권(GT SDF, 물리적 feasibility, 관측 가능성, 차
 - 사람은 후방 장애물 지도에 occupied로 보이는 그대로 다룬다.
 - 시뮬레이터에는 핸들 사용자를 물리 물체로 그대로 둔다 (5장).
 
-### 3.4 명령: 기존 3칸 유지 + NavSkill 명령 (어댑터)
+### 3.4 명령: 기존 3칸 유지 + GAST-Nav 명령 (어댑터)
 
 actor는 이미 `(vx, vy, ωz)`를 받는다. 이번 변경은 **명령 생성기와 분포**를 바꾸는 것이다.
 - `V21VelocityCommand`의 계단 heading 강제와 `platform_gap_commands`의 heading 설정은 LEGACY 모드에서만 실행한다.
@@ -391,7 +394,7 @@ DESCEND ─(현재 계단참 이탈 확인 + 다음 구간 전이)→ APPROACH (
 4. **optimizer**
    - PPO와 CENet optimizer를 새로 만든다. parameter group은 old와 new로 나눈다.
    - source iteration과 nav iteration을 따로 기록한다.
-   - strict resume은 NavSkill 첫 checkpoint부터 한다.
+   - strict resume은 GAST-Nav 첫 checkpoint부터 한다.
 5. **parity (학습 시작 조건)**
    - 기존 관측에서 기존 행동이 나온다. 어댑터가 값을 바꾸는 경우는 "같은 관측"이 아니므로 따로 표시한다.
    - 새 입력이나 조건을 바꿔도 처음에는 행동이 같다 (W_new = 0).
@@ -413,7 +416,7 @@ DESCEND ─(현재 계단참 이탈 확인 + 다음 구간 전이)→ APPROACH (
 | L1 | 시작점 | 3906 | migration + additive adapter (7.1) |
 | L2 | 규모 | 1 GPU, 1024 env | DDP 3 GPU, `--total_envs 4096`. rank 평균 gradient의 편향과 mode별 sample filtering에 따른 rank별 유효 sample 수를 기록한다 |
 | L3 | 명령 | heading 100%, 정지 20% | mode별 생성기와 handshake (3.4, 7.3) |
-| L4 | 관측 | 46×4 + 230 + 지형 | + 넓은 지도, 근거리 지도, NavSkill 명령, phase, c |
+| L4 | 관측 | 46×4 + 230 + 지형 | + 넓은 지도, 근거리 지도, GAST-Nav 명령, phase, c |
 | L5 | 네트워크 | GAST encoder + MLP | + 장애물 CNN(→32), 근거리 CNN(→16), additive adapter |
 | L6 | critic | 깨끗한 지형 | + GT SDF, 물리적 feasibility, 관측 가능성, 차량 가속도, 감독기 개입 상태 |
 | L7 | 보상 | v2.1 + clean gap | + 7.4, mode·phase별 masking |
@@ -544,12 +547,12 @@ DESCEND ─(현재 계단참 이탈 확인 + 다음 구간 전이)→ APPROACH (
 |---|---|
 | 3906 실측 | 1024 env, 1 GPU(90.111 RTX 5090) **11.7 s/iter**. 5000 iter에 16.3 h |
 | GAST v2.1 | 4096 env, 3 GPU(onvlm2) 약 16 s/iter (rank당 1366 env + DDP 동기화) |
-| NavSkill 추가 비용 (가정) | 장애물 레이캐스트, 동적 물체, 근거리 거리 변환, 감독기, packed 저장·재계산으로 **+30–60%** → 약 21–26 s/iter |
+| GAST-Nav 추가 비용 (가정) | 장애물 레이캐스트, 동적 물체, 근거리 거리 변환, 감독기, packed 저장·재계산으로 **+30–60%** → 약 21–26 s/iter |
 | 기대 (약 6k) | 6,000 × 21–26 s ≈ **35–43 h (1.5–1.8일)**. 단계 평가(약 3회 × 3–4 h)를 더하면 **약 2–2.5일** |
 | 상한 (15k) | 15,000 × 21–26 s ≈ **3.6–4.5일** + 평가 |
 
 - 학습량 비교: 4096 × 100 × 6k = 24.6억 transition으로, 3906(1024 × 100 × 5000 = 5.1억)의 약 5배다.
-- 3906은 1–2k iter에서 점수가 평탄해졌다. NavSkill은 작업이 여러 개라 단계당 1–3k를 기대한다.
+- 3906은 1–2k iter에서 점수가 평탄해졌다. GAST-Nav은 작업이 여러 개라 단계당 1–3k를 기대한다.
 - 실제 iter 시간은 pilot 측정값으로 바꾼다.
 
 ---
@@ -705,3 +708,201 @@ NAV1-ACK(6장)로 다음을 gdm에 돌려준다: 적용된 조건, hold 사유, 
 | 검증 세트와 최종 시험 분리 | 9장 |
 | 사용자 추적 대체 시 기능 축소 | 3.3 삭제 (사용자 결정). 사람 추적에 의존하는 성공 기준 제거 |
 | history 초기화 불일치 | 6장 |
+
+---
+
+## 부록 C. 구현 계약 (v0.3.1, UPDATE158 두 Codex 합의 반영)
+
+본문과 이 부록이 다르면 **이 부록을 따른다**. 수치는 모두 설정값이며 학습 코드에 박아 넣지 않는다(`configs/gast_nav/`).
+
+### C1. PPO·trainable 계약
+
+**C1.1 controller 선택**
+- v1에서는 **상태 기반**으로만 고른다.
+- 감독기는 tick t의 상태와 명령만 보고, 정책 출력을 보기 **전에** controller {NAV_POLICY, HOLD_3906, DAMP}를 정한다.
+- 정책 출력을 보고 위험한 action만 바꾸는 proposal 기반 shield는 v1에 넣지 않는다.
+
+**C1.2 tick별 학습 규칙**
+
+| 항목 | 규칙 |
+|---|---|
+| reward | tick t에 실제로 실행된 controller의 결과를 그 tick에 귀속한다. HOLD로 들어간 첫 tick에는 개입 페널티 `r_int`를 준다 |
+| actor 학습 (surrogate, entropy, KL) | **NAV_POLICY tick에만** 쓴다. 이 mask는 rollout에 저장한다 |
+| value | 모든 tick으로 학습한다. GAE도 전체 궤적으로 계산하며, HOLD tick의 보상도 return에 포함한다 |
+| timeout bootstrap | 기존과 같다 |
+| advantage 정규화 | actor에 쓰는 유효 행만으로 평균과 표준편차를 구한다 |
+| 보조 손실 (지형 재구성) | 기존 규칙 그대로 둔다 |
+
+**C1.3 DDP 분모**
+- 각 rank는 `loss_r = world_size × Σ_local(valid loss) / N_global_valid`로 loss를 만든다. `N_global_valid`는 all_reduce로 구한다.
+- 유효 행이 0인 rank도 같은 collective를 호출한다.
+- 전역 유효 행이 0이면 모든 rank가 actor step을 함께 건너뛴다.
+- entropy와 KL 통계도 같은 분모를 쓴다.
+
+**C1.4 trainable manifest**
+
+`configs/gast_nav/trainable_A0.yaml`
+
+| 구분 | 대상 |
+|---|---|
+| 학습 | `W_new`, 장애물 CNN, 근거리 CNN, 새 입력 normalizer(통계 갱신 on), critic 전체 |
+| 고정 | actor `W_old`, actor bias, 첫 층 이후 actor MLP, `log_std`, CENet(optimizer step off), 지형 encoder·재구성 decoder(aux step off), 기존 normalizer(통계 갱신 off) |
+| 구현 방법 | `requires_grad=False` + optimizer parameter 목록에서 제외 + normalizer 갱신 플래그 off |
+| 검증 | 고정 대상의 checksum을 매 iteration 확인한다 |
+
+- A0가 끝난 뒤(`trainable_A.yaml`)에는 전부 학습한다. old group의 lr은 ×0.1이다.
+- critic은 자기 특권 입력을 받는다. actor의 새 encoder를 **공유하지 않는다**.
+- gradient fixture: step 1에서 W_new의 gradient ≠ 0이어야 한다. 새 encoder의 gradient는 W_new ≠ 0이 된 뒤에 ≠ 0이어야 한다. 첫 step에서 encoder gradient가 0인 것은 정상이다.
+
+**C1.5 mirror**
+- **LEGACY 행만** 모든 채널을 일관되게 반사한다.
+  - 대상: 고유감각, 하방 지형, 장애물·근거리 지도(y 반전), y_off 부호, phase
+  - LEGACY 장면에는 비대칭 과제가 없기 때문에 전부 반사해도 된다.
+- NAV/TURN 행은 반사하지 않는다.
+- 반사한 행의 mode는 원래 행의 mode를 그대로 유지한다.
+
+### C2. 지도 golden 계약
+
+**C2.1 지지면 추정**
+
+`gast_nav/support.py`
+- 씨앗: 네 발 접지 위치의 칸, 그리고 하방 지형에서 몸 주변 valid인 칸.
+- 영역 확장: 10 cm 격자에서 이웃 칸으로 넓힌다.
+  - 높이 차가 0.25 m 이하이고 국소 경사가 35° 이하인 칸만 연결한다.
+  - 이 칸에는 위에서 관측된 수평 히트가 있어야 한다.
+- 이웃 지지면보다 0.25 m 넘게 높은 수평면은 장애물(B2 이상)이다.
+- 한계(문서화): 0.25 m 이하 상자는 디딤면 후보가 된다. 로봇이 실제로 오를 수 있는 높이이므로 허용한다.
+- 지지면을 모르는 칸은 세 band 모두 unknown이다.
+- 반례 fixture:
+  1. 바닥에 붙은 0.4 m 상자 → 장애물
+  2. 0.2 m 단을 두 번 거쳐 이어진 0.45 m 좌석 → 좌석 윗면은 지지면 아님(두 번째 단에서 경사·면적 조건 실패를 확인)
+  3. 계단 오르막 → 디딤판 모두 지지면
+  4. 승강장 갭 → 바닥 없음, 장애물 아님, unknown 또는 하방 지형의 깊음
+
+**C2.2 지지면 전달**
+- OBS1에 칸별 지지면 높이를 넣는다. 형식은 uint8로, base 기준 −1.0…+1.54 m 범위를 2 cm 단위로 나타낸다. 255는 unknown이다. 크기는 49×43 = 2,107 B다.
+- 착지 감지와 안전 지도도 같은 값을 쓴다.
+- history의 band는 지지면이 바뀌면 다시 분류하지 않는다. 대신 그 프레임의 sample 지지면을 함께 저장한다.
+
+**C2.3 free 판정**
+- band를 높이 10 cm 단위 sub-bin으로 나눈다(B1 3개, B2 5개, B3 14개).
+- 그 칸의 **모든 sub-bin을 레이 1개 이상이 first-hit 전에 지나갔을 때만** free다.
+- sub-bin 하나라도 안 지나갔으면 unknown이다(보수적).
+- occupied는 히트가 있는 sub-bin이 하나라도 있으면 된다.
+
+**C2.4 근거리 지도**
+- 5 cm 점유 격자를 원시 점·레이로 따로 만든다.
+- unknown 비트는 그 칸의 B1·B2·B3 중 **하나라도** unknown이면 1이다.
+- clearance는 unknown 칸을 장애물로 보지 않는다. 대신 정책과 감독기 모두 unknown 비트를 따로 본다.
+- age:
+  - 근거리 지도도 칸별 4 bit age를 가진다. 크기는 37×25 = 925 B ÷ 2 ≈ 463 B다.
+  - TTL 0.5 s가 지나면 unknown으로 바꾼다.
+
+**C2.5 age 양자화와 packing**
+
+| 항목 | 규칙 |
+|---|---|
+| age | 0.1 s 단위로 **올림**(보수적). 15 = ≥1.5 s 또는 관측 없음 |
+| packing | little-endian, x-fastest, band-major. 2 bit 값은 byte 안에서 LSB부터 채운다 |
+| 상태 코드 | 3은 예약값이며, 받으면 패킷 전체를 거절한다 |
+| reset epoch | episode reset마다 +1. seq는 epoch마다 0부터 다시 센다 |
+| 시간 | 모든 timestamp는 CLOCK_MONOTONIC ms |
+
+- **golden 파일**: `tests/gast_nav/golden/obs1_*.json`. 입력(점군, pose, 지지면)과 기대 출력(packed bytes, decode 결과)을 담는다.
+  - Python 구현이 통과해야 한다. 나중에 ONNX·C++ 구현도 같은 파일로 시험한다.
+- 명세가 없는 정보를 GT로 채우지 않는다.
+
+### C3. 명령·FSM 계약
+
+**C3.1 route hint (gdm → 감독기, NAV1)**
+
+| 필드 | 내용 |
+|---|---|
+| `segment_id` | 구간 번호 |
+| `segment_type` | {FLAT, PASSAGE, STAIR_UP, LANDING, STAIR_DOWN, TURN_SPOT} |
+| `route_axis_yaw` | odom frame에서의 경로 축 방향 |
+| `dist_to_next_m` | 다음 구간까지 거리 |
+| `next_segment_type` | 다음 구간 종류 |
+
+- y_off는 이 경로 축을 기준으로 정한다.
+- hint가 없으면 경로 축은 "현재 yaw로 고정"이고, landing 자동 하강은 하지 않는다.
+
+**C3.2 AUTO release**
+- **감독기 FSM이 직접** 만든다.
+- 외부 입력과 같은 `landing_release` 내부 큐에 넣고, 소스 태그는 AUTO다.
+- ACK에는 해당 seq와 accepted/rejected, 사유를 넣는다.
+
+**C3.3 timer 2개**
+
+| timer | 내용 |
+|---|---|
+| `dwell_timer` | 안정 정지가 이어진 시간 |
+| `announce_timer` | 안내 시간(1차 2.0 s) |
+
+| 상황 | dwell_timer | announce_timer |
+|---|---|---|
+| go=0 | 멈춤(pause) | 멈춤(pause) |
+| 미끄러짐·발 이탈·속도 초과 | 0으로 reset | 유지 |
+| hold·위험 판정 | 0으로 reset | 0으로 reset |
+
+- release 조건: `dwell ≥ announce_end + 0.5 s` 그리고 공통 조건(3.5).
+
+**C3.4 내리막이 안 보이는 계단참**
+- 다음 하강 지지면이 관측되지 않으면 hold하고, 사유 `NO_DESCENT_VIEW`를 보낸다.
+- AUTO release는 내지 않는다.
+- 관측이 회복되면 다시 확인한다. gdm 승인이 와도 지지면 관측 조건은 그대로 적용한다.
+
+**C3.5 기본값과 이상값 처리**
+
+| 상황 | 처리 |
+|---|---|
+| 시작 시 미설정 | 기본값 사용 (y_off 0, margin 0.10, turn_cap 0.6) |
+| 주행 중 NaN, 범위 초과, timeout | **hold** + 사유. 기본값으로 조용히 되돌리지 않는다 |
+| margin을 낮추는 변경 | 정지 상태에서만 받는다 |
+
+### C4. 감독기·평가 계약
+
+**C4.1 health 상태 → controller (actuator writer는 RlWalker 하나)**
+
+| health | 조건 | controller |
+|---|---|---|
+| OK | 모두 정상 | NAV_POLICY |
+| TERRAIN_STALE | GSC2 또는 OBS1이 300 ms 넘게 갱신 안 됨 | 감속 → HOLD_3906 (지형 latent 0 = blackout으로 학습된 상태) |
+| POSE_STALE | odom > `RBQ_GAST_POSE_MAX_AGE_MS` | 위와 같음 |
+| SUPERVISOR_RISK | 8.1 예측 위험, TURN 역회전 개입 | HOLD_3906 |
+| INFER_FAIL | ONNX 실패, NaN | sim: 기존 VisionHold / 실기: Damp |
+| NAV1_INVALID | C3.5 | HOLD_3906 |
+
+- 현재 UPDATE157 경로처럼 pose가 stale일 때 빈 scan으로 latent를 0으로 만들어도 "추론 성공"으로 보지 않는다. TERRAIN_STALE/POSE_STALE health로 따로 올린다.
+
+**C4.2 horizon 시간축**
+- 방식 (a): 지도 sample 시각부터 지금까지 odom으로 로봇 이동을 재구성하고, 그다음 `T_h = 계산·구동 지연 + 실측 정지 시간`만큼 앞으로 예측한다.
+- 움직이는 장애물(occupied인데 사람 크기)은 `v_person_max(설정, 0.8 m/s) × (map age + T_h)`만큼 키운다.
+- 제동 drift가 swept 예측에 이미 들어 있으면 따로 더하지 않는다. 남는 오차만 `residual_margin`(설정)으로 둔다.
+- 허용 map age, 운용 속도 상한, envelope 밖에서의 fallback은 설정값으로 둔다.
+
+**C4.3 실패와 시뮬 오류 집계**
+
+| 분류 | 정의 | 처리 |
+|---|---|---|
+| 정책 실패 | 정책이나 감독기가 제어하는 중 로봇이 사람·구조물과 접촉 | **실패 분모에 남긴다** |
+| invalid | 초기 겹침, NaN, 물리엔진 폭주, 정책과 무관한 사람 모델 침투 | 원인 코드와 함께 건수·분모를 따로 보고한다. invalid 비율이 1%를 넘으면 그 평가 batch는 무효다 |
+
+- 사람 모델 다양성: collision-aware로 비키는 승객과, 멈칫하거나 지연되거나 통로를 막는 승객을 나눠 두고 각각 따로 집계한다.
+
+**C4.4 수치 정정**
+- jerk는 예시값이 아니라 `A ≤ 10/(2πf)` 식으로 clamp한다. 예: f = 2 Hz이면 A ≤ 0.7958.
+- NAV 진행 보상은 `min(v_path, v_cap)/v_cap`이고, v_cap을 넘을 때만 페널티를 준다. 좁은 구간에서 천천히 가는 것은 벌하지 않는다.
+- PRE_BRAKE 중 기존 vx 칸에는 감독기의 감속 profile 값을 넣는다.
+- "자기 가림 unknown 제외" 문구를 다음으로 통일한다: "swept 영역 밖의 자기 가림 unknown만 무시한다. swept 안이면 위험 unknown이다."
+
+**C4.5 평가 비용 (7.6 정정)**
+
+| 평가 | 주기 | 내용 | 시간 |
+|---|---|---|---|
+| 중간 probe | 250–500 iter마다 | 장면별 소규모(env 64, 30 s, seed 2) | 약 20–30 분 |
+| 단계 말 full | A·B·C 끝 | E1 + MuJoCo 전체 | 약 3–4 h |
+
+- 6k 기준 평가 합계: probe 12–24회 × 0.3–0.5 h(≈4–12 h) + full 3회 × 3–4 h ≈ **13–24 h**.
+- 학습(35–43 h)과 합치면 **약 2–2.8일**이고, pilot은 별도다.
+- 기대 총량은 pilot 포함 6.1–6.3k, 상한은 15.3k다.
