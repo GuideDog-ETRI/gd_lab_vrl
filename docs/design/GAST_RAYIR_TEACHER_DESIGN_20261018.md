@@ -333,7 +333,11 @@ platform_gap 위에서는 heading을 gap 방향으로 맞추는 규칙이 있다
 ## 10. 배포 계약 (현행)
 
 - 학습 env.yaml의 `camera_profile` (`vendor_new`)이 평가 시점과 일치해야 한다. 가중치 옆에 `params/env.yaml`이 반드시 있어야 한다.
-- 시뮬레이션은 GT pose를 쓴다. 실제 로봇은 camel_pilot `/odom` (50 Hz)을 쓴다.
+- pose:
+  - 시뮬레이션(Isaac 학습·E1·MuJoCo)은 GT pose를 쓴다. pose 오차는 넣지 않는다 (2026-10-16 결정).
+  - 실기 pose는 camel_pilot이 발행하는 `/odom`(nav_msgs/Odometry, odom→base_link, 50 Hz)을 쓸 예정이다. rosbag에서 토픽을 확인했다.
+  - 모델의 pose 입력 형식(캡처마다 world x, y, yaw)은 `/odom`과 맞춰 두었다. 포팅할 때 토픽만 바꾸면 된다.
+  - 우리 Pilot 사본에는 `/odom` 구독이 아직 없다. 실기 포팅 때 구현한다. odom 오차는 그때 다룬다.
 - 매퍼 출력: 11×17 [height, valid, IR] 프레임을 카메라 주기로 보낸다. Pilot이 8 프레임 history를 warp해서 encoder에 넣는다.
 - 번들: `gd_rbq10_deploy_vrl/resources/policy/gast/gast_rayir_*`. 런처는 `scripts/gast/teacher/<name>/run_sim(_ir).sh`.
 - sim_docker용 `camel.policy.v1` GAST runtime은 브랜치 `feat/gast-teacher-runtime`에 있다. offline parity 약 1e-6, 시뮬 내 smoke 테스트는 아직 하지 않았다.
