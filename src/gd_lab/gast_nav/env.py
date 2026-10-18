@@ -18,7 +18,7 @@ from .supervisor import HealthInput
 from .person_contact import PersonContactTracker,IsaacResetOverlapQuery,reset_overlap_mask
 from .train_inertia import TrainInertia,ExternalForceAccumulator
 from .obs_terms import (ObservationPipeline,static_sensor_rays,world_to_sample,capsules_to_sample,
-                        randomize_sensor_pattern,critic_privileged)
+                        randomize_sensor_pattern,critic_privileged,invalidate_held_rows)
 from .map_types import DynamicCapsules,NEAR_GRID,WIDE_GRID
 from .rewards import reward_terms,legacy_reward_masks
 
@@ -26,10 +26,17 @@ class NavState:
     def __init__(self,env):
         self.env=env;self.robot=env.scene['robot'];self.cfg=env.cfg.nav_settings
         self.stage=env.cfg.nav_stage_settings;n=env.num_envs;dev=env.device
+        from .scene_config import load_scene_config
+        self.scene_settings=load_scene_config()
         runtime=yaml.safe_load((Path(__file__).resolve().parents[3]/'configs/gast_nav/runtime.yaml').read_text())
         # Explicit simulation-only cap; deployment runtime.yaml remains unverified.
         runtime['command']['omega_max_verified']=self.cfg['commands']['simulation_turn_cap_radps']
         self.index=bind_scene(env.scene.terrain)
+        from .batched_oracle import BatchedOracle
+        self.oracle=BatchedOracle(self.index.tiles,self.scene_settings,device=dev)
+        self.tile_ids=torch.tensor(self.index.env_tile_ids,device=dev)
+        self.tile_spawn=torch.tensor([t.turn_spot[0] if t.turn_spot else t.route_polyline[0] for t in self.index.tiles],device=dev)
+        self.tile_axis=torch.tensor([project_route(t,t.route_polyline[0])[2] for t in self.index.tiles],device=dev)
         self.control=ControlRuntime(self.index.lookup(range(n)),self.cfg,runtime,seed=self.cfg['seed'])
         self.inertia=TrainInertia(n,self.cfg['inertia'],device=dev,seed=self.cfg['seed'])
         self.forces=ExternalForceAccumulator(n,self.robot.num_bodies,device=dev)
@@ -61,15 +68,16 @@ class NavState:
     def reset(self,ids):
         env=self.env;ids=torch.as_tensor(ids,device=env.device,dtype=torch.long)
         bind_scene(env.scene.terrain,self.index,ids)
-        tiles=self.index.lookup(ids);meta=self.index.tensors(env.device)
+        self.tile_ids=torch.tensor(self.index.env_tile_ids,device=env.device)
+        tiles=self.index.lookup(ids)
         self.legacy[ids]=torch.tensor([t.kind=='legacy' for t in tiles],device=env.device)
         # Keep env origins at tile centres; only robot spawn uses route start.
         nav_ids=ids[~self.legacy[ids]]
         if len(nav_ids):
             state=self.robot.data.root_state_w[nav_ids].clone()
-            state[:,:2]=env.scene.env_origins[nav_ids,:2]+meta['spawn_xy'][nav_ids]
+            state[:,:2]=env.scene.env_origins[nav_ids,:2]+self.tile_spawn[self.tile_ids[nav_ids]]
             state[:,2]=env.scene.env_origins[nav_ids,2]+self.robot.data.default_root_state[nav_ids,2]
-            yaw=meta['route_axis_yaw'][nav_ids];zero=torch.zeros_like(yaw)
+            yaw=self.tile_axis[self.tile_ids[nav_ids]];zero=torch.zeros_like(yaw)
             state[:,3:7]=quat_from_euler_xyz(zero,zero,yaw);state[:,7:]=0
             self.robot.write_root_state_to_sim(state,nav_ids)
         now=round(env.common_step_counter*env.step_dt*1000)
@@ -89,7 +97,10 @@ class NavState:
         env.sim.physics_sim_view.update_articulations_kinematic()
         initial=reset_overlap_mask(self.cylinder,ids,self.reset_overlap_query)
         self.person_contacts.mark_invalid(ids[initial],'INITIAL_OVERLAP')
-        self.last_capture=-math.inf
+        # Reset rows fail closed until the next global 10Hz capture. Forcing
+        # a whole-batch capture for every individual reset scales to 100Hz.
+        if self.wide is not None:
+            self.wide,self.near=invalidate_held_rows(self.wide,self.near,ids)
 
     def sync_collider_geometry(self,ids):
         # Physical primitive radii/height match the sampled observation capsule.
@@ -133,60 +144,65 @@ class NavState:
                  time_ms=torch.full((env.num_envs,),round(now*1000),device=env.device,dtype=torch.long),
                  capsules=(capsules_to_sample(self.cylinder.capsules(),pose) if self.cylinder.capsules() is not None else None))
             self.last_capture=now
-        else:self.wide,self.near=self.pipeline.inputs(pose,round(now*1000))
+        # UPDATE162: hold the capture-aligned inputs between 10Hz captures.
+        # Sensor age/health still advances each policy tick; reset forces capture.
 
     def prepare(self,obs):
         env=self.env;d=self.robot.data;now=env.common_step_counter*env.step_dt
         self.capture(now)
-        points=(d.root_pos_w-env.scene.env_origins)[:,:2].tolist();tiles=self.index.lookup(range(env.num_envs))
+        tiles=self.index.lookup(range(env.num_envs))
         contacts=env.scene['contact_forces'].data.net_forces_w[:,self.contact_ids].norm(dim=-1)>self.cfg['sensors']['contact_threshold_n']
-        ground=self.pipeline.mapper.history[0]
         from .support import decode_support
-        height,known=decode_support(ground.support)
-        gridxy=NEAR_GRID.xy(device=env.device,dtype=torch.float32)
-        widexy=WIDE_GRID.xy(device=env.device,dtype=torch.float32)
-        for i,(tile,xy) in enumerate(zip(tiles,points)):
-            hint,_,_,_=route_hint(tile,xy)
-            # Sensor-only landing evidence; route hint supplies semantics, not GT landing bounds.
-            centre=height[i,19:24,22:27];valid=known[i,19:24,22:27]
-            flat=bool(valid.all() and (centre.max()-centre.min()<self.cfg['landing_sensor']['flat_tolerance_m']))
-            front=height[i,19:24,27:33];front_valid=known[i,19:24,27:33]
-            descent=bool(front_valid.any() and valid.any() and
-                         front[front_valid].min()<centre[valid].median()-self.cfg['landing_sensor']['descent_drop_m'])
+        height,known=decode_support(self.pipeline.mapper.history[0].support)
+        centre=height[:,19:24,22:27].flatten(1);valid=known[:,19:24,22:27].flatten(1)
+        front=height[:,19:24,27:33].flatten(1);front_valid=known[:,19:24,27:33].flatten(1)
+        flat=valid.all(-1)&(centre.amax(-1)-centre.amin(-1)<self.cfg['landing_sensor']['flat_tolerance_m'])
+        median=torch.where(valid,centre,torch.nan).nanmedian(-1).values
+        descent=front_valid.any(-1)&valid.any(-1)&(front.masked_fill(~front_valid,torch.inf).amin(-1)<median-self.cfg['landing_sensor']['descent_drop_m'])
+        slipping=((self.robot.data.body_lin_vel_w[:,self.foot_ids,:2].norm(dim=-1)>self.cfg['landing_sensor']['slip_speed_mps'])&contacts).any(-1)
+        gridxy=NEAR_GRID.xy(device=env.device,dtype=torch.float32);widexy=WIDE_GRID.xy(device=env.device,dtype=torch.float32)
+        margins=torch.tensor([c.c.margin for c in self.control.commands.commands],device=env.device)
+        turns=torch.tensor([c.requested_mode=='TURN' for c in self.control.commands.commands],device=env.device)
+        radius=self.cfg['rewards']['swept_width_m']/2+margins
+        sweep=(gridxy[None,...,1].abs()<=radius[:,None,None])&(gridxy[None,...,0]>=0)&(gridxy[None,...,0]<=self.cfg['observability']['forward_m'])
+        sweep=torch.where(turns[:,None,None],gridxy.norm(dim=-1)<=self.cfg['observability']['turn_radius_m'],sweep)
+        known_sweep=~((self.near[:,2]>0)&sweep).flatten(1).any(-1)
+        region=widexy.norm(dim=-1)<=self.cfg['observability']['turn_radius_m']
+        known_bands=(self.wide[:,[0,3,6]]+self.wide[:,[1,4,7]])>0
+        known_turn=(known_bands|~region[None,None]).flatten(1).all(-1)
+        known_sweep &= ~turns|known_turn
+        self.unknown_time=torch.where(known_sweep,0.,self.unknown_time+env.step_dt)
+        risky=((self.near[:,:2]*S.NEAR_CLEAR_MAX<margins[:,None,None,None])&sweep[:,None]).flatten(1).any(-1)
+        risky=(risky|(self.unknown_time>=self.cfg['observability']['unknown_hold_s']))&~self.legacy
+        # CPU protocol state machines receive one batched transfer, never one
+        # CUDA scalar read per env/field. Sensor geometry above stays on GPU.
+        host=torch.cat(((d.root_pos_w-env.scene.env_origins)[:,:2],d.heading_w[:,None],
+            d.root_lin_vel_b[:,:2].norm(dim=-1)[:,None],d.root_ang_vel_b[:,2,None],
+            torch.stack((flat,descent,contacts.all(-1),slipping,risky),-1).float(),
+            env.command_manager.get_command('base_velocity')),dim=-1).tolist()
+        epochs=self.pipeline.mapper.epoch.tolist()
+        controllers=[];velocities=[];features=[];phases=[];go=[]
+        age=(now-self.last_capture)*1000
+        for i,(tile,row) in enumerate(zip(tiles,host)):
+            x,y,yaw,speed,yaw_rate,flat_i,descent_i,contact_i,slip_i,risk_i,*legacy=row
+            xy=(x,y);hint,_,_,_=route_hint(tile,xy)
             hint_landing=hint.segment_type=='LANDING' or hint.next_segment_type=='LANDING'
-            o=LandingObservation(hint_landing or hint.segment_type=='STAIR_DOWN',flat and hint_landing,
-                hint.dist_to_next_m<=self.cfg['commands']['brake_distance_m'],flat and hint.segment_type=='LANDING',
-                bool(contacts[i].all()),float(d.root_lin_vel_b[i,:2].norm()),float(d.root_ang_vel_b[i,2]),
-                bool((self.robot.data.body_lin_vel_w[i,self.foot_ids,:2].norm(dim=-1)[contacts[i]]>
-                      self.cfg['landing_sensor']['slip_speed_mps']).any()),descent,
-                hint.segment_type=='STAIR_DOWN',hint.segment_type=='FLAT')
-            age=(now-self.last_capture)*1000
+            o=LandingObservation(hint_landing or hint.segment_type=='STAIR_DOWN',bool(flat_i) and hint_landing,
+                hint.dist_to_next_m<=self.cfg['commands']['brake_distance_m'],bool(flat_i) and hint.segment_type=='LANDING',
+                bool(contact_i),speed,yaw_rate,bool(slip_i),bool(descent_i),hint.segment_type=='STAIR_DOWN',hint.segment_type=='FLAT')
             fault=self.force_fault and i==self.cfg['smoke']['fault_env_id']
-            radius=self.cfg['rewards']['swept_width_m']/2+self.control.commands.commands[i].c.margin
-            sweep=(gridxy[...,1].abs()<=radius)&(gridxy[...,0]>=0)&(gridxy[...,0]<=self.cfg['observability']['forward_m'])
-            if self.control.commands.commands[i].requested_mode=='TURN':
-                sweep=gridxy.norm(dim=-1)<=self.cfg['observability']['turn_radius_m']
-            known_sweep=not bool(self.near[i,2][sweep].any())
-            if self.control.commands.commands[i].requested_mode=='TURN':
-                region=widexy.norm(dim=-1)<=self.cfg['observability']['turn_radius_m']
-                known_bands=(self.wide[i,[0,3,6]]+self.wide[i,[1,4,7]])>0
-                known_sweep=known_sweep and bool(known_bands[:,region].all())
-            self.unknown_time[i]=0. if known_sweep else self.unknown_time[i]+env.step_dt
-            risky=bool((self.near[i,:2,:, :][:,sweep]*S.NEAR_CLEAR_MAX < self.control.commands.commands[i].c.margin).any())
-            risky=(risky or float(self.unknown_time[i])>=self.cfg['observability']['unknown_hold_s']) and not bool(self.legacy[i])
-            health=HealthInput(age if not fault else 1000.,age,0.,risk=risky)
-            output=self.control.before_policy(i,now_ms=round(now*1000),dt=env.step_dt,xy=xy,yaw=float(d.heading_w[i]),
-                health=health,landing_observation=o,odom_epoch=int(self.pipeline.mapper.epoch[i]),
-                legacy_velocity=env.command_manager.get_command('base_velocity')[i].tolist())
-            self.controller[i]=S.CONTROLLERS.index(output.controller);self.reasons[i]=output.reason
-            self.velocity[i]=self.velocity.new_tensor(output.velocity);self.features[i]=self.features.new_tensor(output.features)
-            self.mode[i]=self.features[i,:3].argmax();self.phase[i]=S.PHASES.index(output.phase);self.go[i]=output.effective_go
-            self.positive_yaw[i]+=max(float(d.root_ang_vel_b[i,2]),0)*env.step_dt*(int(self.mode[i])==2)
-            self.drift[i]=max(float(self.drift[i]),float((d.root_pos_w[i,:2]-self.turn_start[i]).norm()))
-            radius=self.cfg['rewards']['swept_width_m']/2+self.control.commands.adapters[i].c.margin
-            sweep=(gridxy[...,1].abs()<=radius)&(gridxy[...,0]>=0)&(gridxy[...,0]<=self.cfg['observability']['forward_m'])
-            if int(self.mode[i])==2:sweep=gridxy.norm(dim=-1)<=self.cfg['observability']['turn_radius_m']
-            self.observed[i]=known_sweep
+            health=HealthInput(age if not fault else 1000.,age,0.,risk=bool(risk_i))
+            output=self.control.before_policy(i,now_ms=round(now*1000),dt=env.step_dt,xy=xy,yaw=yaw,
+                health=health,landing_observation=o,odom_epoch=epochs[i],legacy_velocity=legacy)
+            controllers.append(S.CONTROLLERS.index(output.controller));self.reasons[i]=output.reason
+            velocities.append(output.velocity);features.append(output.features);phases.append(S.PHASES.index(output.phase));go.append(output.effective_go)
+        self.controller=torch.tensor(controllers,device=env.device,dtype=torch.long)
+        self.velocity=torch.tensor(velocities,device=env.device,dtype=torch.float32)
+        self.features=torch.tensor(features,device=env.device,dtype=torch.float32)
+        self.mode=self.features[:,:3].argmax(-1);self.phase=torch.tensor(phases,device=env.device,dtype=torch.long);self.go=torch.tensor(go,device=env.device)
+        self.positive_yaw+=d.root_ang_vel_b[:,2].clamp_min(0)*env.step_dt*(self.mode==2)
+        self.drift=torch.maximum(self.drift,(d.root_pos_w[:,:2]-self.turn_start).norm(dim=-1))
+        self.observed=known_sweep
         self.stall_enabled=legacy_reward_masks(self.mode,self.phase,self.go,self.controller!=0)['stair_stall']
         command=env.command_manager.get_term('base_velocity')
         command.vel_command_b[~self.legacy]=self.velocity[~self.legacy];command.vel_command_b[self.controller!=0]=0
@@ -200,24 +216,17 @@ class NavState:
         return obs
 
     def compute_rewards(self):
-        env=self.env;d=self.robot.data;points=(d.root_pos_w-env.scene.env_origins)[:,:2].tolist()
-        stair=torch.zeros_like(self.go)
-        for i,(tile,xy) in enumerate(zip(self.index.lookup(range(env.num_envs)),points)):
-            _,offset,axis=project_route(tile,xy);self.axis[i]=axis
-            c=self.control.commands.adapters[i].c if self.control.commands.adapters[i] else None
-            if c is None:continue
-            self.offset[i]=offset-c.y_off
-            if tile.kind=='legacy':self.feasible[i]=True;self.clearance[i]=self.cfg['observability']['sdf_clip_m'];continue
-            result=(turn_feasible(tile,xy,margin_m=c.margin) if int(self.mode[i])==2 else passage_feasible(tile,xy,margin_m=c.margin))
-            self.feasible[i]=result.feasible
-            z=floor_height(tile,xy)
-            active=[b for b in tile.obstacles if b.kind!='step' and b.center[2]+b.half[2]>z]
-            radius=self.cfg['observability']['turn_radius_m'] if int(self.mode[i])==2 else self.cfg['rewards']['swept_width_m']/2
-            self.clearance[i]=min([self.cfg['observability']['sdf_clip_m']]+[point_box_distance(xy,b)-radius for b in active])
-            if bool(self.cylinder.enabled[i]):
-                gap=float((d.root_pos_w[i,:2]-self.cylinder.position[i,:2]).norm())-float(self.cylinder.radius[i])-radius
-                self.clearance[i]=min(float(self.clearance[i]),gap)
-            stair[i]=route_hint(tile,xy)[0].segment_type in ('STAIR_UP','STAIR_DOWN','LANDING')
+        env=self.env;d=self.robot.data
+        margins=torch.tensor([a.c.margin for a in self.control.commands.adapters],device=env.device)
+        offsets=torch.tensor([a.c.y_off for a in self.control.commands.adapters],device=env.device)
+        values=self.oracle.evaluate(self.tile_ids,(d.root_pos_w-env.scene.env_origins)[:,:2],self.mode==2,margins,
+            swept_width=self.cfg['rewards']['swept_width_m'],turn_clear_radius=self.cfg['observability']['turn_radius_m'],sdf_clip=self.cfg['observability']['sdf_clip_m'])
+        self.axis=values['axis'];self.offset=values['offset']-offsets;self.feasible=values['feasible'];self.clearance=values['clearance']
+        radius=torch.where(self.mode==2,self.cfg['observability']['turn_radius_m'],self.cfg['rewards']['swept_width_m']/2)
+        gap=(d.root_pos_w[:,:2]-self.cylinder.position[:,:2]).norm(dim=-1)-self.cylinder.radius-radius
+        self.clearance=torch.where(self.cylinder.enabled&~self.legacy,torch.minimum(self.clearance,gap),self.clearance)
+        segment=values['segment'];stair=(segment==S.SEGMENT_TYPES.index('STAIR_UP'))|(segment==S.SEGMENT_TYPES.index('STAIR_DOWN'))|(segment==S.SEGMENT_TYPES.index('LANDING'))
+        stair &= ~self.legacy
         v=d.root_lin_vel_w[:,0]*self.axis.cos()+d.root_lin_vel_w[:,1]*self.axis.sin()
         yaw=torch.atan2(torch.sin(d.heading_w-self.axis),torch.cos(d.heading_w-self.axis))
         contact=(env.scene['contact_forces'].data.net_forces_w.norm(dim=-1)>self.cfg['sensors']['contact_threshold_n'])

@@ -98,7 +98,7 @@ def mask_self_returns(rays, self_capsules, *, config=None):
     return RayBatch(rays.origins, direction, torch.minimum(hit, rays.distances), rays.self_hit | is_self)
 
 
-def fit_observed_surface(points, valid, grid, settings):
+def fit_observed_surface_reference(points, valid, grid, settings):
     """Grid observed returns and fit local planes; no interpolation across missing cells.
 
     A cell is observed only when it contains an actual return. Local covariance
@@ -133,6 +133,13 @@ def fit_observed_surface(points, valid, grid, settings):
         normals[:,first:last]=torch.where(good[...,None],normal,torch.nan)
     shape=(n,grid.ny,grid.nx)
     return torch.where(observed,heights,torch.nan).reshape(shape), observed.reshape(shape), normals.reshape(*shape,3)
+
+
+def fit_observed_surface(points,valid,grid,settings):
+    if points.is_cuda and points.dtype==torch.float32:
+        from .map_cuda import fit_surface_cuda
+        return fit_surface_cuda(points,valid,grid,settings)
+    return fit_observed_surface_reference(points,valid,grid,settings)
 
 
 def observed_support(points, valid, contact_points, contact_valid, segment, grid, settings, *, config=None):
@@ -188,3 +195,11 @@ def critic_privileged(*,sdf,feasible,observed,acceleration,controller):
     from . import schema
     return torch.cat((sdf.flatten(1),feasible[:,None].float(),observed[:,None].float(),acceleration,
                       torch.nn.functional.one_hot(controller.long(),len(schema.CONTROLLERS)).float()),-1)
+
+
+def invalidate_held_rows(wide,near,env_ids):
+    """Reset only these held rows, without mutating earlier rollout observations."""
+    wide=wide.clone();near=near.clone()
+    wide[env_ids]=0.;wide[env_ids,2::3]=1.
+    near[env_ids]=0.;near[env_ids,2]=1.
+    return wide,near

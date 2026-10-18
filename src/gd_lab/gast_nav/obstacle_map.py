@@ -23,7 +23,7 @@ def subbin_edges():
     return out
 
 
-def ray_evidence(resolved, support_height, *, grid=WIDE_GRID, config=None):
+def ray_evidence_reference(resolved, support_height, *, grid=WIDE_GRID, config=None):
     """Resolved rays + observed support [N,NY,NX] -> (state, subbin_free).
 
     Exact segment/AABB positive-length traversal; rays stop strictly before
@@ -84,6 +84,13 @@ def ray_evidence(resolved, support_height, *, grid=WIDE_GRID, config=None):
         result[:, band] = torch.where(occupied_count > 0, S.OCCUPIED, result[:, band])
         diagnostics.append(passed.reshape(n, grid.ny, grid.nx, len(edges)))
     return result.reshape(n, len(S.BANDS), grid.ny, grid.nx), tuple(diagnostics)
+
+
+def ray_evidence(resolved, support_height, *, grid=WIDE_GRID, config=None):
+    if support_height.is_cuda and support_height.dtype==torch.float32:
+        from .map_cuda import ray_evidence_cuda
+        return ray_evidence_cuda(resolved,support_height,grid,config or load_config())
+    return ray_evidence_reference(resolved,support_height,grid=grid,config=config)
 
 
 class ObstacleMap:
