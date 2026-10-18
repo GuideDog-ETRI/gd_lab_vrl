@@ -145,6 +145,12 @@ class RaycastIrTerrain(NoisyTerrain):
         # [visible cells, scan cells, IR available, IR sum, dark-material visible cells]
         self.ir_counts = torch.zeros(5, device=env.device, dtype=torch.float64)
         super().__init__(cfg, env)
+        self.mapper_aug = None
+        if getattr(env.cfg, "mapper_aug_enabled", False):
+            from gd_lab.gast.mapper_aug import MapperAugCfg, MapperAugmentation
+            self.mapper_aug = MapperAugmentation(env.num_envs, env.device, MapperAugCfg(
+                enabled=True, ramp_steps=env.cfg.mapper_aug_ramp_steps,
+                clean_fraction=env.cfg.mapper_aug_clean_fraction, seed=env.cfg.mapper_aug_seed))
         self.history = RayIrHistory(env)
         self.history.reset()
 
@@ -155,6 +161,13 @@ class RaycastIrTerrain(NoisyTerrain):
             self.capture_step[ids] = -100
             self.held[ids] = 0
             self.materials.reset(env_ids)
+        if hasattr(self, "unknown_run"):
+            ids = slice(None) if env_ids is None else env_ids
+            self.unknown_run[ids] = 0
+            self.extra_unknown_run[ids] = 0
+            self.held_extra_unknown[ids] = False
+        if getattr(self, "mapper_aug", None) is not None:
+            self.mapper_aug.reset(env_ids)
 
     def _capture(self, env, strength):
         scan = env.scene['height_scanner'].data
@@ -183,7 +196,13 @@ class RaycastIrTerrain(NoisyTerrain):
             visible |= seen
         visible &= finite
         # Height: same scale/offset as clean_terrain; noise chain of NoisyTerrain.
-        h = ((scan.pos_w[:, 2, None] - z - .5).clamp(-1, 1))
+        height_z = z
+        if self.mapper_aug is not None:
+            from gd_lab.mdp.terrain_families import terrain_family_gate
+            height_z = self.mapper_aug.geometry(points, scan.pos_w[:, 2], env.scene.env_origins[:, 2],
+                pose_xyyaw(env)[:, 2], terrain_family_gate(env, ("platform_gap", "gap_field")) == 0,
+                env.common_step_counter, self.cast)
+        h = ((scan.pos_w[:, 2, None] - height_z - .5).clamp(-1, 1))
         h = torch.where(visible, h, 0.)
         h = h + strength * (torch.randn_like(h) * .01 + self.bias)
         valid = visible & (torch.rand_like(h) > .03 * strength)
@@ -205,6 +224,8 @@ class RaycastIrTerrain(NoisyTerrain):
         dark = visible & (rho <= RHO_DARK + 1e-6)
         self.ir_counts += torch.stack((visible.sum().double(), visible.new_tensor(visible.numel(), dtype=torch.float64),
                                        ir_ok.sum().double(), ir.sum().double(), dark.sum().double()))
+        if self.mapper_aug is not None:
+            height, valid, ir = self.mapper_aug.unknown(height, valid, ir, points, pose_xyyaw(env)[:, 2])
         return torch.cat((height, valid.float(), ir), -1)
 
     def __call__(self, env):
@@ -217,9 +238,26 @@ class RaycastIrTerrain(NoisyTerrain):
             fresh = self._capture(env, strength)
             self.held[refresh] = fresh[refresh]
             self.capture_step[refresh] = step
+            if getattr(env, '_aug149_diagnostics', False):
+                if not hasattr(self, 'held_extra_unknown'):
+                    self.held_extra_unknown = torch.zeros_like(self.held[:, :CELLS], dtype=torch.bool)
+                if self.mapper_aug is not None:
+                    self.held_extra_unknown[refresh] = self.mapper_aug.removed[refresh]
         blackout = self.blackout.mask(step)
         full = torch.where(blackout[:, None], 0., self.held)
         valid = full[:, CELLS:2 * CELLS].bool()
+        if getattr(env, "_aug149_diagnostics", False):
+            if not hasattr(self, "unknown_run"):
+                self.unknown_run = torch.zeros_like(valid, dtype=torch.long)
+                self.longest_unknown_steps = torch.zeros((), dtype=torch.long, device=valid.device)
+                self.extra_unknown_run = torch.zeros_like(self.unknown_run)
+                self.longest_extra_unknown_steps = self.longest_unknown_steps.clone()
+            self.unknown_run = torch.where(valid, 0, self.unknown_run + 1)
+            self.longest_unknown_steps = torch.maximum(self.longest_unknown_steps, self.unknown_run.max())
+            self.extra_unknown_run = torch.where(self.held_extra_unknown, self.extra_unknown_run+1, 0)
+            self.longest_extra_unknown_steps = torch.maximum(self.longest_extra_unknown_steps, self.extra_unknown_run.max())
+            if not torch.isfinite(full).all():
+                raise FloatingPointError("UPDATE149B nonfinite actor frame")
         self.diagnostic_counts += torch.stack((blackout.sum(), blackout.new_tensor(env.num_envs, dtype=torch.long),
                                               valid.sum(), valid.new_tensor(valid.numel(), dtype=torch.long),
                                               full.new_tensor(strength * env.num_envs))).double()

@@ -1,0 +1,7 @@
+{
+  "envs": 1024,
+  "threads": 1,
+  "capture_ms": 41.87685989309102,
+  "estimated_25_captures_ms": 1046.9214973272756,
+  "cast": "analytic CPU fixture, NOT Warp/GPU or end-to-end iteration"
+}
