@@ -243,3 +243,34 @@ def warm_start_from_dwb(alg, checkpoint_path: str, policy_lr: float, terrain_lr:
             "copied": len(source), "fresh_terrain": sum(is_terrain(name) for name in target),
             "cenet_optimizer_restored": False, "latent_head_zeroed": True, "ppo_optimizer": "new",
             "learning_rates": group_learning_rates(alg.optimizer), "terrain_level_means_by_family": None}
+
+
+def warm_start_from_rayir(alg, checkpoint_path, policy_lr, terrain_lr, *, expected_sha256, expected_task):
+    """UPDATE149: exact native Ray+IR weights, new PPO, restored CENet/terrain means.
+
+    Intentionally a new 0-based 2000-update run, not additive optimizer resume.
+    No widening or latent reset is permitted. A2769 and C2769 use this same path.
+    """
+    if alg.schedule != 'fixed':
+        raise ValueError('Ray+IR fine-tune requires fixed schedule')
+    with open(checkpoint_path, 'rb') as f:
+        digest = hashlib.sha256(f.read()).hexdigest()
+    if not expected_sha256 or digest != expected_sha256.lower():
+        raise ValueError('Ray+IR checkpoint sha256 mismatch')
+    c = torch.load(checkpoint_path, map_location='cpu', weights_only=False)
+    extra = (c.get('infos') or {}).get('gd_lab') or {}
+    task = (extra.get('gast_warm_start') or {}).get('task')
+    if task != expected_task or task not in ('Gd-GastRayIrV21-Rbq10-Dreamwaq-v0',
+                                            'Gd-GastRayIrV21Gap50-Rbq10-Dreamwaq-v0'):
+        raise ValueError(f'Ray+IR source task {task!r} does not match {expected_task!r}')
+    means = extra.get('terrain_level_means_by_family')
+    if not means or extra.get('cenet_optimizer_state_dict') is None:
+        raise ValueError('Ray+IR fine-tune requires saved terrain levels and CENet optimizer')
+    alg.policy.load_state_dict(c['model_state_dict'], strict=True)
+    alg.policy.cenet.optimizer.load_state_dict(extra['cenet_optimizer_state_dict'])
+    alg.optimizer = build_grouped_optimizer(alg.policy, policy_lr, terrain_lr, alg.optimizer)
+    alg.learning_rate = float(policy_lr)
+    return dict(source=checkpoint_path, source_sha256=digest, source_iteration=int(c['iter']),
+                source_task=task, source_kind='native_rayir', ppo_optimizer='new',
+                cenet_optimizer_restored=True, latent_head_zeroed=False,
+                learning_rates=group_learning_rates(alg.optimizer), terrain_level_means_by_family=means)

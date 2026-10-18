@@ -6,6 +6,7 @@ import importlib
 import json
 import os
 import signal
+import time
 from pathlib import Path
 
 import torch
@@ -88,6 +89,10 @@ class DreamwaqRunner(OnPolicyRunner):
             criteria_file = Path(__file__).resolve().parents[3] / "configs/online_top5.json"
         self._top5_criteria_reloader = Top5CriteriaReloader(criteria_file, defaults)
 
+        aug149 = hasattr(self, 'aug149_start_iteration')
+        last_update_wall = time.perf_counter()
+        if aug149 and torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats(self.device)
         original_update = self.alg.update
         next_iteration = self.current_learning_iteration
         # Two ways to stop with a save: a stop file (GD_LAB_STOP_FILE, read by rank 0) or SIGUSR1 to any rank.
@@ -104,7 +109,7 @@ class DreamwaqRunner(OnPolicyRunner):
             signal.signal(s, request_stop)
 
         def update_and_rank():
-            nonlocal next_iteration
+            nonlocal next_iteration, last_update_wall
             result = original_update()
             self.current_learning_iteration = next_iteration
             records = self._top5_records
@@ -145,6 +150,36 @@ class DreamwaqRunner(OnPolicyRunner):
                 fingerprint = assert_synchronized(self.alg.policy, [self.alg.optimizer, self.alg.policy.cenet.optimizer])
                 if not self.disable_logs:
                     print(f'[GAST_SYNC_OK] iteration={next_iteration} sha256={fingerprint}', flush=True)
+            if aug149:
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize(self.device)
+                now = time.perf_counter()
+                diagnostic = dict(local_update=next_iteration-self.aug149_start_iteration+1,
+                    update_wall_seconds=now-last_update_wall,
+                    peak_gpu_bytes=torch.cuda.max_memory_allocated(self.device) if torch.cuda.is_available() else 0,
+                    force_scale=float(self.env.unwrapped.reward_manager.get_term_cfg('stair_handle_disturbance').func._scale(self.env.unwrapped, 150000)),
+                    speed_ceiling=__import__('gd_lab.mdp.gap_stair_v2_math', fromlist=['speed_ceiling']).speed_ceiling(
+                        self.env.unwrapped.common_step_counter, self.env.unwrapped.command_manager.get_term('base_velocity').ramp_steps),
+                    noise_strength=min(1., .1+(self.env.unwrapped.common_step_counter+terrain_term.step_offset)/200000.),
+                    longest_extra_unknown_seconds=float(terrain_term.longest_extra_unknown_steps)*self.env.unwrapped.step_dt,
+                    longest_unknown_seconds=float(terrain_term.longest_unknown_steps)*self.env.unwrapped.step_dt,
+                    finite_loss=all(torch.isfinite(torch.as_tensor(v)).all().item() for v in result.values()),
+                    finite_parameters=all(torch.isfinite(p).all().item() for p in self.alg.policy.parameters()))
+                augmentation = getattr(terrain_term, 'mapper_aug', None)
+                diagnostic['mapper'] = ({k:float(v) for k,v in augmentation.last_diagnostics.items()} if augmentation
+                    else dict(strength=0., new_unknown=0, widened_cells=0, extra_unknown_fraction_mean=0.))
+                if not diagnostic['finite_loss'] or not diagnostic['finite_parameters']:
+                    raise FloatingPointError('UPDATE149B nonfinite update')
+                print('[UPDATE149B update] '+json.dumps(diagnostic), flush=True)
+                if not self.disable_logs:
+                    with open(Path(self.log_dir)/'aug149_updates.jsonl', 'a') as f:
+                        f.write(json.dumps(diagnostic)+'\n')
+                last_update_wall = time.perf_counter()
+                if torch.cuda.is_available():
+                    torch.cuda.reset_peak_memory_stats(self.device)
+                # Preserve every LOCAL save250 irrespective of absolute resume index.
+                if diagnostic['local_update'] % 250 == 0 and not self.disable_logs:
+                    self.save(os.path.join(self.log_dir, f"local_{diagnostic['local_update']:04d}.pt"))
             self._latest_diagnostics = {k: float(v) for k, v in result.items()}
             status = {"selected": False, "saved": False, "error": None}
             if rank == 0 and not self.disable_logs and self.log_dir is not None:
@@ -152,6 +187,9 @@ class DreamwaqRunner(OnPolicyRunner):
                 if criteria_message:
                     level = "INFO" if criteria_message.startswith("Reloaded") else "WARN"
                     print(f"[{level}] {criteria_message}", flush=True)
+                if aug149:
+                    criteria = dict(criteria)
+                    criteria['top5_start_iteration'] = self.aug149_start_iteration + 499
                 status = rank_and_save_top5(
                     rank, episodes, Path(self.log_dir) / "best_top5", next_iteration,
                     criteria["top5_min_spacing"], self.save, criteria=criteria,
@@ -200,6 +238,8 @@ class DreamwaqRunner(OnPolicyRunner):
     def save(self, path: str, infos: dict | None = None) -> None:
         infos = dict(infos or {})
         extra = dict(infos.get("gd_lab", {}))
+        if hasattr(self, 'aug149_manifest'):
+            extra['aug149_manifest'] = self.aug149_manifest
         extra["learning_rate"] = self.alg.learning_rate
         if hasattr(self, 'observation_context'):
             extra['observation_context'] = self.observation_context
@@ -252,6 +292,10 @@ class DreamwaqRunner(OnPolicyRunner):
                 for group in self.alg.optimizer.param_groups:
                     group["lr"] = self.alg.learning_rate
         family_columns = getattr(self, "_top5_family_columns", None)
+        if hasattr(self, 'strict_resume149'):
+            means = extra.get('terrain_level_means_by_family', {})
+            if not family_columns or set(family_columns)-set(means):
+                raise ValueError('UPDATE149B missing family levels: refusing fallback')
         if family_columns:
             means = extra.get("terrain_level_means_by_family") or {}
             if not means:
@@ -263,8 +307,19 @@ class DreamwaqRunner(OnPolicyRunner):
                 restored = restore_family_start_levels(
                     scene.terrain, scene.env_origins, family_columns, means
                 )
+                if hasattr(self, 'strict_resume149'):
+                    present = capture_family_level_means(scene.terrain, family_columns)
+                    if not restored or any(present[k] != v for k,v in restored.items()):
+                        raise ValueError('UPDATE149B terrain levels did not restore')
+                    if not torch.equal(scene.env_origins, scene.terrain.terrain_origins[scene.terrain.terrain_levels, scene.terrain.terrain_types]):
+                        raise ValueError('UPDATE149B terrain origin mismatch')
+                    self.strict_resume149['restored_levels'] = restored
                 if restored:
-                    self.env.reset()
+                    if hasattr(self, 'strict_resume149'):
+                        from gd_lab.gast.resume149 import reset_restored_env
+                        reset_restored_env(self.env)
+                    else:
+                        self.env.reset()
                     print(
                         "[INFO] Resumed terrain levels using floor(family mean): "
                         f"{restored}",
