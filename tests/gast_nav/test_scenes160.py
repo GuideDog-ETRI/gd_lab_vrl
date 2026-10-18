@@ -147,14 +147,18 @@ def simple_meta(width=.7,*,turn_radius=None):
 
 @pytest.mark.parametrize('delta,expected',[(-1e-7,False),(0.,True),(1e-7,True)])
 def test_passage_feasibility_exact_swept_plus_margin(delta,expected):
-    r=passage_feasible(simple_meta(.5+2*.1+delta))
-    assert r.feasible==expected and r.required==pytest.approx(.7)
+    from gd_lab.gast_nav.scene_config import load_scene_config
+    o=load_scene_config()['oracle']; W,m=o['swept_width_m'],o['margin_m']
+    r=passage_feasible(simple_meta(W+2*m+delta))
+    assert r.feasible==expected and r.required==pytest.approx(W+2*m)
 
 
 @pytest.mark.parametrize('delta,expected',[(-1e-7,False),(0.,True),(1e-7,True)])
 def test_turn_feasibility_exact_radius_plus_margin(delta,expected):
-    r=turn_feasible(simple_meta(1.5,turn_radius=.65+.1+delta))
-    assert r.feasible==expected and r.required==pytest.approx(.75)
+    from gd_lab.gast_nav.scene_config import load_scene_config
+    o=load_scene_config()['oracle']; R,m=o['turn_swept_radius_m'],o['margin_m']
+    r=turn_feasible(simple_meta(1.5,turn_radius=R+m+delta))
+    assert r.feasible==expected and r.required==pytest.approx(R+m)
 
 
 def test_feasibility_uses_remaining_route_not_passed_bottleneck():

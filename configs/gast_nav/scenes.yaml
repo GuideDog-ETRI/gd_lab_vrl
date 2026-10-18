@@ -70,8 +70,8 @@ stairs:
   rail_height: 0.8
   rail_thickness: 0.04
 oracle:
-  swept_width_m: 0.50  # PROVISIONAL: replace with measured gait envelope.
-  turn_swept_radius_m: 0.65  # reviewer: knee radius ~0.60 + centre drift 0.05; margin EXTRA.
+  swept_width_m: 0.60  # measured (UPDATE162 S1): forward 0.52, lateral 0.60; margin EXTRA.
+  turn_swept_radius_m: 0.76  # measured shape radius 0.71 + allowed drift 0.05 (3906 drifts up to 0.27 m; GAST-Nav must learn <=5 cm); margin EXTRA.
   margin_m: 0.10
   collision_height_m: 0.80  # Geometric proxy only, caller may override vertical span.
   epsilon_m: 0.000001

@@ -64,7 +64,7 @@ rewards:
   dwell_motion: -1.0
   contact: -5.0
   stopped_speed_mps: 0.05
-  swept_width_m: 0.50
+  swept_width_m: 0.60  # measured (UPDATE162 S1, 3906 ARM4): forward 0.52, with lateral steps 0.60; margin extra
 smoke:
   envs: 16
   steps: 200
@@ -91,7 +91,7 @@ landing_sensor:
 observability:
   unknown_hold_s: 3.0
   forward_m: 0.8
-  turn_radius_m: 0.65
+  turn_radius_m: 0.76  # measured body-shape turn radius 0.71 + allowed centre drift 0.05 (R5 gate); margin extra
   sdf_clip_m: 6.0
 person_contact:
   force_threshold_n: 1.0
