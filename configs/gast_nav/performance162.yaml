@@ -1,0 +1,15 @@
+# UPDATE162 optimization verification contract; no sensor rays/bands removed.
+local_env_counts: [16, 64, 256, 1366]
+horizon: 100
+local_rollout_limit_s: 180
+remote_iteration_target_s: 40
+capture_period_s: 0.1
+policy_steps_per_capture: 10
+held_inputs_between_captures: true
+reset_rows_unknown_until_next_capture: true
+cuda_eigh_max_batch: 32768
+state_and_subbin_tolerance: 0
+support_height_and_mask_tolerance: 0
+clearance_tolerance: 0
+support_normal_absolute_tolerance: 0.0001
+oracle_geometry_absolute_tolerance_m: 0.00001

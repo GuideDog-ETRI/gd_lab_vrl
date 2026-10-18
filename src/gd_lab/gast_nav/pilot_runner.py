@@ -100,6 +100,7 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
                'top5':[(s,i,str(p)) for s,i,p in top.records],
                'resume_contract':'weights/optimizers/normalizers + family curriculum; reset episodes, not bitwise trajectory resume'}
         path=log/name;temporary=path.with_suffix('.tmp');torch.save(state,temporary);temporary.replace(path)
+    iteration=start_iteration;tick=-1
     try:
         for iteration in range(start_iteration,args.max_iterations):
             torch.cuda.synchronize();torch.cuda.reset_peak_memory_stats(args.device)
@@ -168,4 +169,15 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
                     top.consider(float(score[0]/score[1]),iteration+1,lambda path:checkpoint(iteration+1,str(path.relative_to(log))))
             if any_rank(stop,args.device):checkpoint(iteration+1,'stopped.pt');return {'status':'stopped','iteration':iteration+1,'optimizer_steps':optimizer_steps}
         return {'status':'completed','iteration':args.max_iterations,'optimizer_steps':optimizer_steps}
-    finally:signal.signal(signal.SIGUSR1,previous)
+    except Exception as error:
+        # Preserve partial-run diagnostics before app teardown or a late signal.
+        try:partial_timing=timing.flush()
+        except Exception as timing_error:partial_timing={'timing_error':repr(timing_error)}
+        partial=dict(status='failed',iteration=iteration,rollout_tick=tick,
+            optimizer_steps=optimizer_steps,error=repr(error),**partial_timing)
+        (log/f'rank{rank}_partial.json').write_text(json.dumps(partial,indent=2)+'\n')
+        raise
+    finally:
+        # A second stop request during Isaac close must not restore SIG_DFL
+        # and replace the recorded timeout with an unrelated signal exit.
+        signal.signal(signal.SIGUSR1,signal.SIG_IGN if previous==signal.SIG_DFL else previous)

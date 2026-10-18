@@ -1,0 +1,20 @@
+# UPDATE162 inference-only paired diagnostic; no training.
+seeds: [16200, 16201, 16202, 16203, 16204, 16205, 16206, 16207]
+difficulty: 0.1
+speed_m_s: 0.5
+yaw_gain: 1.0
+yaw_limit_rad_s: 0.5
+duration_s: 30.0
+fall_tilt_deg: 70.0
+stall_window_s: 2.0
+stall_progress_m: 0.1
+stall_grace_s: 2.0
+completion_margin_m: 0.25
+sample_period_s: 0.1
+clearance_body_radius_proxy_m: 0.25
+fall_increase_pp: 5.0
+stall_increase_pp: 10.0
+# Controlled geometric IR proxy, identical before visibility masking.
+ir_reflectance: 0.6
+clearance_vertical_padding_m: 0.05
+completion_lateral_tolerance_m: 0.35

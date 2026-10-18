@@ -14,7 +14,7 @@ def extended_near_grid():
                 S.NEAR_X0-pad*S.NEAR_RES, S.NEAR_Y0-pad*S.NEAR_RES), pad
 
 
-def clearance_from_state(state, *, grid, config=None):
+def clearance_reference(state, *, grid, config=None):
     """[N,3,Y,X] -> [N,2,Y,X] metres to nearest occupied CELL BOUNDARY.
 
     Unknown is not an obstacle. With no occupied cells distance saturates at
@@ -47,6 +47,15 @@ def clearance_from_state(state, *, grid, config=None):
             if dx < 0: moved[..., :, dx:] = False
             full = torch.minimum(full, torch.where(moved, dist, S.NEAR_CLEAR_MAX))
     return full
+
+
+def clearance_from_state(state, *, grid, config=None):
+    if state.is_cuda:
+        if state.ndim!=4 or state.shape[1:]!=(3,grid.ny,grid.nx):raise ValueError('fine state shape')
+        if bool((state>S.OCCUPIED).any()):raise ValueError('reserved state')
+        from .map_cuda import clearance_cuda
+        return clearance_cuda(state,grid)
+    return clearance_reference(state,grid=grid,config=config)
 
 
 def build_near(rays, fine_support_height, *, boxes=None, capsules=None, config=None):

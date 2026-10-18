@@ -27,6 +27,7 @@ sha256sum checkpoints/teachers/gast/rayir_top5_20261016/3906_gap50_from_dwb38000
 printf '%q ' "$mode" "$@" > "$launch/arguments.txt"
 mkdir -p "$launch/runtime/tmp" "$launch/runtime/usd" "$launch/runtime/cache" "$launch/runtime/mpl"
 export TMPDIR="$launch/runtime/tmp" APPTAINER_TMPDIR="$launch/runtime/tmp" XDG_CACHE_HOME="$launch/runtime/cache" MPLCONFIGDIR="$launch/runtime/mpl"
+export TRITON_CACHE_DIR="$launch/runtime/cache/triton" CUDA_CACHE_PATH="$launch/runtime/cache/cuda"
 export TORCH_HOME="$launch/runtime/cache/torch" NUMBA_CACHE_DIR="$launch/runtime/cache/numba"
 exec apptainer exec --nv --writable-tmpfs --bind "$launch/runtime/usd:/tmp/IsaacLab" \
   "${GD_LAB_SIF:?set GD_LAB_SIF}" "${GD_LAB_PYTHON:?set GD_LAB_PYTHON}" -B \
