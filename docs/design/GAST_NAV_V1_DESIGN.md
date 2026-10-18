@@ -791,6 +791,8 @@ NAV1-ACK(6장)로 다음을 gdm에 돌려준다: 적용된 조건, hold 사유, 
   - 크기: 49×43 = 2,107 B.
 - 착지 감지와 안전 지도도 같은 값을 쓴다.
 - history band는 지지면이 바뀌어도 다시 분류하지 않는다. 그 프레임의 sample 지지면을 함께 저장한다.
+- occupied를 TTL 동안 유지할 때는 그 셀의 이전 support와 band 분류를 그대로 쓴다. 증거가 만료되면 현재 관측으로 바꾼다.
+- OBS1의 sample pose는 odom (x, y, z, yaw) 4요소다. ODM1과 같은 구성이며, z는 계단에서 base 기준 support 높이를 프레임 사이에 비교하는 데 쓴다.
 
 **C2.3 free 판정**
 - band를 높이 10 cm 단위 sub-bin으로 나눈다(B1 3개, B2 5개, B3 14개).
