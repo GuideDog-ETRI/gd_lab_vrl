@@ -38,3 +38,20 @@ def test_top5_retains_best_and_discards_nan(tmp_path):
     assert [x[0] for x in top.records]==[7.,6.,5.,4.,3.]
     assert len(list(tmp_path.glob('*.pt')))==5
     assert not top.consider(float('nan'),9,lambda path:None)
+
+def test_pilot_scope_guards(monkeypatch):
+    from gd_lab.gast_nav.pilot_runner import validate_pilot
+    import yaml
+    from pathlib import Path
+    cfg=yaml.safe_load((Path(__file__).resolve().parents[2]/'configs/gast_nav/pilot.yaml').read_text())
+    args=SimpleNamespace(pilot=True,distributed=True,stage='A0',total_envs=4096,max_iterations=200,pilot_smoke=False)
+    monkeypatch.setenv('GAST_NAV_PILOT','1');monkeypatch.setenv('CUDA_VISIBLE_DEVICES','0,1,2')
+    validate_pilot(args,cfg,3)
+    import pytest
+    with pytest.raises(ValueError):validate_pilot(args,cfg,4)
+    args.max_iterations=201
+    with pytest.raises(ValueError):validate_pilot(args,cfg,3)
+    args.max_iterations=200;monkeypatch.setenv('CUDA_VISIBLE_DEVICES','0,1,2,3')
+    with pytest.raises(ValueError):validate_pilot(args,cfg,3)
+    monkeypatch.setenv('CUDA_VISIBLE_DEVICES','0,1,2');args.pilot_smoke=True;args.max_iterations=5;args.total_envs=48
+    validate_pilot(args,cfg,3)
