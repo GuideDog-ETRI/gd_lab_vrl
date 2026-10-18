@@ -14,3 +14,5 @@ wandb/
 *.onnx
 *.ckpt
 *.safetensors
+*.mp4
+*.webm
