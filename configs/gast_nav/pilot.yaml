@@ -1,0 +1,14 @@
+stage: A0
+max_iterations: 200
+save_interval: 50
+total_envs: 4096
+world_size: 3
+smoke_envs_per_rank: 16
+smoke_iterations: 5
+smoke_horizon: 16
+iteration_limit_s: 60.0
+slow_iterations: 2
+iteration_hard_timeout_s: 120.0
+collective_timeout_s: 180
+sync_every: 1
+vram_limit_fraction: 0.95

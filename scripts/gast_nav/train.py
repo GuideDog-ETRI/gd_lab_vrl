@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GAST-Nav launcher. UPDATE160B execution is --smoke only, never --train."""
+"""GAST-Nav launcher: UPDATE162 bounded A0 pilot, explicit future training, inference smoke."""
 import argparse
 import json
 import os
@@ -11,17 +11,33 @@ sys.path.insert(0,str(ROOT/'src'))
 def main():
     parser=argparse.ArgumentParser()
     mode=parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument('--smoke',action='store_true');mode.add_argument('--train',action='store_true')
-    parser.add_argument('--stage',choices=['A0','A','B','C'],default='B')
+    mode.add_argument('--smoke',action='store_true');mode.add_argument('--train',action='store_true');mode.add_argument('--pilot',action='store_true')
+    parser.add_argument('--stage',choices=['A0','A','B','C'],default=None)
     parser.add_argument('--distributed',action='store_true');parser.add_argument('--total_envs',type=int,default=4096)
+    parser.add_argument('--pilot-smoke',action='store_true')
+    parser.add_argument('--max_iterations',type=int)
+    parser.add_argument('--save_interval',type=int)
+    parser.add_argument('--resume',type=Path)
+    parser.add_argument('--run_id',default=os.environ.get('GAST_RUN_ID'))
     parser.add_argument('--output',type=Path,default=ROOT/'tests/gast_nav/update160b_smoke')
     from isaaclab.app import AppLauncher
     AppLauncher.add_app_launcher_args(parser)
     args=parser.parse_args()
+    import yaml,re
+    pilot_settings=yaml.safe_load((ROOT/'configs/gast_nav/pilot.yaml').read_text())
+    args.stage=args.stage or ('A0' if args.pilot else 'B')
+    if args.pilot_smoke and not args.pilot:parser.error('--pilot-smoke requires --pilot')
+    if args.pilot_smoke:args.total_envs=pilot_settings['smoke_envs_per_rank']*pilot_settings['world_size']
+    args.max_iterations=args.max_iterations or (pilot_settings['smoke_iterations'] if args.pilot_smoke else pilot_settings['max_iterations'] if args.pilot else yaml.safe_load((ROOT/f'configs/gast_nav/stage_{args.stage}.yaml').read_text())['max_iterations'])
+    args.save_interval=args.save_interval or pilot_settings['save_interval']
+    if args.run_id is None:args.run_id='nav_'+__import__('datetime').datetime.now().strftime('%Y%m%d_%H%M%S')
+    if not re.fullmatch(r'[a-zA-Z0-9_-]+',args.run_id):parser.error('invalid run id')
     if args.smoke and args.distributed:parser.error('smoke is one GPU only')
     rank=int(os.environ.get('RANK','0'));local=int(os.environ.get('LOCAL_RANK','0'));world=int(os.environ.get('WORLD_SIZE','1'))
     if args.train and os.environ.get('GAST_NAV_TRAINING_AUTHORIZED')!='1':
         parser.error('training disabled; a separate explicit authorization is required')
+    from gd_lab.gast_nav.pilot_runner import validate_pilot
+    validate_pilot(args,pilot_settings,world)
     args.device=f'cuda:{local}';args.headless=True
     if args.smoke:
         args.output=args.output.resolve()
@@ -29,10 +45,10 @@ def main():
         args.output.mkdir(parents=True,exist_ok=True)
         # Do not rerun after any simulator launch without renewed permission.
         with (args.output/'GPU_ATTEMPT_STARTED').open('x') as f:f.write('one authorized UPDATE160B attempt\n')
-    runtime=args.output/'runtime' if args.smoke else ROOT/'logs/gast/nav_v1'/args.stage/'runtime'/str(rank)
+    runtime=args.output/'runtime' if args.smoke else ROOT/'logs/gast/nav_v1'/args.run_id/'runtime'/str(rank)
     for key in ('cache','data','logs'): (runtime/key).mkdir(parents=True,exist_ok=True)
     args.kit_args=(args.kit_args or '')+' '+ ' '.join(f'--/app/tokens/{key}={runtime/key}' for key in ('cache','data','logs'))
-    result={'status':'started','optimizer_steps':0,'rollout_steps':0,'stage':args.stage}
+    result={'status':'started','optimizer_steps':0 if args.smoke else None,'rollout_steps':0,'stage':args.stage}
     app=None
     try:
         launcher=AppLauncher(args);app=launcher.app
@@ -56,11 +72,12 @@ def main():
                 if cls in seen:continue
                 seen.add(cls);pending.extend(cls.__subclasses__());cls.step=forbidden
         elif args.distributed:
-            torch.cuda.set_device(local);dist.init_process_group('nccl')
+            from datetime import timedelta
+            torch.cuda.set_device(local);dist.init_process_group('nccl',timeout=timedelta(seconds=pilot_settings['collective_timeout_s']))
         cfg=GastNavEnvCfg(nav_stage=args.stage)
         cfg.scene.num_envs=16 if args.smoke else rank_env_count(args.total_envs,world,rank)
         cfg.sim.device=args.device;cfg.nav_smoke=args.smoke
-        if args.smoke:
+        if args.smoke or args.pilot_smoke:
             cfg.scene.terrain.terrain_generator.num_rows=2
             cfg.scene.terrain.terrain_generator.num_cols=20
             cfg.scene.terrain.max_init_terrain_level=0
@@ -118,35 +135,9 @@ def main():
             assert 0 in controllers and 1 in controllers
             assert force_error<1e-4
         else:
-            from gd_lab.gast_nav.ppo import GastNavPPO
-            runtime_cfg=yaml.safe_load((ROOT/'configs/gast_nav/runtime.yaml').read_text())
-            train=cfg.nav_settings['training'];policy.train()
-            if world>1:
-                for value in policy.state_dict().values():dist.broadcast(value,src=0)
-            alg=GastNavPPO(policy,nav_config=runtime_cfg['ppo'],trainable_manifest=ROOT/phase['trainable'],device=args.device,
-                schedule='fixed',learning_rate=train['learning_rate'],num_learning_epochs=train['epochs'],num_mini_batches=train['minibatches'])
-            alg.init_storage('rl',env.num_envs,train['horizon'],obs,[12])
-            log=ROOT/train['log_root']/args.stage;top=TopK(log/'best_top5',train['top_k'])
-            for iteration in range(phase['max_iterations']):
-                score=torch.zeros(2,device=args.device)
-                with torch.no_grad():
-                    for _ in range(train['horizon']):
-                        action=alg.act_selected(obs,obs['nav_controller'])
-                        raw,reward,terminated,truncated,extras=env.step(action)
-                        obs=TensorDict(raw,batch_size=[env.num_envs],device=args.device)
-                        extras['time_outs']=truncated
-                        alg.process_env_step(obs,reward,terminated|truncated,extras)
-                        score+=torch.stack((reward.sum(),reward.new_tensor(reward.numel())))
-                    alg.compute_returns(obs)
-                metrics=alg.update()
-                if world>1:dist.all_reduce(score)
-                if rank==0:
-                    log.mkdir(parents=True,exist_ok=True)
-                    with (log/'metrics.jsonl').open('a') as f:f.write(json.dumps({'iteration':iteration,'mean_reward':float(score[0]/score[1]),**metrics})+'\n')
-                    if (iteration+1)%train['checkpoint_interval']==0:
-                        def save(path):torch.save({'model_state_dict':policy.state_dict(),'optimizer_state_dict':alg.optimizer.state_dict(),
-                                                  'iteration':iteration+1,'migration':migration},path)
-                        top.consider(float(score[0]/score[1]),iteration+1,save)
+            from gd_lab.gast_nav.pilot_runner import run_training
+            result.update(run_training(env=env,policy=policy,obs=obs,args=args,root=ROOT,
+                                       migration=migration,pilot_settings=pilot_settings))
         env.close()
     except Exception as error:
         result['status']='failed';result['error']=repr(error)
@@ -154,6 +145,10 @@ def main():
     finally:
         if args.smoke:
             (args.output/'result.json').write_text(json.dumps(result,indent=2,default=str)+'\n')
+        else:
+            destination=ROOT/'logs/gast/nav_v1'/args.run_id
+            destination.mkdir(parents=True,exist_ok=True)
+            (destination/f'rank{rank}_result.json').write_text(json.dumps(result,indent=2,default=str)+'\n')
         if app is not None:app.close()
 
 if __name__=='__main__':main()
