@@ -31,13 +31,13 @@ code{font-family:var(--f-mono);font-size:.84em;overflow-wrap:anywhere}
 <div class="wrap">
 <header style="display:grid;gap:6px">
   <h1>RBQ10 정책 계보도</h1>
-  <p class="sub">블라인드 출발점(ONNX b1_18, ARM1~4)부터 Ray+IR 교사, 카메라 학생까지 실패·중단 모델을 포함한 전체 계보. 2026-10-16 기준, 세 서버(로컬 5090 · onvlm2 다중 GPU · 90.111)의 학습 기록(params, manifest, README, 로그)에서 모음.</p>
+  <p class="sub">블라인드 출발점(ONNX b1_18, ARM1~4)부터 Ray+IR 교사, 카메라 학생까지 실패·중단 모델을 포함한 전체 계보. 2026-10-18 기준 (원래 3906 중심 갱신), 세 서버(로컬 5090 · onvlm2 다중 GPU · 90.111)의 학습 기록(params, manifest, README, 로그)에서 모음.</p>
 </header>
 
 <section style="display:grid;gap:10px">
   <div class="legend">
     <span><i class="sw" style="background:#9fd3b4"></i>채택 (다음 단계 출발점)</span>
-    <span><i class="sw" style="background:#a9c8ec"></i>현재 후보 / E1 진행 중</span>
+    <span><i class="sw" style="background:#a9c8ec"></i>현재 후보 (배포 비교 중)</span>
     <span><i class="sw" style="background:#d9dcd9"></i>대체됨 (다음 세대로 넘어감)</span>
     <span><i class="sw" style="background:#f2b8b0"></i>실패 · 중단</span>
     <span><i class="sw" style="background:#f4dc9a"></i>시작점 · 학습 기록 없음</span>
@@ -82,9 +82,16 @@ flowchart TD
   G21 -- resume --> G21R["재시도 8000·8100<br/>4096 · 8001→8407 · 3G<br/>fused SDPA 원인 확인"]:::fail
   G21R -- resume --> G26["GAST v2.1 math SDPA<br/>4096 · 8401→30000 · 3G onvlm2<br/>Top-1 26123 (10-13 기본)"]:::ok
 
-  G21 -- "2000 warm start" --> RI["Ray+IR 2769<br/>1024 · 0→5000 · 1G onvlm2<br/>E1 v25or 갭 99.0% · 카메라+필터 94.2%"]:::cur
-  G26 -- "26123 warm start" --> RIL["Ray+IR 갭 50% 2836<br/>1024 · 0→5000 · 1G 로컬<br/>E1 진행 중"]:::cur
-  ARM4 -- "blind_init" --> RID["Ray+IR 갭 50% 3906<br/>1024 · 0→5000 · 1G 90.111<br/>지형 인코더 새로 · E1 진행 중"]:::cur
+  G21 -- "2000 warm start (conv 2→3ch)" --> RI["Ray+IR 2769<br/>1024 · 0→5000 · 1G onvlm2<br/>E1 v25or 갭 99.0% · 카메라+필터 94.2%"]:::ok
+  G26 -- "26123 warm start" --> RIL["Ray+IR 갭 50% 2836<br/>1024 · 0→5000 · 1G 로컬<br/>E1 v25or 갭 87.2%"]:::old
+  ARM4 == "blind_init (45 복사 · 지형 24 새로 · latent head 0)" ==> RID["<b>원래 3906</b> · Ray+IR 갭 50%<br/>1024 · 0→5000 · 1G 90.111 · SHA f3e7afe5<br/>E1 v25or 96.8% · 카메라+필터 96.2% · 계단 100%<br/>MuJoCo depth_ir 10/12"]:::cur
+
+  RID == "aug149 strict resume +2000<br/>(매퍼 오차 증강)" ==> A39["A3906 · 90.111<br/>E1 camf 갭 98.7~100%"]:::old
+  A39 --> A39T["5737 top1<br/>MuJoCo 1/5 (oracle 2/6) · 탈락"]:::fail
+  A39 --> A39M["4999 · l1500"]:::old
+  A39 --> A39L["l2000 (=5906)<br/>MuJoCo depth_ir 10/12 · 3906과 동률"]:::cur
+  RI -- "aug149 strict resume +2000" --> A27["A2769 top1 3815 · onvlm2<br/>MuJoCo depth_ir 11/12"]:::cur
+  RI -- "증강 없이 +2000 (대조군)" --> C27["C2769 top2 4146 · onvlm2<br/>E1 ≈ A2769"]:::old
 
   classDef ok fill:#9fd3b4,stroke:#2f6f5e,color:#10221a
   classDef cur fill:#a9c8ec,stroke:#2d5d8f,color:#0f1d2c
@@ -117,7 +124,7 @@ flowchart TD
   S34 -- "시각 경로 복사" --> V3["v3 belief GRU s42·s7<br/>32 · 0→50000 · 1G 90.111<br/>E1 40k 75.9/77.8% · 보류"]:::old
   B3 --> ARMS["+8k 팔 C·B1·B2·B4<br/>32 · +8000 · 90.111<br/>E1 58~78%, 모두 불통과"]:::fail
   V3 --> ARMV["+8k 팔 V3-C·V3-B1<br/>32 · +8000 · 90.111<br/>76.0 / 72.6%, 불통과"]:::fail
-  RIX["Ray+IR 2769 (LiDAR 직결)"]:::cur -. "학생 없이 v25or 지도 직접 입력" .-> NOS["학생 불필요 검토 중"]:::cur
+  RIX["Ray+IR 교사 (3906 · 2769 계열)"]:::cur -. "학생 없이 depth+IR → camfilter136 → v25or 지도 직접 입력" .-> NOS["교사 직결 배포 (학생 없음)"]:::cur
 
   classDef ok fill:#9fd3b4,stroke:#2f6f5e,color:#10221a
   classDef cur fill:#a9c8ec,stroke:#2d5d8f,color:#0f1d2c
@@ -129,6 +136,9 @@ flowchart TD
 <section style="display:grid;gap:8px">
   <h2>읽을 때 주의할 점</h2>
   <ul>
+    <li><b>원래 3906 = 현재 기준선.</b> 우리 ARM4 블라인드 DWB-38000(c6cfe178)에서 blind_init으로 시작해 Ray+IR(레이캐스트 가시성 + IR 채널) + GAST 8프레임 기억 + 갭 50% 지형으로 5000 이터 학습. 구조·방법은 <code>gd_lab_vrl/docs/design/GAST_RAYIR_TEACHER_DESIGN_20261018.md</code>.</li>
+    <li><b>aug149 (10-17~18).</b> 3906·2769를 strict resume으로 +2000 이터, actor 입력에만 v25or 매퍼 오차(deepest-of-5 pit 확장, 군집 unknown) 증강. A3906은 Isaac E1은 좋아졌지만 MuJoCo depth_ir에서 l2000이 원래 3906과 동률(10/12), top1 5737은 1/5로 탈락. A2769_top1이 11/12로 가장 좋음. 최종 배포 모델(A2769_top1 vs 원래 3906)은 사용자 결정 대기.</li>
+    <li><b>외력(force4).</b> 200 N × 2 s는 학습 범위(오르막 ≤200 N·≤1 s, 내리막 ≤150 N·≤0.5 s)를 넘음. 3906은 오르막 당김에 가장 약했고(10/20) 26123이 가장 강했음. 150 N × 2 s 반복 측정은 중단 상태.</li>
     <li><b>두 개의 블라인드 뿌리.</b> b1_18 ONNX 계열(17206 → 21068 → GAST 2000·26123 → 2769·2836)과 DWB-38000 계열(BIVT 2-A·Render·Ray 4500·Enhanced, BAVRL, 3906)은 서로 다른 블라인드에서 출발함.</li>
     <li><b>b1_18은 50 Hz ONNX</b>(policy_dt 0.02, Kd 2.5)인데 17206 계열은 100 Hz ARM4 이득으로 학습함. b1_18 자체의 학습 기록은 남아 있지 않음.</li>
     <li><b>같은 이름 다른 모델.</b> DWB-38000(c6cfe178)은 onvlm2 ARM4 블라인드 런의 model_38000이고(SHA로 확인), 90.111의 ARM2 model_38000(c1d451f4)과 다름.</li>
@@ -145,6 +155,7 @@ flowchart TD
     <li>CVTT·BIVT(38000 계열): onvlm2 <code>gd_lab_vrl_old/logs/vision_rbq10_dreamwaq/arm_4/</code>, 로컬 <code>archive/gd_lab_vrl_checkpoints_20261007/teachers/</code></li>
     <li>b1_18 계열 ①~③: 로컬 <code>gd_lab_vrl/logs/vision_rbq10_dreamwaq/arm_4/2026-10-03_*_dwb_v3_6_21_b1_18_ray_*</code></li>
     <li>Clean·v2·GAST v2.1: onvlm2 <code>gd_lab_vrl_worktrees/{bivt-ray-ddp-newcam-17206, teacher-v2-20261007, gast-v21-20261007}</code></li>
+    <li>aug149: <code>gd_lab_vrl</code> 브랜치 <code>aug149-mapper-aug</code>(04813ed), 배포 번들 <code>gd_rbq10_deploy_vrl/resources/policy/gast/gast_rayir_*_aug149_irinput_20261018</code>, MuJoCo 기록 <code>records/gapprefix_depthir_*_20261018</code></li>
     <li>Ray+IR: onvlm2 <code>gast-rayir-20261014</code>, 로컬 <code>archive/aux_worktrees/update135_gap50</code>, 90.111 <code>gast-rayir-gap50-20261015</code></li>
     <li>학생: 로컬 <code>archive/aux_worktrees/update37_b3</code>, 90.111 <code>gd_lab_vrl_worktrees/update51_student_v3</code>, <code>transfer_collab_20261009/update110_arms</code></li>
   </ul>
