@@ -1,0 +1,6 @@
+stage: B
+trainable: configs/gast_nav/trainable_A.yaml
+max_iterations: 7000
+difficulty_range: [0.0, 1.0]
+moving_cylinder: false
+inertia_scale: 1.0
