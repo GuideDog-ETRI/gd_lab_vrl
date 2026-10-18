@@ -1,0 +1,20 @@
+{
+  "src/gd_lab/gast_nav/actor_critic.py": "65a7de86936a6b88996fcec0c865fec46b621b0c77b961171a49ea513bfb04f1",
+  "src/gd_lab/gast_nav/migration.py": "bcdef026914846096cb30a915478801d14e416002c1b185f6a8d5ae7e4898fcb",
+  "src/gd_lab/gast_nav/trainable.py": "325d62ba53aece5c22f4a0114fef24636bb5aaa7f53323af5641e7f90ae71fff",
+  "src/gd_lab/gast_nav/ppo.py": "973d66f11bf489ffe934b9804bea18d106d678b56d6fd294d1adc4c27f6ab635",
+  "src/gd_lab/gast_nav/commands.py": "3a4db0542799c7b2511f42ea5c5338024a96888d1cdb579ca85905de69711b23",
+  "src/gd_lab/gast_nav/landing_fsm.py": "20ef7f414cf1228aa35d6141824f78bd32769ba1c4570d2c9adc156d6b076bc5",
+  "src/gd_lab/gast_nav/supervisor.py": "4e9828981281ef55d68069077ef55916508d93020029c8d582db6aa27dc5477a",
+  "src/gd_lab/gast_nav/POLICY_API.md": "3919d4287f692cf253a3024efa4fc08b4299d27edbae1d2a4cc83c40a026278c",
+  "configs/gast_nav/runtime.yaml": "5b677cad97da3ad92043c37a0147f367b6de1d59308cf27945a7fd2f84386098",
+  "configs/gast_nav/source_3906.yaml": "7989c03f1522a5a2f1fb6243ceb37b50c2dc78c8145f47f797df933ca264729b",
+  "configs/gast_nav/trainable_A.yaml": "42487f04e27d0b99141b5428d742a2c6bbfca440cd14be58f6a4821655d90c96",
+  "configs/gast_nav/trainable_A0.yaml": "d53caa40df1be3929c1cab825b4bf45525766f79df46db942f19df09ad6a7d87",
+  "scripts/gast_nav/run_cpu_tests.sh": "b81583c3c1e03a1c34bc4f83cdc0725c75106443bbe99b344567bffecf1d74f9",
+  "tests/gast_nav/cpu_fixture.py": "46a0b606aebb98af67af133508317e6fce618302e4815846e5233f36a65058ce",
+  "tests/gast_nav/test_policy_control.py": "ab3c577ed36fab962b773abb1c1f9197ad908fd18d695808d332c671e20dabdf",
+  "tests/gast_nav/test_policy_model.py": "02002d5ff294a0026df0404e7aae5af5ab500556a301f1ef366ffbe154c97ba8",
+  "tests/gast_nav/test_policy_ppo.py": "65b254ba87fe7693128c1008743cdc10c1faa2313f56532de7bc7024759a2efa",
+  "schema.py (read-only reference)": "ac76b59eed80b1ddf53388c1d5cfd7b503f7ab5f7c1abc642b063309b97ca235"
+}

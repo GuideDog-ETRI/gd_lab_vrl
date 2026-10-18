@@ -1,0 +1,7 @@
+stage: A
+train_prefixes: ['']
+old_lr_scale: 0.1
+old_stats: true
+new_stats: true
+cenet_step: true
+aux_step: true
