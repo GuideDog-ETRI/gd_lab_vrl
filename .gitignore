@@ -16,3 +16,5 @@ wandb/
 *.safetensors
 *.mp4
 *.webm
+archive/update149_validation/mplconfig/
+archive/update149_validation/pytest-of-user/
