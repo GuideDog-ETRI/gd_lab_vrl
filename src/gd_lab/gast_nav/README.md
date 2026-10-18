@@ -10,4 +10,4 @@
 | `tests/gast_nav/` | CPU 단위 시험, `golden/` 기준 입출력 |
 | `configs/gast_nav/` | 수치 설정 (trainable manifest, 감독기·FSM 설정) |
 
-상태: 구현 중 (UPDATE159). 학습은 아직 하지 않는다.
+상태: 1차 구현 완료 (UPDATE159): 지도 쪽(C2)과 정책 쪽(C1·C3·C4) 모듈과 CPU 시험 123개. 실행: `bash tests/gast_nav/run_cpu.sh`. Isaac 장면·보상·학습 실행기는 아직 없다. 학습은 하지 않았다.
