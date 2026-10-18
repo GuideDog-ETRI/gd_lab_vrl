@@ -89,22 +89,14 @@ def build_scene(kind, difficulty, cfg=None, *, seed=None):
         if threshold > t['geometry_epsilon']: box((0.,0.,threshold/2),(depth/2,width/2,threshold/2),kind='step')
         length=c['route_length']; route=((-length/2,0.),(length/2,0.)); segments=(('PASSAGE',0.,length),); nominal=size[1]
     elif kind == 'nav_turn_room':
-        c=settings['turn_room']; width=_narrow(c['width'],difficulty); length=_narrow(c['length'],difficulty)
-        for side in (-1,1):
-            box((side*(length+thick)/2,0.,wall_h/2),(thick/2,(width+2*thick)/2,wall_h/2),kind='wall')
-            box((0.,side*(width+thick)/2,wall_h/2),(length/2,thick/2,wall_h/2),kind='wall')
-        for _ in range(_count(rng,c['box_count'])):
-            extent=_uniform(rng,c['box_length']); depth=_uniform(rng,c['box_depth']); h=_uniform(rng,c['box_height']); side=rng.choice([-1,1])
-            x=_uniform(rng,(-max(0.,length-extent)/2,max(0.,length-extent)/2))
-            candidate=StaticBox((x,float(side*(width-depth)/2),h/2),(extent/2,depth/2,h/2),0.,'box')
-            if point_box_distance((0.,0.),candidate) >= c['spawn_clearance']:
-                box(candidate.center,candidate.half,kind='box')
-        for _ in range(_count(rng,c['pillar_count'])):
-            p=_uniform(rng,c['pillar_width']); side=rng.choice([-1,1])
-            box((side*(length-p)/2,0.,wall_h/2),(p/2,p/2,wall_h/2),kind='pillar')
-        radius=max(0.,min(point_box_distance((0.,0.),b) for b in obstacles))
-        turn_spot=((0.,0.),radius)
-        length_route=c['route_length']; route=((-length_route/2,0.),(length_route/2,0.)); segments=(('TURN_SPOT',0.,length_route),); nominal=width
+        from .turn_clutter import build_turn_clutter
+        clutter,route,nominal,radius=build_turn_clutter(difficulty,level,rng,settings,wall_h)
+        for primitive in clutter:
+            box(primitive.center,primitive.half,primitive.yaw,primitive.kind)
+        turn_spot=(route[-1],radius)
+        route_length=math.dist(route[0],route[-1])
+        segments=(('TURN_SPOT',0.,route_length),)
+
     else:
         c=settings['stairs']; width=_narrow(c['width'],difficulty); rise=c['rise'][0]+difficulty*(c['rise'][1]-c['rise'][0])
         run=_uniform(rng,c['run']); steps=_count(rng,c['steps']); flat=_narrow(c['landing_length'],difficulty); top=steps*rise

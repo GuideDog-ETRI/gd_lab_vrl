@@ -2,7 +2,9 @@
 from pathlib import Path
 import yaml
 from isaaclab.utils import configclass
-from isaaclab.managers import RewardTermCfg
+from isaaclab.managers import RewardTermCfg, TerminationTermCfg
+from isaaclab.sensors import ContactSensorCfg
+from .person_contact import person_contact_termination, person_invalid_termination
 from isaaclab.assets import RigidObjectCfg
 import isaaclab.sim as sim_utils
 from gd_lab.gast.tasks import GastRayIrV21Gap50TeacherCfg
@@ -43,6 +45,14 @@ class GastNavEnvCfg(GastRayIrV21Gap50TeacherCfg):
                 rigid_props=sim_utils.RigidBodyPropertiesCfg(kinematic_enabled=True,disable_gravity=True),
                 collision_props=sim_utils.CollisionPropertiesCfg()),
             init_state=RigidObjectCfg.InitialStateCfg(pos=(0.,0.,-100.)))
+        for link in base['person_contact']['robot_links']:
+            setattr(self.scene,'person_contact_'+link,ContactSensorCfg(
+                prim_path='{ENV_REGEX_NS}/Robot/'+link,
+                filter_prim_paths_expr=['{ENV_REGEX_NS}/NavCylinder'],
+                update_period=self.sim.dt,history_length=self.decimation,
+                max_contact_data_count_per_prim=base['person_contact']['max_contacts_per_prim']))
+        self.terminations.person_contact=TerminationTermCfg(func=person_contact_termination)
+        self.terminations.person_invalid=TerminationTermCfg(func=person_invalid_termination)
         self.actions.joint_pos.class_type=NavJointPositionAction
         self.commands.base_velocity.class_type=NavVelocityCommand
         self.observations.policy.projected_gravity.func=biased_gravity

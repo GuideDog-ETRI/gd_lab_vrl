@@ -93,3 +93,7 @@ observability:
   forward_m: 0.8
   turn_radius_m: 0.65
   sdf_clip_m: 6.0
+person_contact:
+  force_threshold_n: 1.0
+  max_contacts_per_prim: 32
+  robot_links: [trunk, FL_hip, FL_thigh, FL_calf, FL_foot, FR_hip, FR_thigh, FR_calf, FR_foot, RL_hip, RL_thigh, RL_calf, RL_foot, RR_hip, RR_thigh, RR_calf, RR_foot]
