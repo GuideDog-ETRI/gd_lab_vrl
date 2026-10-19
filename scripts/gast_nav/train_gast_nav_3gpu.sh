@@ -13,7 +13,11 @@ case "$mode" in
 esac
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$root"
-export CUDA_VISIBLE_DEVICES=0,1,2 APPTAINERENV_CUDA_VISIBLE_DEVICES=0,1,2
+# GAST_NAV_GPUS: visible GPUs for train mode (default 0,1,2; never GPU 3 on onvlm2). Pilot stays 0,1,2.
+gpus="${GAST_NAV_GPUS:-0,1,2}"
+[[ "$gpus" =~ ^[0-2](,[0-2])*$ ]] || { echo 'GAST_NAV_GPUS must list GPUs 0-2' >&2; exit 2; }
+[[ "$mode" = train || "$gpus" = 0,1,2 ]] || { echo 'only train mode may change GPUs' >&2; exit 2; }
+export CUDA_VISIBLE_DEVICES=$gpus APPTAINERENV_CUDA_VISIBLE_DEVICES=$gpus
 export NCCL_DEBUG=INFO TORCH_DISTRIBUTED_DEBUG=DETAIL TORCH_NCCL_ASYNC_ERROR_HANDLING=1
 export TRAIN_ARM=4 GAST_MATH_SDPA=1 OMNI_KIT_ACCEPT_EULA=YES
 export PYTHONPATH="$root/src" PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=4 MKL_NUM_THREADS=4
@@ -44,7 +48,7 @@ CUDA_VISIBLE_DEVICES=0 APPTAINERENV_CUDA_VISIBLE_DEVICES=0 \
   "${GD_LAB_SIF:?set GD_LAB_SIF}" \
  "${GD_LAB_PYTHON:?set GD_LAB_PYTHON}" -B -m gd_lab.gast_nav.pilot_runner --warmup \
  > "$root/logs/gast/nav_v1/$GAST_RUN_ID/warmup.log" 2>&1
-for rank in 0 1 2; do
+for rank in $(seq 0 $(( $(awk -F, "{print NF}" <<<"$gpus") - 1 ))); do
  mkdir -p "$GAST_TRITON_CACHE_ROOT/$rank"
  cp -a "$GAST_TRITON_CACHE_ROOT/warmup/." "$GAST_TRITON_CACHE_ROOT/$rank/"
 done
@@ -52,7 +56,7 @@ else
  printf '%s\n' '{"backend":"torch","triton_warmup":"skipped"}' > "$root/logs/gast/nav_v1/$GAST_RUN_ID/warmup.log"
 fi
 if [[ "$mode" = warmup ]]; then exit 0; fi
-nproc=3
+nproc=$(awk -F, "{print NF}" <<<"$gpus")
 if [[ "${GAST_NAV_SINGLE_RANK_SMOKE:-0}" = 1 ]]; then
  [[ "$mode" = pilot && " $* " = *" --pilot-smoke "* ]] || exit 2
  nproc=1
