@@ -1,0 +1,14 @@
+{
+  "contract": "appendix D, no R1/R2, map reference CPU fixtures",
+  "minimum_obstacle_diameter_m": 0.05,
+  "minimum_obstacle_height_m": 0.03,
+  "fixtures": [
+    {"id": 1, "test": "test_counterexample1_person_enters_occluded_old_free", "input": {"age_s": 0.2, "object_speed_bound_mps": 1.0, "free_y_extent_m": [-0.2, 0.2]}, "expected": "old footprint erosion makes low-band certificate false without needing a current object hit"},
+    {"id": 2, "test": "test_counterexample2_expired_wall_cannot_be_reused_as_free", "input": {"age_s": 0.6, "ttl_s": 0.5, "wall_x_m": 0.45}, "expected": "UNKNOWN, never known-as-free from occupied history"},
+    {"id": 3, "test": "test_counterexample3_single_unseen_5cm_pillar_cell_not_ignored", "input": {"grid_res_m": 0.05, "unseen_x_extent_m": [0.475, 0.525]}, "expected": "single cell low-band certificate false; unknown area is never a permission threshold"},
+    {"id": 4, "test": "test_counterexample4_one_cell_wide_long_unknown_strip", "input": {"grid_shape_yx": [5, 9], "grid_res_m": 0.05, "unknown_row": 2}, "expected": "observed outer rows do not waive the 1x9 unknown strip"},
+    {"id": 5, "test": "test_counterexample5_gap_support_unknown_never_filled_by_free_rays", "input": {"support": "NaN", "frusta": "valid broad measured volume"}, "expected": "UNKNOWN support means no low-band certificate"},
+    {"id": 6, "test": "test_counterexample6_changed_support_odom_epoch_fail_closed", "input": {"variants": ["support+0.2m", "odom shift+0.1m at evidence boundary", "epoch reset"]}, "expected": "no old free reuse after reference disagreement/out-of-footprint/reset"}
+  ],
+  "scope": "Synthetic sensor-volume and geometry fixtures; not real D4xx calibration, optical detection validation, or an Isaac safety approval. Some tests explicitly use ideal angular error for an isolated geometric property. Deployment defaults stay in free_evidence167.yaml."
+}

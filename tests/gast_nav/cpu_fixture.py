@@ -25,7 +25,7 @@ def observations(n=3):
         'terrain': torch.cat((torch.randn(n, 187), torch.ones(n, 187)), -1),
         'gast_history': history.flatten(1), 'gast_clean': torch.zeros(n, 748),
         'nav_wide': torch.rand(n, 27, 43, 49), 'nav_near': torch.rand(n, 3, 25, 37),
-        'nav_features': torch.rand(n, NAV_FEATURE_DIM), 'nav_privileged': torch.rand(n, 8)}, batch_size=[n])
+        'nav_route_features': torch.rand(n, 3), 'nav_features': torch.rand(n, NAV_FEATURE_DIM), 'nav_privileged': torch.rand(n, 8)}, batch_size=[n])
 
 def policy_pair(obs):
     args = dict(obs=obs, obs_groups={'policy':['policy'], 'critic':['critic']}, num_actions=12,

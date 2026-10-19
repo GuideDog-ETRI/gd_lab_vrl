@@ -1,0 +1,12 @@
+# Default deployment/real setting; no housing cutout has been measured.
+producer168:
+  backend: triton
+  near_m: 0.15  # D4xx minimum optical depth, from vendor_new depth_clip
+  max_m: 5.0
+  epsilon_m: 0.00001
+  self_trunk_aperture: false
+  context: deployment
+  block_width: 8
+  block_height: 8
+# Dimensions supported at and below the required 0.05 m diameter / 0.03 m height.
+# Complete primitive inventory is mandatory. Unsupported collider => invalid env.

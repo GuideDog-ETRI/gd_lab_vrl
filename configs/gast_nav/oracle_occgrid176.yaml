@@ -1,0 +1,12 @@
+# Oracle baseline. No noise/missing/mount/pose error. Actor OBS1 unchanged.
+body_height_m: 0.66 # measured trunk top ~0.61m +0.05m, above observed support
+floor_min_m: 0.03
+cell_m: 0.10 # supported 0.10 / 0.05
+x_min_m: -2.45
+x_max_m: 2.45
+y_min_m: -2.15
+y_max_m: 2.15
+ttl_s: 0.50
+retain_free_across_captures: false
+# Future tuning hooks only; no scheduled learning/start performed.
+noise_stage: oracle # oracle | tuning; explicit perturbation callback for tuning

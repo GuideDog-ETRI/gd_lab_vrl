@@ -1,0 +1,12 @@
+# Supervisor-only UPDATE176. Actor OBS1 is unchanged.
+certification_mode: occupancy_grid
+volume_proof_enabled: false
+sensor_mode: oracle_first_hit
+body_height_m: 0.66
+floor_min_m: 0.03
+cell_m: 0.10
+obstacle_ttl_s: 0.5
+support_ttl_s: 0.5
+margin_source: nav_command
+# Still diagnostic only; unsupported command/posture domains fail closed.
+stopping_model: diagnostic_envelope174

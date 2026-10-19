@@ -1,0 +1,15 @@
+# UPDATE183: explicitly static oracle diagnostic only. Actor/3906 unchanged.
+enabled: false
+context: training_static
+oracle: true
+front_lower_camera_indices: [0, 1]
+obstacle_ttl_s: 0.5
+support_ttl_s: 0.5
+comparison_ttls_s: [0.5, 1.0, 2.0]
+virtual_entry:
+  distance_m: 2.0
+  spacing_m: 0.2
+  turn_speed_mps: 0.4
+  label: '가상 진입 관측(측정된 보행 이력 아님)'
+  skip_collision_pose: true
+  preserve_height_roll_pitch: true

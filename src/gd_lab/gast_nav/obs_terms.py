@@ -5,12 +5,14 @@ verified without loading a simulator. All map coordinates are sample body-yaw.
 """
 import math
 import torch
+from .map_backend import use_triton
 from .map_types import RayBatch, DynamicCapsules, WIDE_GRID
 from .map_config import load_config
 from .ray_geometry import capsule_intersections
 from .support import grow_support, make_seed_mask
 from .obstacle_map import ObstacleMap
 from .near_clearance import build_near, extended_near_grid
+from .map_types import NEAR_GRID
 from .map_inputs import network_inputs
 
 
@@ -94,7 +96,7 @@ def mask_self_returns(rays, self_capsules, *, config=None):
     cfg = config or load_config()
     direction = torch.nn.functional.normalize(rays.directions, dim=-1)
     hit = capsule_intersections(rays.origins, direction, self_capsules, eps=cfg.intersection_epsilon).amin(-1)
-    is_self = hit <= rays.distances
+    is_self = torch.isfinite(hit) & (hit <= rays.distances)
     return RayBatch(rays.origins, direction, torch.minimum(hit, rays.distances), rays.self_hit | is_self)
 
 
@@ -136,7 +138,7 @@ def fit_observed_surface_reference(points, valid, grid, settings):
 
 
 def fit_observed_surface(points,valid,grid,settings):
-    if points.is_cuda and points.dtype==torch.float32:
+    if use_triton(points) and points.dtype==torch.float32:
         from .map_cuda import fit_surface_cuda
         return fit_surface_cuda(points,valid,grid,settings)
     return fit_observed_surface_reference(points,valid,grid,settings)
@@ -162,12 +164,27 @@ class ObservationPipeline:
         self.config=map_config or load_config()
         self.mapper=ObstacleMap(num_envs,device=device,config=self.config)
         self.near=None
+        self.near_state=None;self.near_support_known=None
+        self.near_support_height=None
+        self.certified_no_producer=False
+        self.certified_producer=None
+        self.cert_near_state=self.cert_wide_state=None
+
+    @property
+    def certification_enabled(self):
+        return self.certified_no_producer or self.certified_producer is not None
 
     def reset(self,env_ids):
         self.mapper.reset(env_ids)
+        if self.certified_producer is not None:self.certified_producer.reset(env_ids)
+        if self.cert_near_state is not None:
+            self.cert_near_state[env_ids]=0;self.cert_wide_state[env_ids]=0
         if self.near is not None:
             self.near.unknown[env_ids]=True
             self.near.age_s[env_ids]=torch.inf
+            self.near_state[env_ids]=0
+            self.near_support_known[env_ids]=False
+            self.near_support_height[env_ids]=torch.nan
 
     def capture(self,*,rays,terrain_points,terrain_valid,contact_points,contact_valid,segment,pose,time_ms,capsules=None):
         # Static first returns supply support evidence; self returns never do.
@@ -182,7 +199,24 @@ class ObservationPipeline:
         wide_support=observed_support(*args,WIDE_GRID,self.settings,config=self.config)
         fine_support=observed_support(*args,extended_near_grid()[0],self.settings,config=self.config)
         self.mapper.update(rays,wide_support,pose,time_ms,capsules=capsules)
-        self.near=build_near(rays,fine_support,capsules=capsules,config=self.config)
+        _,pad=extended_near_grid()
+        self.near_support_height=fine_support[:,pad:pad+NEAR_GRID.ny,pad:pad+NEAR_GRID.nx].clone()
+        self.near,self.near_state,self.near_support_known=build_near(rays,fine_support,capsules=capsules,config=self.config,return_evidence=True)
+        if self.certified_no_producer:
+            # Explicit measured-model path. Centre rays carry no volume warranty;
+            # retain occupied hits, but never manufacture volume_valid/free.
+            from .obstacle_map import ray_evidence
+            from .ray_geometry import resolve_first_hits
+            resolved=resolve_first_hits(rays,capsules=capsules,config=self.config)
+            self.cert_wide_state,_=ray_evidence(resolved,wide_support,config=self.config,certified=True)
+            fine_state,_=ray_evidence(resolved,fine_support,grid=extended_near_grid()[0],config=self.config,certified=True)
+            self.cert_near_state=fine_state[...,pad:pad+NEAR_GRID.ny,pad:pad+NEAR_GRID.nx]
+        if self.certified_producer is not None:
+            wide,fine=self.certified_producer.capture(rays=rays,pose=pose,time_ms=time_ms,
+                wide_support=wide_support,fine_support=fine_support,epoch=self.mapper.epoch,
+                capsules=capsules,config=self.config)
+            self.cert_wide_state,self.cert_wide_age=wide
+            self.cert_near_state,self.cert_near_age=fine
         return self.inputs(pose,time_ms)
 
     def inputs(self,pose,time_ms):
@@ -203,3 +237,10 @@ def invalidate_held_rows(wide,near,env_ids):
     wide[env_ids]=0.;wide[env_ids,2::3]=1.
     near[env_ids]=0.;near[env_ids,2]=1.
     return wide,near
+
+
+def replace_latest_command(policy_obs, command, scale):
+    """3906 proprioceptive command observation is scaled, unlike NAV features."""
+    scales=torch.as_tensor(scale,device=command.device,dtype=command.dtype)
+    if scales.shape!=(3,):raise ValueError('command observation scale')
+    policy_obs[:,30:45].reshape(len(command),5,3)[:,-1]=command*scales

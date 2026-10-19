@@ -1,0 +1,8 @@
+# All current collision postures; no empirical pose-domain lookup.
+delay_s: 0.04
+deceleration: 0.5
+angular_deceleration: 1.0 # existing UPDATE167 temporary angular-stop assumption
+gait_margin: 0.04 # per side: (measured lateral width .60 - forward .52)/2
+turn_radius: 0.76
+reverse_overshoot_deg: 3.0 # existing V1 stopping overshoot allowance
+samples: 17 # angular discretization with conservative between-sample padding

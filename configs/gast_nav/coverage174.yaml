@@ -1,0 +1,14 @@
+# Active UPDATE174B / design v0.3.3. No physical sensor type/FoV specification.
+model: v033_assumed_coverage
+hip_x_m: -0.31
+front_origins: [[0.28, 0.0, 0.12], [0.10, 0.0, 0.18]]
+rear_origins: [[-0.39, 0.24, 0.10], [-0.39, -0.24, 0.10]]
+mount_jitter_m: [0.03, 0.03, 0.03]
+angle_jitter_deg: [5.0, 5.0, 10.0]
+chart_divisions: 10
+query_radius_m: 6.0
+numerical_near_m: 0.001
+noise_floor_m: 0.02
+noise_fraction: 0.02
+missing_probability: 0.05
+occluded_block_probability: 0.02

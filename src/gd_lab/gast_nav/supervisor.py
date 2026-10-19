@@ -72,3 +72,45 @@ def predict_horizon(*, map_age_s, compute_actuation_s, stopping_s, speed_mps, cf
     future = compute_actuation_s + stopping_s
     return Horizon(future, cfg['v_person_max'] * (map_age_s + future), cfg['residual_margin_m'],
                    map_age_s > cfg['max_map_age_s'] or speed_mps > cfg['max_speed_mps'])
+
+
+class HoldReasonMetrics:
+    """Executed decision counts. Risk flags overlap; denominators are ticks."""
+    def __init__(self):
+        self.groups = {}
+
+    def add(self, rows):
+        for row in rows:
+            key = tuple(row[k] for k in ('kind', 'requested_mode', 'mode', 'phase', 'handshake'))
+            group = self.groups.setdefault(key, dict(ticks=0, hold=0, reasons={}, sums={}))
+            group['ticks'] += 1
+            group['hold'] += row['controller'] == 'HOLD_3906'
+            reason = row['controller'] + ':' + (row['reason'] or 'OK')
+            group['reasons'][reason] = group['reasons'].get(reason, 0) + 1
+            for name, value in row.items():
+                if isinstance(value, (int, float)):
+                    group['sums'][name] = group['sums'].get(name, 0.) + value
+
+    def snapshot(self):
+        import copy
+        return [dict(zip(('kind', 'requested_mode', 'mode', 'phase', 'handshake'), key),
+                     **copy.deepcopy(value)) for key, value in sorted(self.groups.items())]
+
+
+def required_band_indices(names):
+    """C2.3a explicit configuration; never silently accept an empty certificate."""
+    bands = tuple(name for name, _, _ in schema.BANDS)
+    if not names or len(set(names)) != len(names) or any(name not in bands for name in names):
+        raise ValueError('invalid required_bands')
+    return tuple(bands.index(name) for name in names)
+
+
+def required_observed(state, support_known, required_bands):
+    """Per-cell certificate from measured support and required categorical bands.
+
+    This does not rewrite map states or manufacture free space. Occupied is
+    observed but remains a separate clearance/collision hazard.
+    """
+    indices = required_band_indices(required_bands)
+    return support_known & ((state[:, indices] == schema.FREE) |
+                            (state[:, indices] == schema.OCCUPIED)).all(1)

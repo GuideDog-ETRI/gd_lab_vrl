@@ -2,7 +2,9 @@
 No transport side effects. Caller supplies CLOCK_MONOTONIC ms. Bad packets raise;
 the receiver retains the error and the adapter emits hold (never silent defaults).
 """
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, fields, is_dataclass
+from functools import lru_cache
+from operator import attrgetter
 import json
 import math
 import struct
@@ -25,6 +27,7 @@ class RouteHint:
     route_axis_yaw: float
     dist_to_next_m: float
     next_segment_type: str
+    route_lateral_error_m: float | None = None  # optional for old NAV1 decoding only
 
 @dataclass(frozen=True)
 class Release:
@@ -73,6 +76,24 @@ def _finite(value):
     if isinstance(value, (list, tuple)): return all(_finite(v) for v in value)
     return not isinstance(value, float) or math.isfinite(value)
 
+@lru_cache(maxsize=32)
+def _field_getter(cls):
+    names=tuple(f.name for f in fields(cls))
+    return names,attrgetter(*names) if names else None
+
+def _finite_command_tree(value):
+    # Same leaves as asdict, without allocating/deepcopying the immutable tree.
+    if type(value) is float:return math.isfinite(value)
+    if type(value) in (int,str,bool,type(None)):return True
+    if is_dataclass(value) and not isinstance(value,type):
+        names,getter=_field_getter(type(value))
+        if not names:return True
+        values=getter(value)
+        return all(_finite_command_tree(v) for v in (values if len(names)>1 else (values,)))
+    if isinstance(value,dict):return all(_finite_command_tree(v) for v in value.values())
+    if isinstance(value,(list,tuple)):return all(_finite_command_tree(v) for v in value)
+    return not isinstance(value,float) or math.isfinite(value)
+
 def _id(value):
     return type(value) is int and value >= 0
 
@@ -82,9 +103,11 @@ def validate_command(cmd, cfg, now_ms):
     if cmd.route_hint and any(type(v) not in (int, float) for v in
                               (cmd.route_hint.route_axis_yaw, cmd.route_hint.dist_to_next_m)):
         raise ValueError('HINT_NUMERIC_TYPE')
+    if cmd.route_hint and cmd.route_hint.route_lateral_error_m is not None and type(cmd.route_hint.route_lateral_error_m) not in (int, float):
+        raise ValueError('HINT_LATERAL_NUMERIC_TYPE')
     if cmd.landing_release and type(cmd.landing_release.timestamp_ms) not in (int, float):
         raise ValueError('RELEASE_TIME_TYPE')
-    if not _finite(asdict(cmd)): raise ValueError('NONFINITE')
+    if not _finite_command_tree(cmd): raise ValueError('NONFINITE')
     if cmd.requested_mode not in schema.MODES or type(cmd.requested_go) is not bool:
         raise ValueError('MODE_OR_GO')
     if not all(_id(v) for v in (cmd.seq, cmd.manoeuvre_id, cmd.route_epoch, cmd.heartbeat)):

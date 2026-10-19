@@ -1,0 +1,10 @@
+# review-approved training/C-only assumptions; NOT deployment defaults.
+context: training_static_c
+historical_obstacle_speed_bound_mps: 0.0
+max_captures: 6
+# C vx cap 0.6 m/s + 0.4 m/s tracking/transient allowance.
+linear_speed_bound_mps: 1.0
+# Verified command cap 1.0 rad/s + 0.5 rad/s transient allowance.
+yaw_rate_bound_radps: 1.5
+# These are diagnostic operating bounds, not measured hard physical guarantees.
+# Violation at a physics sample invalidates retained evidence. TTL remains 0.5 s.

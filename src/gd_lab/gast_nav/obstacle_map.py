@@ -1,12 +1,14 @@
 """C2 first-hit/sub-bin evidence and batched three-capture history.
 
-Free is certified only when *every* band sub-bin was traversed in this capture.
-No partial free evidence is promoted by combining unrelated poses or captures.
+Legacy actor mode uses complete sub-bin traversal in one capture. UPDATE167
+opt-in certification instead proves full micro-box containment in measured
+free volumes; old partial ray bits are never promoted into free evidence.
 Occupied carry is conservative up to TTL; history retains each sample support.
 """
 from dataclasses import replace
 import math
 import torch
+from .map_backend import use_triton
 from . import schema as S
 from .map_config import load_config
 from .map_types import WIDE_GRID, MapFrame
@@ -86,11 +88,62 @@ def ray_evidence_reference(resolved, support_height, *, grid=WIDE_GRID, config=N
     return result.reshape(n, len(S.BANDS), grid.ny, grid.nx), tuple(diagnostics)
 
 
-def ray_evidence(resolved, support_height, *, grid=WIDE_GRID, config=None):
-    if support_height.is_cuda and support_height.dtype==torch.float32:
+def _current_hit_state(resolved,support_height,grid,cfg):
+    """Point first-hit occupancy only; no legacy free or sub-bin traversal."""
+    n=resolved.origins.shape[0]
+    if support_height.shape!=(n,grid.ny,grid.nx) or support_height.device!=resolved.origins.device:
+        raise ValueError('support/grid shape or device')
+    support=support_height.flatten(1)
+    known=torch.isfinite(support)&(support>=cfg.min_z_m)&(support<=cfg.max_z_m)
+    end=resolved.origins+resolved.directions*resolved.distances[...,None]
+    ix=torch.floor((end[...,0]-grid.x0)/grid.res+.5).long()
+    iy=torch.floor((end[...,1]-grid.y0)/grid.res+.5).long()
+    valid=resolved.occupied_hit&(ix>=0)&(ix<grid.nx)&(iy>=0)&(iy<grid.ny)
+    index=iy.clamp(0,grid.ny-1)*grid.nx+ix.clamp(0,grid.nx-1)
+    z=end[...,2]-support.gather(1,index)
+    out=[]
+    for b,(_,lo,hi) in enumerate(S.BANDS):
+        inside=(z>=lo)&((z<hi) if b<2 else (z<=hi))
+        count=torch.zeros_like(support,dtype=torch.int64)
+        count.scatter_add_(1,index,(valid&known.gather(1,index)&inside).long())
+        out.append(torch.where(count>0,S.OCCUPIED,S.UNKNOWN).to(torch.uint8).reshape(n,grid.ny,grid.nx))
+    return torch.stack(out,1)
+
+
+def ray_evidence(resolved, support_height, *, grid=WIDE_GRID, config=None,
+                 measurement=None, certified=False, return_age=False):
+    """Legacy actor path unchanged; opt-in certified frusta replace sub-bin free.
+
+    certified=True without measured frusta => UNKNOWN except current hit
+    OCCUPIED. A sensor footprint is never inferred from centre rays. The
+    certified mode returns an empty sub-bin diagnostic tuple. Volume fractions
+    are available from volume_free_proof and never grant partial free.
+    return_age adds an internal tensor, never a wire/schema field.
+    """
+    cfg=config or load_config()
+    # The certified proposal is a Torch reference even on CUDA; do not silently
+    # dispatch to the old sub-bin Triton kernel and call that a volume proof.
+    measured=certified or measurement is not None
+    if measured:
+        state,diag=_current_hit_state(resolved,support_height,grid,cfg),()
+    elif use_triton(support_height) and support_height.dtype==torch.float32:
         from .map_cuda import ray_evidence_cuda
-        return ray_evidence_cuda(resolved,support_height,grid,config or load_config())
-    return ray_evidence_reference(resolved,support_height,grid=grid,config=config)
+        state,diag=ray_evidence_cuda(resolved,support_height,grid,cfg)
+    else:
+        state,diag=ray_evidence_reference(resolved,support_height,grid=grid,config=cfg)
+    age=torch.where(state!=S.UNKNOWN,0.,torch.inf)
+    if measured:
+        occupied=state==S.OCCUPIED
+        if measurement is None:
+            free=torch.zeros_like(occupied);free_age=torch.full_like(age,torch.inf)
+        else:
+            from .free_evidence167 import volume_free_proof, limit_by_current_returns
+            measurement=limit_by_current_returns(measurement,resolved)
+            proof=volume_free_proof(support_height,measurement,grid=grid,config=cfg)
+            free,free_age=proof.free,proof.age_s
+        state=torch.where(occupied,S.OCCUPIED,torch.where(free,S.FREE,S.UNKNOWN)).to(torch.uint8)
+        age=torch.where(occupied,0.,torch.where(free,free_age,torch.inf))
+    return (state,diag,age) if return_age else (state,diag)
 
 
 class ObstacleMap:
@@ -121,7 +174,7 @@ class ObstacleMap:
             updated.append(replace(frame, state=state, age_s=age, support=support))
         self.history = updated
 
-    def update(self, rays, support_height, sample_pose, sample_time_ms, *, boxes=None, capsules=None):
+    def update(self, rays, support_height, sample_pose, sample_time_ms, *, boxes=None, capsules=None, measurement=None, certified=False):
         """Capture -> MapFrame, keeping up to three capture-local snapshots."""
         from .warp import warp_categorical
         from .packets import age_codes, age_upper_s
@@ -131,14 +184,17 @@ class ObstacleMap:
             raise ValueError('invalid pose/time')
         if sample_pose.device != self.device or support_height.device != self.device:
             raise ValueError('map device mismatch')
+        if measurement is not None:
+            if not torch.allclose(measurement.pose.to(sample_pose),sample_pose,atol=self.config.intersection_epsilon,rtol=0) or not torch.equal(measurement.now_ms,sample_time_ms) or not torch.equal(measurement.epoch,self.epoch):
+                raise ValueError('measurement/current frame pose/time/epoch mismatch')
         resolved = resolve_first_hits(rays, boxes=boxes, capsules=capsules, config=self.config)
-        state, _ = ray_evidence(resolved, support_height, config=self.config)
+        state, _, evidence_age = ray_evidence(resolved, support_height, config=self.config, measurement=measurement, certified=certified, return_age=True)
         current_occupied = state == S.OCCUPIED
         support = encode_support(support_height, config=self.config)
         world_support = support_height+sample_pose[:, 2, None, None]
         known_support = support != S.SUPPORT_UNKNOWN
         state = torch.where(known_support[:, None], state, S.UNKNOWN)
-        age = torch.where(state != S.UNKNOWN, 0., torch.inf)
+        age = torch.where(state != S.UNKNOWN, evidence_age, torch.inf)
         if self.history:
             prev = self.history[0]
             elapsed = (sample_time_ms-prev.sample_time_ms).double()/1000

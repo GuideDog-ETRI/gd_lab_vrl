@@ -1,6 +1,7 @@
 """Independent raw-ray 5 cm occupancy and unsigned cell-area clearance (C2.4)."""
 import math
 import torch
+from .map_backend import use_triton
 from . import schema as S
 from .map_config import load_config
 from .map_types import Grid, NearFrame
@@ -50,7 +51,7 @@ def clearance_reference(state, *, grid, config=None):
 
 
 def clearance_from_state(state, *, grid, config=None):
-    if state.is_cuda:
+    if use_triton(state):
         if state.ndim!=4 or state.shape[1:]!=(3,grid.ny,grid.nx):raise ValueError('fine state shape')
         if bool((state>S.OCCUPIED).any()):raise ValueError('reserved state')
         from .map_cuda import clearance_cuda
@@ -58,21 +59,37 @@ def clearance_from_state(state, *, grid, config=None):
     return clearance_reference(state,grid=grid,config=config)
 
 
-def build_near(rays, fine_support_height, *, boxes=None, capsules=None, config=None):
+def build_near(rays, fine_support_height, *, boxes=None, capsules=None, config=None, return_evidence=False, measurement=None, certified=False, return_proof=False):
     """Raw rays + INDEPENDENT observed support on ROI+0.5m -> NearFrame.
 
     fine_support_height must have [N,45,57]; this function never upsamples wide
-    occupancy. To preserve age semantics this initial implementation builds each
-    fine capture from current rays only (no hidden persistent stale evidence).
+    occupancy. Legacy mode builds each fine capture from current rays only. UPDATE167
+    opt-in measurement uses explicit timestamped frusta and preserves their
+    oldest necessary age; no implicit stale/free cache is introduced.
     """
     cfg = config or load_config()
+    if return_proof and not (certified or measurement is not None):
+        raise ValueError('return_proof requires certified=True or measurement')
     grid, pad = extended_near_grid()
     resolved = resolve_first_hits(rays, boxes=boxes, capsules=capsules, config=cfg)
-    state, _ = ray_evidence(resolved, fine_support_height, grid=grid, config=cfg)
+    state, _, evidence_age = ray_evidence(resolved, fine_support_height, grid=grid, config=cfg, measurement=measurement, certified=certified, return_age=True)
     metres = clearance_from_state(state, grid=grid, config=cfg)
     region = (slice(None), slice(pad, pad+S.NEAR_NY), slice(pad, pad+S.NEAR_NX))
     unknown = (state == S.UNKNOWN).any(1)[region]
     code = (metres[..., pad:pad+S.NEAR_NY, pad:pad+S.NEAR_NX]/S.NEAR_CLEAR_MAX*255).round().clamp(0, 255).to(torch.uint8)
     observed = (state != S.UNKNOWN).any(1)[region]
     age = torch.where(observed, 0., torch.inf)
-    return NearFrame(code, unknown, age)
+    if certified or measurement is not None:
+        # Retain the oldest necessary band age. All-band unknown stays unchanged.
+        age = evidence_age.amax(1)[region]
+    frame = NearFrame(code, unknown, age)
+    if return_proof:
+        # Supervisor low-band proof consumes state/support/age independently;
+        # it must not reinterpret the policy's all-band unknown bit.
+        return frame, state[..., pad:pad+S.NEAR_NY, pad:pad+S.NEAR_NX], (torch.isfinite(fine_support_height[region]) & (fine_support_height[region]>=cfg.min_z_m) & (fine_support_height[region]<=cfg.max_z_m)), evidence_age[..., pad:pad+S.NEAR_NY, pad:pad+S.NEAR_NX]
+    if return_evidence:
+        # Internal evidence only: preserve the all-band policy/wire unknown bit.
+        cropped = state[..., pad:pad+S.NEAR_NY, pad:pad+S.NEAR_NX]
+        support = torch.isfinite(fine_support_height[region])
+        return frame, cropped, support
+    return frame

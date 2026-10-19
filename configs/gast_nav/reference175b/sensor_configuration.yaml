@@ -1,0 +1,162 @@
+# GuideDog 센서 외부 파라미터 (extrinsics) — 실로봇이 정본, 시뮬레이터가 이를 따른다.
+#
+# ┌─ 이 파일 하나가 아래 전부를 결정한다 ──────────────────────────────────────────┐
+# │ sim  : sim_docker/workspace/scripts/run_rbq10_sim.py                  │
+# │        → USD 센서 prim pose (= 점군/이미지가 나오는 좌표계) + 발행 static TF  │
+# │ gdm  : gdm_planning/launch/rbq.launch.py                              │
+# │        → static TF 발행 + 노드 센서 오프셋 파라미터                         │
+# └───────────────────────────────────────────────────────────────────────┘
+#
+# 이 파일의 정본 위치는 **gdm_planning 패키지 안**이다:
+#   gdm_docker/workspace/src/gdm_planning/resource/sensor_configuration.yaml
+# gdm 쪽은 `share/gdm_planning/resource/` 로 설치된 사본을 ament 로 찾아 읽는다 —
+# 실로봇 docker 는 마운트 구성이 달라도 패키지만 있으면 되므로 이게 가장 안전하다.
+# sim 쪽은 `~/GuideDog/sensor_configuration.yaml`(→ 이 파일로의 심볼릭 링크)을
+# sim_docker/compose.yml 이 /opt/guidedog/sensor_configuration.yaml 로 :ro 마운트한다.
+#
+# 따라서 실로봇 장착이 바뀌면 **이 파일만 고치고** gdm 은 `cbuild gdm_planning`,
+# sim 은 재시작하면 양쪽이 같이 따라온다.
+# 값을 여기 말고 다른 곳에 적지 말 것 — 그렇게 갈라진 사본 4개를 합친 파일이다.
+#
+# 규약: 회전은 ROS 쿼터니언 (x, y, z, w). 링크 프레임 축은 x=전방, y=좌, z=상.
+#       xyz 단위 m. 각 transform 은 parent 기준 상대 pose.
+
+# base_link 지면高 [m] — 지면 제거·센서 지면高 계산의 기준.
+# (RBQ10 서 있는 자세. sim 스폰 z 와 같은 값이며 실측 정지 자세는 ≈0.518.)
+base_height: 0.55
+
+transforms:
+
+  # Ouster OS1-64 — /ouster/points, /ouster/scan
+  # 2026-09-30 실측 (센서 기구부 재설치 후, bag ROSBAG/calib_extrinsic_20260930:
+  #   316 s, 186 m 주행 + 계단 오르내림, odom 50 Hz / ouster 10 Hz / livox 20 Hz).
+  #   · x, yaw : hand-eye (다리 odom ↔ ouster deskew LiDAR odometry, odom 스케일 동시추정)
+  #              x 0.276~0.300 (창 길이·구간별), yaw +0.44~+0.55° → x 0.285, yaw +0.50°.
+  #              y 는 0.00~0.02 로 0 과 구분 안 됨 → 0.
+  #   · pitch  : +0.74° (센서 하향). 정지 6구간 중력(ouster IMU vs odom 자세) +0.72~+0.77°,
+  #              hand-eye +0.60~+0.85° 두 독립 경로 일치.
+  #   · roll   : 0. hand-eye -0.03~-0.31°, livox IMU 경유 +0.1°. (ouster IMU 는 +0.93° 를
+  #              주지만 지면·livox 와 모순 → 가속도계 bias 로 판단해 버렸다.)
+  #   · z      : hand-eye 로는 관측 불가(계단에서 odom/LO 고도가 서로 어긋남). 평지 스캔 104개의
+  #              지면 평면으로 센서 지면高 중앙값 0.5965 m (IQR 0.591~0.611) → base_height 0.55
+  #              기준 z = 0.046. (재설치 전 0.05 대비 "약 5mm 하강" 보고와 일치.)
+  #   · 불확도 : x ±0.01, yaw ±0.1°, pitch ±0.1°, z ±0.01(base_height 정의에 종속).
+  #   · 부수 발견: 다리 odom 은 이동거리를 LiDAR 대비 약 8% 짧게 낸다 (scale 0.92).
+  # 이전 값 (0.3, 0, 0.05, 무회전) 은 장착 설계값이었다.
+  # 2026-08-21 확정: 이 파일이 참값 (trav_map `run.sh` 의 (0,0,0.3) 폴백은 폐기 예정).
+  os_sensor:
+    parent: base_link
+    xyz: [0.285, 0.0, 0.046]
+    quat_xyzw: [-0.000028177, 0.006457612, 0.004363218, 0.999969630]   # rpy [0, +0.74°, +0.50°]
+
+  # Intel RealSense D455 — /camera/camera/color/*, /camera/camera/aligned_depth_to_color/*
+  # 출처: xyz 는 원래 trav_map `run.sh` 의 EXTERNAL_TF 모드 값에서 가져왔다
+  #      (os_sensor→camera_link, z=-0.015822 → 카메라가 Ouster 퍽 아래 1.58cm).
+  #      회전은 calib_r64.txt 외부 캘리브레이션 그대로 — pitch 14.76° 하향.
+  #      2026-08-21 부터 방향이 뒤집혔다: trav_map `run.sh` 가 이 파일을 읽는다
+  #      (`$GUIDEDOG_SENSOR_CONFIG` → `share/gdm_planning/resource/`). 즉 이 파일이
+  #      단일 정본이고, run.sh 의 상수는 gdm_planning 이 없을 때의 폴백일 뿐이다.
+  # parent 가 os_sensor 인 이유: 카메라가 Ouster·Livox 와 같은 센서 헤드에 붙어 있으니
+  #      헤드를 하나의 강체로 유지한다 (livox_frame 과 같은 규약).
+  # 2026-10-06 재보정 (Thor rbq10) — 목표: D455 와 ouster 의 평면(특히 바닥)이 겹치게.
+  #   위치 = 기구 설계값 (실측 근거):
+  #     x 0.1205 : ouster 중심 → D455 앞면 12.5 cm (줄자, 벽까지 160/147 cm 차 13 cm 와 일치)
+  #                − 깊이 원점이 앞면 4.65 mm 안쪽 (realsense2_description _d455, 15° 숙임 반영 4.5 mm)
+  #     y 0.0475 : D455 본체 중심 = ouster 중심 (기구 설계), camera_link = 왼쪽 IR = 중심 +47.5 mm
+  #     z -0.0147: ouster 바닥면(os_sensor 원점) = D455 가장 높은 곳(윗면 뒤 모서리, 원점 위 19.7 mm) → -0.0197 이
+  #                설계값이나, 재기동 후 실측에서 바닥이 1.2~3.5 m 전 구간 -5 mm 일정(평행) → +5 mm 보정
+  #                (기구 설계값을 넣은 적이 없어 제작 공차로 판단, 사용자 결정).
+  #   회전 = 위치 고정·회전만 점-평면 최소제곱. ouster 는 **lidar_fix 가 옮기지 않은 실제 반사점**,
+  #     비교는 **두 센서 공통 구간만** (코너 3.76 m, 3세트). pitch 15.16° ≈ 기구 설계 15°.
+  #     결과 평면 오차: 바닥 -5 mm 일정 → z 보정 후 ≈0 (재검증 필요), 벽 -4 ~ +21 mm (2.6~3.3 m, D455 거리
+  #     오차라 extrinsic 으로 못 줄임 → D455 Tare/On-Chip 사안).
+  #   ⚠ 같은 날 먼저 넣었던 pitch 15.99° 안은 lidar_fix 출력(/ouster/points/fix)의 바닥에 맞춘 값 —
+  #     그 바닥은 lidar_fix 가 만든 센서좌표 수평면(장소마다 지면추정 1~11 mm 차)이라 기준으로 부적합. 폐기.
+  #   도구·데이터: ~/gdm/workspace/log/d455_calib_tools/ (d455_align_genuine.py, joint_solve_rot.py)
+  #   이전 값: 2026-10-05 xyz [0.108850, 0.041369, -0.023398] quat [0.002769, 0.129543, -0.001782, 0.991568]
+  #            원래   xyz [0.065151, 0.002019, -0.015822] quat [-0.000391, 0.128428, 0.001329, 0.991718]
+  camera_link:
+    parent: os_sensor
+    xyz: [0.120500, 0.047500, -0.014700]
+    quat_xyzw: [0.002691, 0.131891, -0.002161, 0.991258]   # rpy [+0.283, +15.158, -0.212]°
+
+  # Livox Mid-360 — /livox/lidar (/livox/lidar_raw 도 같은 livox 로컬 좌표 — frame_id 가
+  #   os_sensor 로 찍혀 나오지만 드라이버가 extrinsic 을 적용하지 않은 센서 좌표다)
+  # 2026-09-30 실측 (bag ROSBAG/calib_livox_20260930, 370 s): 45° 경사판 2장을 2~3 m 에 두고
+  #   배치 4종 × 앉은 자세 + 선 자세 2구간 = 정지 6구간(각 20~56 s). 구간별 ouster↔livox
+  #   point-to-plane ICP 정·역방향 12회 + 양방향 정합률 프로파일.
+  #   z 0.139~0.145 (std 1.9 mm, 자세 무관), x -0.015~-0.025, y +0.02~+0.05 (프로파일 최빈 +0.04),
+  #   roll 0.0~0.04°, pitch 4.70~4.87°, yaw 0.0° (프로파일 6구간 모두). 잔차 rms 12~13 mm.
+  #   불확도: x ±0.01, y ±0.015, z ±0.005 m / roll ±0.05°, pitch ±0.07°, yaw ±0.2°.
+  #   교차확인: livox IMU 로 본 base 기준 pitch 5.52° − 4.81° = 0.71° ≈ os_sensor pitch 0.74°.
+  #   pitch 4.8° 하향은 **의도된 설계** — 0 으로 "바로잡지" 말 것.
+  # 비교 (양방향 정합률 = 상대 센서 면 2 cm 이내 점 비율, 6구간): 이 값 6.3~8.1 %
+  #   > GDS lidar_calibration(2026-09-30T07:01Z, xyz [-0.0444,-0.0032,0.1511]
+  #   rpy [-0.094,+4.764,-0.029]) 4.4~6.1 % > 이전 궤적정합 값(z 0.181) 4.3~4.8 %.
+  #   (궤적정합은 경사면이 없어 z 가 장면 따라 0.15~0.19 로 흔들렸다 — 폐기.)
+  # ⚠ GDS lidar_calibration 노드가 같은 os_sensor→livox_frame TF 를 **자기 값으로** 발행한다.
+  #   rbq.launch.py 의 static TF 와 충돌하므로 한쪽만 발행하도록 맞출 것.
+  livox_frame:
+    parent: os_sensor
+    xyz: [-0.0207, 0.0387, 0.1426]
+    quat_xyzw: [0.000174379, 0.041962843, -0.000007324, 0.999119157]   # rpy [+0.02, +4.81, 0.00]°
+
+# ── self-hit (자기 몸체 반사) ────────────────────────────────────────────────
+# 센서가 **자기 장착 구조물**을 때려서 늘 같은 자리에 찍히는 점. 실장애물이 아니므로
+# 근접 안전(emergency)·refine 캐시 어디서도 장애물로 세면 안 된다. 장착 기하가
+# 정하는 값이라 extrinsic 과 같은 성질 → 정본이 이 파일이다.
+#
+# 규약: 각 항목은 해당 센서 프레임(키 이름: livox_frame) 기준 **구면 섹터**(방위 쐐기 × 고도 띠 × 최대거리).
+#   bearing_deg    : 섹터 중심 방위 [deg] (0=전방 +x, +90=좌 +y, 180=후방)
+#   half_angle_deg : 방위 반폭 [deg] (|각도차| <= 이 값, 180 = 전방위)
+#   elev_min/max_deg: 고도각 범위 [deg] (0=센서 수평면, 음수=아래)
+#   max_range      : 3D 거리 상한 [m] (이보다 멀면 self-hit 아님)
+# 세 조건을 **모두** 만족해야 self-hit 이다. 소비자는
+# gdm_planning 노드 파라미터 `livox_self_hit_sectors`
+# (= [bearing, half_angle, elev_min, elev_max, max_range] × N 평탄화)로,
+# rbq.launch.py 가 `self_hits.livox_frame` 을 읽어 넘긴다.
+# Ouster 는 항목이 없다 — ouster 점을 쓰는 쪽이 모두 0.4 m 이상 근거리 컷을 쓴다
+# (gdm_obstacle_tracker min_range 0.5 / robot_exclude_radius 0.8, gdm_planning
+# sensor_blind_radius 0.4, clustering3d min_range 0.6). 컷을 0.35 m 아래로 줄이면 다시 재야 한다.
+self_hits:
+
+  # 장착을 건드렸으면 다시 재어 고칠 것 —
+  #   `python3 src/gdm_planning/scripts/measure_livox_self_hit.py`
+  #
+  # 2026-09-30 재측정 — 센서 기구부 재설치(센서 헤드 ≈5 mm 하강) 직후, 실로봇 기립 정지,
+  #   2회 독립 캡처 × 400 프레임. 1.5 m 안의 전 점을 base_link 로 옮겨 보면 self-hit 은
+  #   **전부 로봇 footprint(x -0.42~0.45, |y|<=0.25) 안**의 센서 헤드 초근접 반사다.
+  livox_frame:
+    # 센서 헤드 초근접 반사 — **방위는 전방위**로 둔다 (2026-10-05 지시). 반사 방위가
+    #   캡처마다 떠다녀 쐐기로 잡으면 애매했다 (우측 관측: 2026-09-29 -119.3~-23.3°,
+    #   09-30 -36.6~-33.9°, 재확인 -103.7~-49.3°; 후방 관측 180±20.5°). 고도·거리는 우측 반사
+    #   세 관측의 합집합 + 여유: 고도 +6.6~+39.7° / ≤0.1315 m. 같은 방향의 다음 실제 점은 0.80 m.
+    #   후방 반사 중 고도 44° 초과·0.20 m 초과분(관측 최대 47.3° / 0.205 m)은 후방 사용자
+    #   섹터(±75°)가 지운다 — 섹터를 좁히면 다시 재라.
+    #   emergency "Obstacle detected/cleared" 깜빡임의 원인이었던 반사다.
+    - name: head_near
+      bearing_deg: 0.0
+      half_angle_deg: 180.0
+      elev_min_deg: 2.0
+      elev_max_deg: 44.0
+      max_range: 0.20
+
+# ── emergency 근접 정지 영역 (MID360, **base_link 기준**) ─────────────────────
+# 정지 시 최소 사각기둥: -back <= x <= front_min, |y| <= side (z 창은 런치의
+# EMERGENCY_CEILING_AGL 파생). 노드가 livox 점에 장착 오프셋(livox_mount_x/y)을
+# 더해 base_link 좌표로 판정한다 — 계획·추종·GP 와 같은 원점 (2026-09-08).
+# 주행 중 전방은 노드가
+#   front_eff = max(front_min, nose_x + v_fwd × livox_emergency_ttc)
+# 로 동적 확장한다 (v_fwd = odom twist 의 yaw 전방 투영, TTC 규칙). TTC 거리는
+# **로봇 앞코**(nose_x)에서 잰다 — 충돌 지점이 앞코라 그래야 ttc 초가 실제 ttc 초다.
+# 로봇 몸집·센서 장착이 정하는 값이라 extrinsic 과 같은 성질 → 정본이 이 파일이다.
+# 소비자: rbq.launch.py 가 읽어 노드 파라미터
+#   livox_emergency_front / back / side 로 넘긴다 (없으면 즉시 실패).
+# 2026-09-08 이전엔 livox_frame 기준 0.30/2.0/0.30 이었다. livox 가 base_link 앞
+# 0.296m 라 base_link 기준으로 옮기면 0.60/1.70 — 물리적 기둥은 그대로다.
+emergency:
+  base_link:
+    front_min: 0.60   # 정지 시 전방 최소 깊이 [m] (= livox 앞 0.30)
+    back: 1.70        # 후방 [m] — 후방 사용자 섹터(±75°)가 먼저 걸려 유효 깊이는 base x≈+0.19 에서 끊긴다
+    side: 0.30        # 좌우 반폭 [m]
+    nose_x: 0.41      # 로봇 앞코 = base_link 전방 [m] (URDF trunk x +0.415, collision box 0.8) — TTC 원점

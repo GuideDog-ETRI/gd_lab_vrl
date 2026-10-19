@@ -1,0 +1,20 @@
+support_ttl_s: 0.5 # supervisor foot support only; native v25or TTL unchanged
+obstacle_ttl_s: 0.5 # caller overrides with active supervisor obstacle TTL
+flat_raised_m: 0.03 # floor_min: positive low box/step on FLAT is occupied
+flat_drop_m: 0.03 # unaccepted descending discontinuity is no-entry; stair exception below
+support_agreement_m: 0.02
+normal_max_slope_deg: 35.0
+normal_fit_rms_m: 0.02
+seed_near_x_m: 0.35
+seed_near_y_m: 0.28
+flat_support_tolerance_m: 0.10 # existing C2.1 eligibility, NOT flat obstacle exemption
+max_step_m: 0.25
+chunk_envs: 128
+
+# UPDATE177B user-approved walking limits; native mapper/actor TTL unchanged.
+terrain_limits177b: true
+gap_max_width_m: 0.26
+flat_step_max_m: 0.16
+stair_step_max_m: 0.25
+rough_max_m: 0.10
+low_object_max_m: 0.16

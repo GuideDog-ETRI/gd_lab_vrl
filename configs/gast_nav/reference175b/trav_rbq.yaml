@@ -1,0 +1,143 @@
+/trav_map:
+  ros__parameters:
+    # Frame configuration (from bag: /tf, /tf_static)
+    map_frame: 'odom'
+    base_frame: 'base_link'
+    corrected_map_frame: 'odom'
+
+    # ── 최근 추가 기능 튜닝 (여기서 로봇별 조정) ────────────────────────────
+    # launch 인자로도 override 가능 (예: cleanup_step:=0.3). launch 인자를 주면
+    # 아래 값을 덮어씀. 안 주면(기본) 아래 값이 적용됨.
+    # 이동물체 잔상 제거: visibility cleanup 강도 (0~1, 클수록 잔상 빨리 제거)
+    cleanup_step: 0.2
+    # 초기 음영지역 traversability prior (planner 기동 대응)
+    init_trav_prior_enable: true       # 로봇 반경 이내 미관측 셀을 상수 τ 로 채움
+    init_trav_prior_radius_m: 0.6      # prior 반경 [m] (0=비활성). 직사각형 모드면 후방·좌우 폭
+    # 전방 [m]: >0 이면 로봇 yaw 정렬 직사각형 (x∈[-radius, front], |y|≤radius). 0=원형.
+    # D455 바닥은 base_link 앞 0.92 m 부터 보인다 (2026-10-05 실측) → 그 앞 띠를 덮는다.
+    init_trav_prior_front_m: 0.95
+    init_trav_prior_value: 0.8         # prior τ 값 (0~1)
+    init_trav_prior_mask_enable: false # trav_prior_mask layer 발행 여부
+    # Semantic fusion (combined = w·geo + (1-w)·semantic)
+    # 0.7→0.8 (2026-10-01): 노은 bag 실측 — 정면 FOV 평탄 셀의 geo 는 좌우 오프셋 무관
+    # ~0.86 인데 semantic 은 경로 띠(폭 ~2m) 밖에서 0.06~0.30 → w↓ 일수록 측면이 깎임.
+    # 0.8→0.7 (2026-10-06): semantic 10 Hz + EMA α0.2 로 semantic 값이 안정(셀별 시간 표준편차 p95 0.09→0.02)
+    #   되어 비중을 되돌림. 사용자 결정.
+    semantic_weight_geometric: 0.7     # geo 가중 w (↓ = semantic 비중↑)
+    # semantic 미관측 셀(카메라 미관측)은 0.9·w·geo → 평지 0.72 (semantic_fusion.GEO_ONLY_FACTOR).
+    # init prior 셀은 제외(τ 그대로).
+    semantic_geo_layer: 'erosion'      # geo 사이드 layer ('erosion'/'traversability')
+    # semantic 셀값 시간축 EMA: new = (1-α)·old + α·이번 프레임 median (그 셀이 관측된 프레임마다).
+    # 0.5→0.2 (2026-10-06, semantic 10 Hz 전환과 함께): 등가 창 ≈ 2/α−1 = 9 프레임(~0.9 s),
+    # 90% 응답 ~1 s (5 Hz·α0.5 때 0.66 s). semantic 값을 덜 출렁이게 해 비중을 올릴 여지 확보.
+    semantic_ema_alpha: 0.2
+    # geo(erosion) 시간축 EMA (발행 직전, combined 상속). semantic 보다 빠른 변화 대응이 필요해 0.5
+    # (등가 창 ~3 프레임, 90% 응답 ~0.33 s @10 Hz). 이번 값 NaN 이면 NaN·상태 리셋. 1.0=off. 2026-10-06.
+    geo_ema_alpha: 0.5
+    # geo trav 경사 데드밴드 [deg]: CNN 은 수평 평면=1.0 이지만 2° 경사만으로 ~0.85.
+    # 이 경사 이하 평면을 1.0 으로 (발행 traversability/erosion 에 trav'=min(1,trav/τ(θ)),
+    # τ(3°)=0.7615). 단차도 같이 관대해짐: 5cm 0.56→0.73, 10cm 0.31→0.41. 0=off.
+    geo_trav_slope_deadband_deg: 3.0
+    # CPU 절감(P1): GPU PC 파싱 (출력 불변). 기본 true = Thor 사용 기준.
+    # (워크스테이션도 무해 — bit-identical 검증됨. 끄려면 false 또는 launch override)
+    gpu_pointcloud_parse: true
+    # 메모리 누수 방지: CuPy managed/pinned 풀을 주기적으로 반환 (free_all_blocks +
+    # torch empty_cache). 0=off 면 통합메모리(Thor)에서 풀 high-water 가 계속 커져
+    # RSS 가 무한 상승(관측됨). 5초마다 미사용 블록 반환해 RSS 안정화.
+    cupy_memory_pool_trim_interval_s: 5.0
+    # Live/Isaac latency recovery. Queues retain only the newest state; stale clouds
+    # are rejected before GPU parsing. Every 10 steady-clock minutes, only transient
+    # DDS/TF/CUDA-cache state is recreated. Elevation and semantic map data survive.
+    # trav_map_bag.launch.py overrides these to legacy preserve-all settings.
+    pointcloud_qos_depth: 1
+    semantic_qos_depth: 1
+    gridmap_qos_depth: 1
+    max_pointcloud_age_s: 0.5
+    max_semantic_age_s: 0.75
+    transient_reset_interval_s: 600.0
+    # CPU 절감(B): 발행 D2H 배치 (영속 stream async enqueue + sync 1회, per-layer
+    # CUDA sync N→1). 이득 미미(asnumpy self ~2.6%)라 기본 OFF. 레이스 이력으로
+    # non_blocking=False 수정본 있으나 오프라인 bag 검증 후 켤 것.
+    publish_d2h_async: false
+    # CPU 절감(입력 점 감소): 기본 전략 = 하방 32채널(ring_range) + 후방제거 + 반경필터.
+    # map_length=20m → 반대각선 ≈14.1m 이상은 어차피 맵 밖 → 14.5m 로 안전 컷.
+    # ⚠️ 반경/방위각/ring 필터는 ring 필드 보유 클라우드(=라이다)에만 적용 —
+    #    D455 등 optical-frame 클라우드는 자동 무시 (프레임 정렬이 달라 오컷 방지).
+    # 기본 1(복원). 하방만 대신 채널 반감으로 전환하려면 여기 2 + ring_range [-1,-1].
+    ouster_ring_decimation: 1          # 수직 채널 데시메이션 (1=복원=전 채널, 2=32ch)
+    # 하위 채널만 선택 (아래보는 빔). col_decim 과 달리 방위각 전부 유지 →
+    # 원거리 빈틈 없이 수직 FOV 만 축소. [lo,hi] ring 인덱스. [-1,-1]=off.
+    # ⚠️ ring_range 와 ouster_ring_decimation 은 상호배타 — 둘 중 하나만 쓸 것.
+    #    동시 설정 시 ring_range 우선(decimation 무시)하고 경고 로그.
+    # Ouster 관례: beam_altitude_angles 가 위(+)→아래(-) 순, ring=행 인덱스 →
+    #   ring 0=최상단, 최고 인덱스=최하단. 따라서 64ch 하위(아래보는) 32채널 = [32,63].
+    #   ✔ subway bag(RBQ Ouster 64ch)에서 metadata(+21°→−21.6°)+실측 z 로 [32,63]=하방 확정.
+    # ⚠️ 다른 센서/펌웨어/lidar_fix 재배열 시 재확인 — 최종은 센서 metadata
+    #   beam_altitude_angles 배열 순서로 확인 (위→아래면 [32,63], 아래→위면 [0,31]).
+    ouster_ring_range: [32, 63]        # 하방 32채널 (아래보는 빔). off=[-1,-1]
+    # 링 사이 점-점 연결 보간 (같은 방위 인접 링, 선분 ≤1.5 m·|Δz| ≤0.10 m·경사 ≤10°, 5 cm 간격).
+    # 원거리 링 간격 NaN 띠·깜빡임 대응 (bag 재생: 깜빡 셀 205→75, 내부 홀 68→18 셀). 같은 높이
+    # 물체 사이(가려진 영역)도 이어질 수 있음 — 2026-10-06 사용자 결정으로 활성. 상세 STATUS §6-1.
+    ouster_ring_bridge: true
+    input_max_radius_m: 14.5           # 라이다 원점 2D 반경 밖 제외 [m] (0=off)
+    # 채널(ring)을 복원(=1)할 때 점 수를 대신 줄이는 방향:
+    #  - ouster_col_decimation: 방위각 컬럼 N개당 1개 (채널 전부 유지, organized만). 1=off.
+    #    ring 복원 시 여기서 2~3 으로 가로 밀도를 줄여 점 수 상쇄.
+    #  - input_exclude_azimuth_deg: [start,end] 방위각 섹터 제외 (12시=정면 0°, 시계 0~360).
+    #    [140,210]=후방 웨지 (핸들러/장비 음영). ⚠️ 이 방향의 lidar 장애물 관측도 사라짐.
+    #    끄려면 [0,0]. 라이다 프레임 기준(RBQ os_sensor≈base_link 정렬). wrap-around
+    #    (start>end, 0° 통과) 미지원 — 필요 시 [0,0] 로 끄고 방향 재조정.
+    ouster_col_decimation: 1
+    input_exclude_azimuth_deg: [140.0, 210.0]
+
+    # Initializer frame
+    initialize_frame_id: ['base_link']
+    initialize_tf_offset: [0.0]
+
+    # Subscribers: Ouster LiDAR (primary) + RealSense D455 (secondary)
+    subscribers:
+      ouster:
+        topic_name: '/ouster/points'
+        data_type: 'pointcloud'
+      realsense:
+        topic_name: '/camera/camera/depth/color/points'
+        data_type: 'pointcloud'
+        # visibility(광선) 정리는 ouster 에만 맡긴다. 실측(2026-08-19): ray-march 가
+        # add_points 시간의 94~95% 이고 점 수 감축 효과는 sublinear(점 8배 → 시간
+        # 2.85배)라 무효. D455 만 끄면 Thor 에서 elevation_update 69ms → 한 자릿수 ms,
+        # 최대 블로킹이 100ms 발행주기 밑으로 내려가 GridMap 발행 7.9 → ~10Hz.
+        # ouster 는 ring_range [32,63](하방 32ch)로 카메라 근거리 FOV 를 덮으므로
+        # 이동물체 잔상 청소는 유지된다 (단 13.3Hz→7.7Hz 로 느려짐 → 필요하면
+        # cleanup_step 을 0.2→0.3 으로 올려 보상).
+        visibility_cleanup: false
+        # max_rate_hz: 0.0   # 입력 rate 상한 (0=무제한). 측정 재현용 진단 노브.
+
+    publishers:
+      # 통합 출력 — trav_map_node 가 SemanticFusion 활성 시 semantic_trav /
+      # semantic_trav_valid / traversability_combined 도 함께 append 해서 발행.
+      # → /trav_map/trav_map 단일 토픽으로 다운스트림 (외부 fusion 노드 폐기).
+      trav_map:
+        layers: ['elevation', 'traversability', 'erosion']
+        basic_layers: ['elevation']
+        fps: 10.0       # GridMap 발행 주기 (10Hz 로 복귀 — CPU 여유 충분, 갱신성 우선)
+
+# ── SegFormer semantic_trav_node 튜닝 (여기서 로봇별 조정) ──────────────────
+# launch 인자로도 override 가능 (예: semantic_stride:=4). launch 인자를 주면
+# 아래 값을 덮어씀. 안 주면(기본) 아래 값이 적용됨.
+# 주의: bottom_ratio 는 노드 declare 기본이 0.0(비활성)이라 여기 명시 필수.
+/semantic_trav_node:
+  ros__parameters:
+    publish_overlay: false    # [A 실험] CPU 절감: RGB heatmap 오버레이 발행 off
+                              #   (_publish_rgb_overlay 가 semantic 노드 CPU 의 ~1/3 소모)
+    publish_rate_hz: 10.0     # PC 발행 상한 Hz (2026-10-06 5→10: TensorRT 로 infer ~18 ms)
+    stride: 2                 # 투영 stride (px). 키우면 점 수↓·투영비용↓ (Orin 튜닝)
+    max_range_m: 8.0          # 최대 투영 거리 [m]
+    bottom_ratio: 0.5         # 하단(근거리) 추가 stride 영역 비율 (0=비활성)
+    bottom_stride: 3          # 하단 영역 stride (px)
+    use_fp16: true            # half precision (Tensor Core 가속)
+    channels_last: true       # channels_last 레이아웃 (무손실 가속, GPU만)
+    cudnn_benchmark: false    # conv 알고리즘 탐색 off — 기동 탐색 버스트가 Thor OC 와 겹침 (2026-10-06)
+    # TensorRT FP16 엔진 (Thor, TRT 10.13). 있으면 PyTorch 대신 사용 — GPU 연산 6.5 ms (PyTorch fp16 ~28 ms),
+    # 빌드 때 커널 고정이라 기동 autotune 버스트 없음 (OC 대응). 파일 없음/역직렬화 실패(워크스테이션, TRT
+    # 버전 변경) 시 PyTorch 폴백. 체크포인트(best.pt)를 바꾸면 ONNX export → trtexec 재빌드 (README). disabled=끄기
+    trt_engine: ~/gdm/workspace/models/segformer_b2_aoff_ep12/segformer_b2_288x512_fp16_trt10.13.plan
