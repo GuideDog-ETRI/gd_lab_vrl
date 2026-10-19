@@ -84,6 +84,10 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
         if not args.pilot or os.environ.get('GAST_NAV_MAP_BACKEND')!='torch':raise ValueError('reference diagnostic guard')
         pilot_settings=dict(pilot_settings,iteration_limit_s=1200.,iteration_hard_timeout_s=1200.)
     runtime=yaml.safe_load((root/'configs/gast_nav/runtime.yaml').read_text())
+    limit=os.environ.get('GAST_NAV_ITERATION_LIMIT_S')
+    if limit and args.train and not args.pilot:
+        # Train mode only: the pilot's 60 s gate stays for --pilot.
+        limit=float(limit);pilot_settings=dict(pilot_settings,iteration_limit_s=limit,iteration_hard_timeout_s=max(2*limit,pilot_settings['iteration_hard_timeout_s']))
     a0_iterations = int(os.environ.get('GAST_NAV_A0_ITERATIONS', '0'))
     if a0_iterations:
         if args.pilot or not args.train or args.stage != 'A0' or args.resume:

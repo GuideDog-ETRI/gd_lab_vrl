@@ -19,6 +19,9 @@ gpus="${GAST_NAV_GPUS:-0,1,2}"
 [[ "$mode" = train || "$gpus" = 0,1,2 ]] || { echo 'only train mode may change GPUs' >&2; exit 2; }
 export CUDA_VISIBLE_DEVICES=$gpus APPTAINERENV_CUDA_VISIBLE_DEVICES=$gpus
 export NCCL_DEBUG=INFO TORCH_DISTRIBUTED_DEBUG=DETAIL TORCH_NCCL_ASYNC_ERROR_HANDLING=1
+# onvlm2 2026-10-19: NCCL P2P and SHM transports fail with illegal memory access even in a bare
+# broadcast test; socket transport works. GAST_NAV_NCCL_SOCKET=1 (default) forces it.
+if [[ "${GAST_NAV_NCCL_SOCKET:-1}" = 1 ]]; then export NCCL_P2P_DISABLE=1 NCCL_SHM_DISABLE=1; fi
 export TRAIN_ARM=4 GAST_MATH_SDPA=1 OMNI_KIT_ACCEPT_EULA=YES
 export PYTHONPATH="$root/src" PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 OMP_NUM_THREADS=4 MKL_NUM_THREADS=4
 export GAST_RUN_ID="${GAST_RUN_ID:-$(date +%Y%m%d_%H%M%S)_nav_${mode}}"
