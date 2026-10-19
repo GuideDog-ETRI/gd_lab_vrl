@@ -1223,3 +1223,34 @@ NAV1-ACK(6장)로 다음을 gdm에 돌려준다: 적용된 조건, hold 사유, 
 | onvlm2 2-GPU smoke (4096 env, 10 iter) | A0 83–92 s, A 93–102 s/iter, NaN 없음, checksum 정상, 62 GB/GPU | rollout이 62→72 s로 증가하는 경향을 본 학습에서 감시 |
 | 단계 A 시작 | run `gast_nav_v1_A_20261019`, onvlm2 GPU 0·1(GPU 2·3은 다른 사용자 사용 중), 4096 env, A0 300 → A, 최대 3000 iter, 저장 50, iteration 제한 200 s, 커밋 `1542a6f` | 예상 약 80–85시간 |
 
+### D-9. 온라인 Top-5 선정 (2026-10-19 사용자 결정)
+
+이전 교사 학습(`src/gd_lab/rl/online_top5.py`)처럼 **학습 중에 기준을 바꿀 수 있게** 한다. 구현은 `src/gd_lab/gast_nav/online_top5_nav.py`(기존 파일은 수정하지 않음).
+
+**점수** (최근 `window`=50 iter 평균)
+
+> **S = 0.35·P + 0.15·T + 0.20·(1 − C) + 0.10·(1 − U) + 0.10·(1 − R) + 0.10·L**
+
+| 기호 | 뜻 | 계산 |
+|---|---|---|
+| P | 진행률 | NAV·go tick의 clamp(v_path / v_cap, 0, 1) 평균 |
+| T | 정지 성공률 | 정지가 필요한 tick(go=0 또는 계단 끝 대기) 중 실제로 멈춘 비율 |
+| C | 종료율 | 에피소드 종료 중 time-out이 아닌 종료(넘어짐·몸통 접촉·원기둥 접촉) 비율 |
+| U | unknown 진입률 | NAV tick 중 몸이 unknown 칸으로 들어간 비율(정책 지도 OBS1 기준) |
+| R | 역회전 | TURN tick의 clamp(반시계 누적 각도 / 3°, 0, 1) 평균 |
+| L | LEGACY 성공률 | LEGACY 에피소드 종료 중 time-out으로 끝난 비율 |
+
+**후보 자격(gate)**
+- 단계 A이고 iteration ≥ 400, 기존 후보와 100 iter 이상 간격
+- C ≤ 0.09
+- U ≤ U 기준선 + 0.05: 정책 지도는 몸 주변이 대부분 unknown이라 동결 3906도 NAV tick의 약 절반에서 unknown에 들어간다(로컬 smoke). 그래서 고정값이 아닌 상대 기준이다
+- L ≥ L 기준선 − 0.02
+- 기준선(U, L)은 학습 첫 50 iter 평균이다. 이 구간의 정책은 adapter가 0으로 시작하므로 3906과 같다. JSON에서 직접 값을 줄 수도 있다
+
+**온라인 변경**
+- 기준 파일: `logs/gast/nav_v1/<run>/top5_criteria.json`. rank 0이 매 iteration 파일의 변경 시각·크기를 확인하고, 바뀌면 다시 읽는다.
+- 잘못된 값이면 마지막 정상 값을 유지하고 학습은 멈추지 않는다.
+- 바꿀 수 있는 키: `w_P, w_T, w_C, w_U, w_R, w_L, window, top5_start_iteration, top5_min_spacing, max_termination_rate, max_unknown_entry_increase, unknown_baseline, max_legacy_drop, legacy_baseline, baseline_iterations`
+- 매 iteration 결정은 `top5_decisions.jsonl`에, 현재 Top-5는 `best_top5/top5.json`에 기록한다.
+- 최종 선택은 Top-5 후보를 MuJoCo와 E1으로 다시 평가해 정한다(11장).
+
