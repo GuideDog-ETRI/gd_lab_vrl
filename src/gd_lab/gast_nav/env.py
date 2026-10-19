@@ -94,6 +94,8 @@ class NavState:
         self.unknown_time=self.offset.clone();self.positive_yaw=self.offset.clone();self.drift=self.offset.clone();self.turn_start=torch.zeros(n,2,device=dev)
         self.entry_previous=None;self.entry_valid=torch.zeros(n,dtype=torch.bool,device=dev)
         self.entered_unknown=torch.zeros_like(self.entry_valid);self.support_stable=torch.zeros_like(self.entry_valid)
+        # Online Top-5 rate counters (summed per iteration by the runner, then cleared).
+        self.top5_counts=torch.zeros(10,device=dev,dtype=torch.float64)
         self.reasons=['']*n;self.last_capture=-math.inf;self.wide=self.near=None;self.reward_log={}
         self.force_fault=False;self.fixed_policy=None
         self.reason_metrics_enabled=os.environ.get('GAST_NAV_HOLD_METRICS')=='1'
@@ -122,6 +124,11 @@ class NavState:
 
     def reset(self,ids):
         env=self.env;ids=torch.as_tensor(ids,device=env.device,dtype=torch.long)
+        tm=getattr(env,'termination_manager',None)
+        if tm is not None and hasattr(self,'top5_counts'):
+            ended=tm.dones[ids];was_legacy=self.legacy[ids]
+            # [8] LEGACY episodes ended, [9] of which by time-out (no fall / contact termination).
+            self.top5_counts[8]+=(ended&was_legacy).sum();self.top5_counts[9]+=(ended&was_legacy&tm.time_outs[ids]).sum()
         self.entry_valid[ids]=False
         bind_scene(env.scene.terrain,self.index,ids)
         self.tile_ids=torch.tensor(self.index.env_tile_ids,device=env.device)
@@ -456,6 +463,9 @@ class NavState:
                    nav_controller=self.controller.clone(),nav_mode=self.mode.clone())
         return obs
 
+    def top5_take(self):
+        out=self.top5_counts.clone();self.top5_counts.zero_();return out
+
     def compute_rewards(self):
         env=self.env;d=self.robot.data
         # RewardManager calls this after physics, BEFORE prepare(). Read the
@@ -507,6 +517,18 @@ class NavState:
                 zmax=torch.where(sel,z,-big).amax(-1);zmin=torch.where(sel,z,big).amin(-1)
                 foot=d.body_pos_w[:,self.foot_ids,2].mean(-1)-c['foot_radius_m']
                 ahead_flat=(sel.sum(-1)>=c['ahead_min_points'])&((zmax-zmin)<=c['ahead_flat_m'])&((0.5*(zmax+zmin)-foot).abs()<=c['ahead_level_m'])
+            # Online Top-5 rate counters (D-9): P progress, T stop, U unknown entry, R reverse rotation.
+            vcap=self.features[:,4].clamp_min(self.cfg['commands']['minimum_cap_mps'])
+            vpath=d.root_lin_vel_w[:,0]*self.axis.cos()+d.root_lin_vel_w[:,1]*self.axis.sin()
+            nav=(self.mode==1)&~self.legacy;turn=(self.mode==2)&~self.legacy;nav_go=nav&self.go.bool()
+            speed_b=d.root_lin_vel_b[:,:2].norm(dim=-1);yaw_b=d.root_ang_vel_b[:,2].abs()
+            stopped=(speed_b<self.cfg['rewards']['stopped_speed_mps'])&(yaw_b<self.cfg['rewards'].get('stopped_yaw_rate_radps',.05))
+            need_stop=(nav|turn)&(~self.go.bool()|self.stair_end184.wait)
+            c=self.top5_counts
+            c[0]+=(vpath/vcap).clamp(0,1)[nav_go].sum();c[1]+=nav_go.sum()
+            c[2]+=(need_stop&stopped).sum();c[3]+=need_stop.sum()
+            c[4]+=(self.entered_unknown.bool()&nav).sum();c[5]+=nav.sum()
+            c[6]+=(torch.rad2deg(self.positive_yaw)/3.).clamp(0,1)[turn].sum();c[7]+=turn.sum()
             self.stair_end184.tick(foot_z=d.body_pos_w[:,self.foot_ids,2],contacts=feet_contact,pitch=pitch,roll=roll,
                 stair_surface=stair,nav=(self.mode==1),go=torch.tensor([c.requested_go for c in cmds],device=env.device),
                 request_id=torch.tensor([c.manoeuvre_id for c in cmds],device=env.device),dt=env.step_dt,ahead_flat=ahead_flat)

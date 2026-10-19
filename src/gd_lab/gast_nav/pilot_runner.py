@@ -115,6 +115,8 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
     families={k:sorted({c for (_,c),m in grid.items() if m.kind==k}) for k in cfg['scene_mix']}
     start_iteration=0
     top=TopK(log/'best_top5',train['top_k'])
+    from .online_top5_nav import OnlineTop5,rates as top5_rates
+    online_top5=OnlineTop5(log/'best_top5',log/'top5_criteria.json',k=train['top_k'])
     if args.resume:
         saved=torch.load(args.resume,map_location=args.device,weights_only=False)
         if saved['stage']!=args.stage:raise ValueError('resume stage differs from checkpoint')
@@ -129,6 +131,7 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
         restore_family_start_levels(env.scene.terrain,env.scene.env_origins,families,saved.get('family_levels',{}))
         raw,_=env.reset();obs=TensorDict(raw,batch_size=[env.num_envs],device=args.device)
         top.records=[(s,i,Path(p)) for s,i,p in saved.get('top5',[]) if Path(p).is_file() and Path(p).parent.resolve()==top.directory.resolve()]
+        if 'online_top5' in saved:online_top5.load_state(saved['online_top5'])
     optimizer_steps=0
     original_step=alg.optimizer.step
     def counted_step(*a,**kw):
@@ -160,7 +163,7 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
         state={'model_state_dict':policy.state_dict(),'optimizer_state_dict':alg.optimizer.state_dict(),
                'cenet_optimizer_state_dict':policy.cenet.optimizer.state_dict(),'iteration':iteration,'stage':args.stage,
                'migration':migration,'family_levels':capture_family_level_means(env.scene.terrain,families),
-               'top5':[(s,i,str(p)) for s,i,p in top.records],
+               'top5':[(s,i,str(p)) for s,i,p in top.records],'online_top5':online_top5.state(),
                'resume_contract':'weights/optimizers/normalizers + family curriculum; reset episodes, not bitwise trajectory resume'}
         path=log/name;temporary=path.with_suffix('.tmp');torch.save(state,temporary);temporary.replace(path)
     growth_probe=None
@@ -261,12 +264,17 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
             if slow_count>=pilot_settings['slow_iterations']:
                 checkpoint(iteration+1,'stopped_slow.pt')
                 raise RuntimeError(f'iteration > {pilot_settings["iteration_limit_s"]} s for {slow_count} consecutive iterations')
-            score=torch.tensor([reward_sum,total],device=args.device,dtype=torch.float64)
-            if world>1:dist.all_reduce(score)
+            # Online Top-5 (D-9): rates summed over ranks, criteria JSON re-read each iteration (rank 0).
+            counts=torch.cat((env.nav.top5_take(),torch.tensor([terminations,timeouts],device=args.device,dtype=torch.float64)))
+            if world>1:dist.all_reduce(counts)
+            row=top5_rates(counts[:10].tolist(),counts[10].item(),counts[11].item())
+            if rank==0:
+                decision=online_top5.observe(iteration+1,row,args.stage)
+                kept=online_top5.consider(decision,lambda path:checkpoint(iteration+1,str(path.relative_to(log))))
+                with (log/'top5_decisions.jsonl').open('a') as f:f.write(json.dumps(dict(decision,rates=row,kept=kept),allow_nan=False,default=str)+'\n')
+                if decision['criteria_message']:print(json.dumps({'top5':decision['criteria_message']}),flush=True)
             if (iteration+1)%args.save_interval==0 or iteration+1==args.max_iterations:
                 checkpoint(iteration+1,'latest.pt')
-                if rank==0:
-                    top.consider(float(score[0]/score[1]),iteration+1,lambda path:checkpoint(iteration+1,str(path.relative_to(log))))
             if any_rank(stop,args.device):checkpoint(iteration+1,'stopped.pt');return {'status':'stopped','iteration':iteration+1,'optimizer_steps':optimizer_steps}
         return {'status':'completed','iteration':args.max_iterations,'optimizer_steps':optimizer_steps}
     except Exception as error:
