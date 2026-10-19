@@ -5,7 +5,7 @@
 좁은 공간 통과, 시계방향 제자리 회전, 계단 정렬을 학습하는 교사 정책의 기본 설계다. 백본은 Ray+IR 3906이다.
 
 **상태**
-- **현재 (2026-10-19)**: 구현 중(브랜치 `feat/gast-nav-v1`). 본 학습은 쉬운 장면 C READY 판정 뒤 시작한다. 감독기 설계는 부록 D-3·D-4가 최신이며, 본문 3.2(c)·8.1·10·11장에 반영했다.
+- **현재 (2026-10-19 오후)**: 구현 중(브랜치 `feat/gast-nav-v1`, 커밋 전 변경 다수). 학습 중 감독기는 그림자 모드(D-8)로 전환했다. 쉬운 장면 그림자 진단 → 로컬 학습 smoke(256 env, A0→A) → onvlm2 3-GPU smoke → 단계 A 순서로 진행한다. 감독기 최신 설계는 부록 D-3~D-8이다.
 - 검토 이력: v0.1 → UPDATE155, v0.2 → UPDATE156. 두 번 모두 두 검토가 "조건부"로 판정했다.
 - v0.3은 UPDATE156 지적과 2026-10-18 사용자 결정을 반영했다. UPDATE158에서 두 검토 모두 "조건부: 코드·CPU fixture 착수 가능, 계약 4개를 먼저 고정"으로 판정했다.
 - **v0.4 (2026-10-19 사용자 결정)**: 학습 중 감독기는 **그림자 모드**(막지 않고 판정만 계산)다. 계단 끝 정지와 시계방향 회전은 보상으로 학습한다. 감독기 안전 개입은 배포 안전망으로 둔다(부록 D-8).
@@ -1200,4 +1200,16 @@ NAV1-ACK(6장)로 다음을 gdm에 돌려준다: 적용된 조건, hold 사유, 
 - 학습 결과의 unknown 행동(진입률, 정지율)을 지표로 기록한다.
 
 **배포 전 검증**: 감독기 안전망을 켠 상태로 같은 장면을 평가해 개입 빈도, false-stop, 충돌을 측정한다. 이 값으로 감독기 설정(TTL, margin)을 정한다.
+
+**D-8 구현 상태 (2026-10-19 오후)**
+| 항목 | 상태 | 위치 |
+|---|---|---|
+| 그림자 모드 | 구현됨. `supervisor_mode: shadow | enforce`. shadow에서는 unknown 대기·FSM·TURN 역회전 HOLD를 강제하지 않고, 명령 clamp·handshake·무효 명령 처리만 유지한다 | `control_runtime.py`, `env_cfg.py` |
+| 진행 보상 | shadow에서는 go 기준(감독기 인증과 무관) | `rewards.py` |
+| unknown 보상 | unknown 진입 벌점, unknown 안전 정지 보상, 지표 `unknown_entry184`·`unknown_stop184` | `env.py`, `rewards.py` |
+| 계단 끝 정지 보상 | 구현됨(`stair_end_stop`, `stair_end_motion`). **판정기는 이전 기준**(발 접지 높이 단차 + pitch 변화 뒤 네 발 수평)이다. "진행 방향 앞이 평지면 정지" 규칙으로 바꾸는 작업이 남아 있다 | `stair_end184.py`, `configs/gast_nav/shadow184.yaml` |
+| 반시계 벌점 | 지표 `ccw_angle184`. 결정 3의 비례 벌점 유지 | `env.py` |
+| 진단 | 64-env 600-tick 그림자 진단 실행 중 | `scripts/gast_nav/diagnose_shadow184.*` |
+| 학습 smoke | 실행기 준비(GPU 1장, 256 env, A0 10 iter → A 10 iter, 저장 간격 5, `--resume` 1회) | `scripts/gast_nav/train_local184.sh` |
+- 기존 3906 실험·학습 코드는 수정하지 않는다. GAST-Nav 전용 디렉토리만 변경한다.
 
