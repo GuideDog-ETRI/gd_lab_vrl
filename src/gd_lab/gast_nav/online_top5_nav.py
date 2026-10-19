@@ -1,6 +1,8 @@
 """Online Top-5 checkpoint ranking for GAST-Nav (design D-9, user decision 2026-10-19).
 
-Score over a rolling window of iterations:
+Score over a rolling window of iterations. Every rate is a ratio of counter SUMS over the
+window (episodes start together and end in ~20-iteration waves, so per-iteration ratios
+oscillate between ~0.05 and ~0.9 and must not be averaged; finding 2026-10-20):
 
     S = w_P*P + w_T*T + w_C*(1-C) + w_U*(1-U) + w_R*(1-R) + w_L*L
 
@@ -15,8 +17,9 @@ A candidate is eligible only when it is in stage A, past top5_start_iteration,
 at least top5_min_spacing iterations from every kept entry, and passes the gates
 C <= max_termination_rate, U <= unknown_baseline + max_unknown_entry_increase,
 L >= legacy_baseline - max_legacy_drop. A baseline < 0 means "measure it":
-the mean over the first baseline_iterations iterations (A0 start, policy equal to
-3906 because the adapters are zero-initialised). U is relative because the OBS1
+the ratio of sums over baseline_iterations iterations starting at
+baseline_start_iteration (default 21: the first time-outs appear at iteration ~20; the
+policy there is still close to 3906 because the adapters start at zero). U is relative because the OBS1
 near map leaves most cells around the body unknown (frozen 3906 enters unknown on
 about half of NAV ticks, local smoke 2026-10-19).
 
@@ -42,8 +45,9 @@ DEFAULTS = {
     "max_legacy_drop": 0.02,
     "legacy_baseline": -1.0,
     "baseline_iterations": 50,
+    "baseline_start_iteration": 21,
 }
-INTEGER_KEYS = ("window", "top5_start_iteration", "top5_min_spacing", "baseline_iterations")
+INTEGER_KEYS = ("window", "top5_start_iteration", "top5_min_spacing", "baseline_iterations", "baseline_start_iteration")
 
 
 def validate(override: dict) -> dict:
@@ -58,7 +62,7 @@ def validate(override: dict) -> dict:
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValueError(f"{key} must be a finite number")
         if key in INTEGER_KEYS:
-            if int(value) != value or value < 1 and key != "top5_start_iteration" or value < 0:
+            if int(value) != value or value < 1 and key not in ("top5_start_iteration", "baseline_start_iteration") or value < 0:
                 raise ValueError(f"{key} must be a non-negative integer (window/spacing/baseline >= 1)")
             result[key] = int(value)
         elif key in ("legacy_baseline", "unknown_baseline"):
@@ -96,9 +100,11 @@ class CriteriaFile:
             return dict(self.criteria), f"invalid Top-5 criteria ({exc}); keeping last valid values"
 
 
-def rates(counts, terminations, timeouts):
-    """counts: 10 summed counters from NavState.top5_take (all ranks)."""
+def rates(counts, terminations=None, timeouts=None):
+    """counts: 10 NavState.top5_take counters (+ terminations, timeouts as items 10, 11)."""
     c = [float(x) for x in counts]
+    if terminations is None:
+        terminations, timeouts = c[10], c[11]
     div = lambda a, b: a / b if b > 0 else None
     return {
         "P": div(c[0], c[1]), "T": div(c[2], c[3]), "U": div(c[4], c[5]), "R": div(c[6], c[7]),
@@ -116,26 +122,28 @@ class OnlineTop5:
         self.baseline = None
         self.unknown_baseline = None
 
-    def _window(self, size):
-        rows = list(self.history)[-size:]
-        out = {}
-        for key in ("P", "T", "C", "U", "R", "L"):
-            values = [row[key] for row in rows if row[key] is not None]
-            out[key] = sum(values) / len(values) if values else None
-        return out
+    @staticmethod
+    def _sum(rows):
+        total = [0.0] * 12
+        for row in rows:
+            total = [a + b for a, b in zip(total, row["counts"])]
+        return rates(total)
 
-    def observe(self, iteration, row, stage):
-        """Add one iteration of rates; return a dict describing the decision."""
+    def _window(self, size):
+        return self._sum(list(self.history)[-size:])
+
+    def observe(self, iteration, counts, stage):
+        """Add one iteration of raw counters (12 values); return the decision."""
         criteria, message = self.criteria_file.refresh()
-        self.history.append(dict(row, iteration=iteration))
-        n = criteria["baseline_iterations"]
-        if len(self.history) >= n:
-            first = list(self.history)[:n]
-            mean = lambda key: (lambda v: sum(v) / len(v) if v else None)([r[key] for r in first if r[key] is not None])
+        self.history.append({"iteration": int(iteration), "counts": [float(x) for x in counts]})
+        n, start = criteria["baseline_iterations"], criteria["baseline_start_iteration"]
+        span = [r for r in self.history if start <= r["iteration"] < start + n]
+        if len(span) >= n:
+            base = self._sum(span)
             if self.baseline is None:
-                self.baseline = mean("L")
+                self.baseline = base["L"]
             if self.unknown_baseline is None:
-                self.unknown_baseline = mean("U")
+                self.unknown_baseline = base["U"]
         baseline = criteria["legacy_baseline"] if criteria["legacy_baseline"] >= 0 else self.baseline
         unknown_baseline = criteria["unknown_baseline"] if criteria["unknown_baseline"] >= 0 else self.unknown_baseline
         window = self._window(criteria["window"])
@@ -146,7 +154,7 @@ class OnlineTop5:
             reasons.append("not stage A")
         if iteration < criteria["top5_start_iteration"]:
             reasons.append("before top5_start_iteration")
-        if len(self.history) < criteria["window"]:
+        if len(self.history) < criteria["window"] or iteration - self.history[-criteria["window"]]["iteration"] >= 2 * criteria["window"]:
             reasons.append("window not full")
         if any(window[key] is None for key in window):
             reasons.append("missing rate: " + ",".join(k for k, v in window.items() if v is None))
@@ -196,4 +204,5 @@ class OnlineTop5:
         self.baseline = state.get("baseline")
         self.unknown_baseline = state.get("unknown_baseline")
         for row in state.get("history", []):
-            self.history.append(row)
+            if "counts" in row:  # rows from the first (rate-averaging) version are dropped
+                self.history.append(row)
