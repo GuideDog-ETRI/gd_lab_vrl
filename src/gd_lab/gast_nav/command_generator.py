@@ -27,7 +27,7 @@ def route_hint(tile, xy):
         if start <= s <= end: segment=i;break
     kind,start,end=tile.segments[segment]
     following=tile.segments[min(segment+1,len(tile.segments)-1)][0]
-    return RouteHint(segment,kind,yaw,max(0.,end-s),following),s,offset,remaining
+    return RouteHint(segment,kind,yaw,max(0.,end-s),following,route_lateral_error_m=offset),s,offset,remaining
 
 class CommandGenerator:
     def __init__(self, tiles, cfg, command_cfg, *, seed):
@@ -44,6 +44,22 @@ class CommandGenerator:
         if r.random()<self.cfg['commands']['default_conditions_fraction']:
             return Conditions(**self.command_cfg['defaults'])
         return Conditions(*(r.uniform(*self.command_cfg[k+'_range']) for k in schema.CONDITION_KEYS))
+
+    def _speed_cap(self,r):
+        limits=self.cfg.get('curriculum_C_limits')
+        if limits:
+            choices=[v for v in limits['measured_nav_caps_mps'] if self.command_cfg['v_cap_range'][0]<=v<=self.command_cfg['v_cap_range'][1]]
+            if not choices:raise ValueError('no measured C NAV command in range')
+            return r.choice(choices)
+        return r.uniform(*self.command_cfg['v_cap_range'])
+
+    def _turn_rate(self,r,cap):
+        limits=self.cfg.get('curriculum_C_limits')
+        if limits:
+            choices=[v for v in limits['measured_turn_rates_radps'] if self.command_cfg['turn_cap_range'][0]<=abs(v)<=cap]
+            if choices:return r.choice(choices)
+            # Unsupported combination remains subject to unknown envelope.
+        return -r.uniform(self.command_cfg['turn_cap_range'][0],cap)
 
     def reset(self,env_ids,*,now_ms,yaws,tiles=None):
         if tiles is not None:
@@ -64,10 +80,10 @@ class CommandGenerator:
             mode='LEGACY' if task=='legacy' else 'TURN' if task=='turn' else 'NAV'
             self.adapters[i]=CommandAdapter(self.command_cfg,initial_yaw=float(yaws[j]))
             self.commands[i]=NavCommand(self.seq[i],now_ms,mode,r.random()<self.cfg['commands']['go_probability'],
-                r.uniform(*self.command_cfg['v_cap_range']),-r.uniform(self.command_cfg['turn_cap_range'][0],c.turn_cap),c,
+                self._speed_cap(r),self._turn_rate(r,c.turn_cap),c,
                 self.epoch[i],self.epoch[i],self.seq[i])
 
-    def tick(self,env_id,*,now_ms,dt,xy,stable,hold=False,fsm_go=True,phase='APPROACH',dwell_progress=0.,legacy=(0.,0.,0.)):
+    def tick(self,env_id,*,now_ms,dt,xy,stable,hold=False,fsm_go=True,phase='APPROACH',dwell_progress=0.,legacy=(0.,0.,0.),route_info=None,return_features=True):
         i=int(env_id);r=self.rng[i];self.elapsed[i]+=dt
         cmd=self.commands[i]
         if cmd is None:raise RuntimeError('reset generator before tick')
@@ -80,7 +96,7 @@ class CommandGenerator:
             new=old+max(-step,min(step,goal-old))
             if key=='margin' and new<old and not stable:new=old
             values.append(new)
-        hint,s,offset,remaining=route_hint(self.tiles[i],xy)
+        hint,s,offset,remaining=route_hint(self.tiles[i],xy) if route_info is None else route_info
         landing_id=next((j for j,(k,_,_) in enumerate(self.tiles[i].segments) if k=='LANDING'),None)
         go=cmd.requested_go
         interval=int(self.elapsed[i]/self.cfg['commands']['resample_s'])
@@ -88,8 +104,8 @@ class CommandGenerator:
         if interval != self.previous_resample[i]:
             go=r.random()<self.cfg['commands']['go_probability']
             if self.task[i]=='stop_start':mode='TURN' if mode=='NAV' else 'NAV'
-            cmd=replace(cmd,v_cap=r.uniform(*self.command_cfg['v_cap_range']),
-                        turn_rate=-r.uniform(self.command_cfg['turn_cap_range'][0],cmd.c.turn_cap),
+            cmd=replace(cmd,v_cap=self._speed_cap(r),
+                        turn_rate=self._turn_rate(r,cmd.c.turn_cap),
                         manoeuvre_id=cmd.manoeuvre_id+1,requested_mode=mode)
         self.previous_resample[i]=interval
         toggle=int(self.elapsed[i]/self.cfg['commands']['stop_start_toggle_s'])
@@ -104,4 +120,4 @@ class CommandGenerator:
         if phase=='PRE_BRAKE':
             brake=min(cmd.v_cap,math.sqrt(2*self.cfg['commands']['brake_deceleration_mps2']*hint.dist_to_next_m))
         applied=adapter.tick(now_ms=now_ms,stable=stable,hold=hold,fsm_go=fsm_go,pre_brake_v=brake,legacy=legacy)
-        return cmd,applied,policy_features(applied,adapter.c,phase,dwell_progress),{'route_s':s,'offset':offset,'remaining':remaining}
+        return cmd,applied,(policy_features(applied,adapter.c,phase,dwell_progress) if return_features else None),{'route_s':s,'offset':offset,'remaining':remaining}

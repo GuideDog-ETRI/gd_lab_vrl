@@ -1,0 +1,125 @@
+status: measured_not_deployment_certified
+source: 3906 frozen, flat floor, 64 env x 3 seeds
+quantile: 0.99
+quantile_definition: per-cell occupancy >=1% across valid stopped trajectories; not
+  whole-trajectory 99% coverage
+requested_margin_m: 0.02
+raster_resolution_m: 0.025
+actual_margin_grid_cells: 1
+collision_sampling_cover_grid_cells: 1
+missing_command: unknown
+artifact: /home/user/gd_project/archive/gd_lab_vrl_worktrees/gast_nav_v1/logs/gast/nav_v1/update167_envelope/envelopes.pt
+artifact_sha256: dde69a70dd2da1fe0eea7938917e1a7db7bba59f9942da82829fec916735ea41
+turn_deceleration_note: non-reset trials with positive endpoint deceleration; p95
+  descriptive, p05 also reported; neither is a deterministic stopping bound
+commands:
+  NAV_0.2:
+    status: measured
+    valid_stopped: 17
+    invalid: 0
+    total: 192
+    stopped: 17
+    cells: 2186
+    p2_inflation:
+      horizontal_m: 0.10221490459995025
+      vertical_m: 0.02
+      duration_s: 1.95
+      statistical_contract: 99% marginal XY-radius/yaw, not simultaneous pathwise
+        guarantee
+    overshoot_deg: 0
+    x_range_m:
+    - -0.8499999642372131
+    - 0.7250001430511475
+    y_range_m:
+    - -0.4249999523162842
+    - 0.42500007152557373
+    turn_deceleration_p95_radps2: null
+    turn_deceleration_p05_radps2: null
+  NAV_0.4:
+    status: measured
+    valid_stopped: 25
+    invalid: 0
+    total: 192
+    stopped: 25
+    cells: 2522
+    p2_inflation:
+      horizontal_m: 0.1200116443063979
+      vertical_m: 0.02
+      duration_s: 2.35
+      statistical_contract: 99% marginal XY-radius/yaw, not simultaneous pathwise
+        guarantee
+    overshoot_deg: 0
+    x_range_m:
+    - -0.8499999642372131
+    - 0.9750001430511475
+    y_range_m:
+    - -0.4249999523162842
+    - 0.42500007152557373
+    turn_deceleration_p95_radps2: null
+    turn_deceleration_p05_radps2: null
+  NAV_0.6:
+    status: measured
+    valid_stopped: 10
+    invalid: 0
+    total: 192
+    stopped: 10
+    cells: 3191
+    p2_inflation:
+      horizontal_m: 0.14243308619416523
+      vertical_m: 0.02
+      duration_s: 2.75
+      statistical_contract: 99% marginal XY-radius/yaw, not simultaneous pathwise
+        guarantee
+    overshoot_deg: 0
+    x_range_m:
+    - -0.875
+    - 1.25
+    y_range_m:
+    - -0.5
+    - 0.4750000238418579
+    turn_deceleration_p95_radps2: null
+    turn_deceleration_p05_radps2: null
+  TURN_0.3:
+    status: measured
+    valid_stopped: 30
+    invalid: 0
+    total: 192
+    stopped: 30
+    cells: 2482
+    p2_inflation:
+      horizontal_m: 0.10513481964548854
+      vertical_m: 0.02
+      duration_s: 1.85
+      statistical_contract: 99% marginal XY-radius/yaw, not simultaneous pathwise
+        guarantee
+    overshoot_deg: 3
+    x_range_m:
+    - -0.875
+    - 0.7000000476837158
+    y_range_m:
+    - -0.5
+    - 0.5
+    turn_deceleration_p95_radps2: 1.4609431028366089
+    turn_deceleration_p05_radps2: 0.7471015453338623
+  TURN_0.6:
+    status: measured
+    valid_stopped: 29
+    invalid: 0
+    total: 192
+    stopped: 29
+    cells: 2703
+    p2_inflation:
+      horizontal_m: 0.12101313716815146
+      vertical_m: 0.02
+      duration_s: 2.15
+      statistical_contract: 99% marginal XY-radius/yaw, not simultaneous pathwise
+        guarantee
+    overshoot_deg: 3
+    x_range_m:
+    - -0.8999999761581421
+    - 0.75
+    y_range_m:
+    - -0.5249999761581421
+    - 0.5750000476837158
+    turn_deceleration_p95_radps2: 1.2060095071792603
+    turn_deceleration_p05_radps2: 0.7779740691184998

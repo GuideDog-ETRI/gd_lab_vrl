@@ -1,0 +1,20 @@
+# Proposal only; no implicit change to actor/OBS1/legacy ray evidence.
+minimum_obstacle_diameter_m: 0.05
+minimum_obstacle_height_m: 0.03
+range_error_floor_m: 0.02
+range_error_fraction: 0.02
+sensor_angle_error_deg: 0.5
+support_error_m: 0.02
+pose_rw_xy_m_sqrt_s: 0.015
+pose_rw_yaw_deg_sqrt_s: 0.3
+pose_slip_fraction: 0.03
+pose_white_xy_m: 0.005
+pose_white_yaw_deg: 0.2
+pose_delay_s: 0.04
+pose_sigma: 3.0  # Statistical working envelope, NOT a hard Gaussian bound.
+historical_obstacle_speed_bound_mps: null  # Unknown bound -> no old free reuse.
+max_captures: 6  # Internal cache only; OBS1 stays 3 frames, 4-bit age unchanged.
+xy_parts: 2
+z_max_piece_m: 0.05
+cell_chunk: 32
+beam_chunk: 32

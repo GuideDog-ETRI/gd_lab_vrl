@@ -4,7 +4,8 @@ from pathlib import Path
 import torch
 
 NEW_PREFIXES = ('nav_wide_encoder.', 'nav_near_encoder.', 'nav_normalizer.',
-                'nav_critic_wide.', 'nav_critic_near.', 'nav_critic_normalizer.')
+                'nav_critic_wide.', 'nav_critic_near.', 'nav_critic_normalizer.',
+                'nav_route_normalizer.', 'nav_critic_route_normalizer.')
 NEW_KEYS = {'actor.0.W_new', 'critic.0.W_new'}
 
 def migrate_state_dict(source, target):
@@ -36,4 +37,6 @@ def migrate_checkpoint(policy, path, *, expected_sha256):
     policy.load_state_dict(merged, strict=True)
     return {'source': str(path), 'source_sha256': digest, 'source_iteration': 3906,
             'nav_iteration': 0, 'fresh_keys': fresh, 'strict_load': True,
-            'ppo_optimizer': 'new', 'cenet_optimizer': 'new'}
+            'ppo_optimizer': 'new', 'cenet_optimizer': 'new',
+            'route_observation': {'version': 1, 'key': 'nav_route_features',
+                                  'features': ['route_yaw_sin', 'route_yaw_cos', 'route_lateral_error_m']}}

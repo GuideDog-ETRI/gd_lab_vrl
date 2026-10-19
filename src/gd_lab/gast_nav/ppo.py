@@ -60,6 +60,8 @@ def mirror_legacy(obs, actions, mode, *, env=None, base_mirror=mirror_gast, priv
         if key in ('nav_wide', 'nav_near'): value = value.flip(-2)
         elif key == 'nav_features':
             value = value.clone(); value[:, 5] *= -1; value[:, 13] *= -1
+        elif key == schema.ROUTE_OBS_KEY:
+            value = value.clone(); value[:, 0] *= -1; value[:, 2] *= -1
         elif key == 'nav_privileged':
             if privileged_mirror is None: raise ValueError('critic privileged mirror contract required')
             value = privileged_mirror(value)

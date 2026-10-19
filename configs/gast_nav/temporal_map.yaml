@@ -1,0 +1,29 @@
+rear_source: temporal_map
+context: training_static
+memory_free_for_certification: true
+memory_free_ttl_s: 0.5 # comparison overrides: 0.5 / 1 / 2 / 3
+support_ttl_s: 0.5 # never changed by memory TTL experiments
+retention_s: 10.0
+world_cells: [65, 65]
+resolution_m: 0.1
+query_chunk_envs: 128
+pose_level: P0
+initial_prior_for_certification: false
+extrinsics_file: configs/gast_nav/reference175b/sensor_configuration.yaml
+mid360_pattern_file: src/gd_lab/gast_nav/temporal_map/data/mid360_pattern.npy
+ouster_emitter_file: src/gd_lab/gast_nav/temporal_map/data/os1_emitters.json
+sensor_sim:
+  max_range_m: 6.0 # offline Ouster/HEAD D455 cap; Mid additionally capped by gdm livox_max_range=1.5
+  d455_min_range_m: 0.15
+  livox_vertical_fov_deg: [-7.0, 52.0] # explicit effective profile shared with UPDATE176
+  d455_resolution: [1280, 720]
+  d455_focal_mm: 1.93
+  d455_horizontal_aperture_mm: 3.896
+  range_noise_std_m: 0.0
+  dropout_probability: 0.0
+  ray_chunk: 4096
+gdm:
+  planning_launch: configs/gast_nav/reference175b/rbq.launch.py
+  sensor_configuration: configs/gast_nav/reference175b/sensor_configuration.yaml
+  trav_rbq: configs/gast_nav/reference175b/trav_rbq.yaml
+  trav_core: configs/gast_nav/reference175b/trav_core.yaml

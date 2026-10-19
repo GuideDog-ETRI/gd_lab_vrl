@@ -55,9 +55,11 @@ def validate_pilot(args,settings,world):
     if os.environ.get('CUDA_VISIBLE_DEVICES')!=('0' if diagnostic else '0,1,2'):raise ValueError('pilot visible GPUs must be exactly 0,1,2')
     if not args.distributed or (world!=settings['world_size'] and not diagnostic):raise ValueError('pilot requires exactly three ranks')
     if args.stage!='A0':raise ValueError('pilot is A0 only')
-    expected=settings['smoke_envs_per_rank']*world if args.pilot_smoke else settings['total_envs']
+    reference=os.environ.get('GAST_NAV_REFERENCE_DIAGNOSTIC')=='1'
+    if reference and (os.environ.get('GAST_NAV_MAP_BACKEND')!='torch' or args.pilot_smoke or world!=3):raise ValueError('reference diagnostic requires torch, full horizon, 3 ranks')
+    expected=48 if reference else settings['smoke_envs_per_rank']*world if args.pilot_smoke else settings['total_envs']
     if args.total_envs!=expected:raise ValueError('pilot env count outside authorization')
-    limit=settings['smoke_iterations'] if args.pilot_smoke else settings['max_iterations']
+    limit=30 if reference else settings['smoke_iterations'] if args.pilot_smoke else settings['max_iterations']
     if not 1<=args.max_iterations<=limit:raise ValueError('pilot iteration count outside authorization')
 
 
@@ -78,6 +80,9 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
     import yaml
     rank=int(os.environ.get('RANK','0'));world=dist.get_world_size() if dist.is_initialized() else 1
     cfg=env.cfg.nav_settings;train=cfg['training'];phase=env.cfg.nav_stage_settings
+    if os.environ.get('GAST_NAV_REFERENCE_DIAGNOSTIC')=='1':
+        if not args.pilot or os.environ.get('GAST_NAV_MAP_BACKEND')!='torch':raise ValueError('reference diagnostic guard')
+        pilot_settings=dict(pilot_settings,iteration_limit_s=1200.,iteration_hard_timeout_s=1200.)
     runtime=yaml.safe_load((root/'configs/gast_nav/runtime.yaml').read_text())
     a0_iterations = int(os.environ.get('GAST_NAV_A0_ITERATIONS', '0'))
     if a0_iterations:
@@ -154,6 +159,11 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
                'top5':[(s,i,str(p)) for s,i,p in top.records],
                'resume_contract':'weights/optimizers/normalizers + family curriculum; reset episodes, not bitwise trajectory resume'}
         path=log/name;temporary=path.with_suffix('.tmp');torch.save(state,temporary);temporary.replace(path)
+    growth_probe=None
+    if os.environ.get('GAST_ROLLOUT_GROWTH_PROBE')=='1':
+        import sys
+        from .rollout_growth167 import RolloutGrowthProbe,retained_counts
+        growth_probe=RolloutGrowthProbe();growth_probe.install(env,alg,sys.modules[__name__])
     iteration=start_iteration;tick=-1
     try:
         for iteration in range(start_iteration,args.max_iterations):
@@ -175,6 +185,11 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
                                'optimizer_state_preserved':True,'new_parameters_fresh':True,
                                'geometry_note':'prebuilt terrain retained; dynamic stage settings take effect at reset'},f)
             torch.cuda.synchronize();torch.cuda.reset_peak_memory_stats(args.device)
+            rollout_profile=None
+            if os.environ.get('GAST_PROFILE_ROLLOUT')=='1' and iteration==start_iteration:
+                from .rollout_profile import RolloutProfile
+                rollout_profile=RolloutProfile();rollout_profile.start(env,alg)
+            if growth_probe:growth_probe.flush()
             begin=time.perf_counter();reward_sum=0.;controllers=Counter();rewards=defaultdict(float);valid_rows=0
             terminations=0;timeouts=0;person0=env.nav.person_contacts.summary()['person_contact']
             with torch.no_grad():
@@ -205,6 +220,9 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
                         checkpoint(iteration,'stopped.pt');return {'status':'stopped','iteration':iteration,'partial_rollout_discarded':True,'optimizer_steps':optimizer_steps}
                 alg.compute_returns(obs)
             torch.cuda.synchronize();rollout_s=time.perf_counter()-begin
+            growth_timings=growth_probe.flush() if growth_probe else {}
+            if growth_probe:growth_timings['retained_counts']=retained_counts(env,alg)
+            if rollout_profile:rollout_profile.finish(log,rank)
             update_start=time.perf_counter()
             if os.environ.get('GAST_PROFILE_UPDATE')=='1' and iteration==start_iteration:
                 from .update_profile import UpdateProfile
@@ -224,6 +242,7 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
             peak=torch.cuda.max_memory_reserved(args.device);capacity=torch.cuda.get_device_properties(args.device).total_memory
             total=env.num_envs*horizon
             record=dict(iteration=iteration+1,rank=rank,num_envs=env.num_envs,horizon=horizon,
+                rollout_growth_host=growth_timings,
                 rollout_s=rollout_s,update_s=update_s,iteration_s=elapsed,step_per_s=total/elapsed,
                 optimizer_steps=optimizer_steps,peak_allocated_bytes=torch.cuda.max_memory_allocated(args.device),peak_reserved_bytes=peak,
                 reward_mean=reward_sum/total,actor_valid_rows=valid_rows,
@@ -255,6 +274,7 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
         (log/f'rank{rank}_partial.json').write_text(json.dumps(partial,indent=2)+'\n')
         raise
     finally:
+        if growth_probe:growth_probe.close()
         # A second stop request during Isaac close must not restore SIG_DFL
         # and replace the recorded timeout with an unrelated signal exit.
         signal.signal(signal.SIGUSR1,signal.SIG_IGN if previous==signal.SIG_DFL else previous)
@@ -307,7 +327,8 @@ if __name__ == '__main__':
     parser=argparse.ArgumentParser();parser.add_argument('--warmup',action='store_true',required=True)
     parser.parse_args()
     import faulthandler
-    faulthandler.dump_traceback_later(20, repeat=True)
+    if os.environ.get('GAST_NAV_PERIODIC_STACKS')=='1':
+        faulthandler.dump_traceback_later(20, repeat=True)
     try:
         warmup_maps(Path(__file__).resolve().parents[3])
     finally:

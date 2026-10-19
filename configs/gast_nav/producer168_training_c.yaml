@@ -1,0 +1,12 @@
+# Explicit simulation-only override. NOT deployable before measured lens cutout.
+producer168:
+  backend: triton
+  near_m: 0.15
+  max_m: 5.0
+  epsilon_m: 0.00001
+  self_trunk_aperture: true
+  context: training_sim
+  block_width: 8
+  block_height: 8
+# Ignore ONLY the initial containing simplified trunk convex box. All free starts
+# after max(near, whole-block last-exit upper bound). Legs/feet stay strict.

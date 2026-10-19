@@ -1,0 +1,20 @@
+# Opt-in diagnostic only. No change to deployment defaults or mixed-terrain jobs.
+primitive_c169:
+  enabled: false
+  tile_size_m: [24.0, 24.0]
+  body_collision_inner_xy_m: 4.0
+  generator: primitive_c_generator_cfg169
+  terrain_importer: make_primitive_c_importer169
+  legacy_terrain: false
+  implicit_border_mesh: false
+  implicit_ground_plane: false
+  terrain_curriculum: false
+  unique_tile_per_env: true
+  moving_cylinder: false
+  # Production complete remains false until the actual installer verifies that
+  # the generator+own robot colliders are the complete collision scene.
+proof169:
+  backend: triton  # CPU/float64 use original reference; explicit backend='torch' for audit.
+  ttl_s: 0.5       # Documentation only; value still read from unchanged maps.yaml.
+  target_envs: 1366
+  target_clipping_and_proof_ms: 50.0

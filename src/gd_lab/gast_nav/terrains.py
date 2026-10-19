@@ -144,6 +144,7 @@ def build_scene(kind, difficulty, cfg=None, *, seed=None):
         # so terrain sampling never perturbs another family's RNG stream.
         mesh=trimesh.creation.box(extents=np.array(b.half)*2)
         mesh.vertices=np.asarray(mesh.vertices)@transform[:3,:3].T+transform[:3,3]
+        mesh.metadata['gast_nav_sensor_solid']=b
         meshes.append(mesh)
     meshes[0].metadata[META_KEY]=asdict(meta)
     return meshes,origin,meta
@@ -179,7 +180,7 @@ def make_isaac_generator_class():
     from isaaclab.terrains import TerrainGenerator
     class GastNavTerrainGenerator(TerrainGenerator):
         def __init__(self,*args,**kwargs):
-            self.scene_grid={}; self._nav_serial=0
+            self.scene_grid={}; self.sensor_grid={}; self._nav_serial=0
             super().__init__(*args,**kwargs)
         def _get_terrain_mesh(self,difficulty,cfg):
             matches=[k for k,f in FUNCTIONS.items() if cfg.function is f]
@@ -193,10 +194,13 @@ def make_isaac_generator_class():
             translation=np.array([-local.size[0]/2,-local.size[1]/2,0.])
             mesh.apply_translation(translation); origin=origin+translation
             mesh.metadata[META_KEY]=meta
+            mesh.metadata['gast_nav_sensor_solids']=tuple(m.metadata['gast_nav_sensor_solid'] for m in meshes)
             return mesh,origin
         def _add_sub_terrain(self,mesh,origin,row,col,sub_terrain_cfg):
             meta=mesh.metadata.get(META_KEY)
-            if meta is not None: self.scene_grid[(row,col)]=meta
+            if meta is not None:
+                self.scene_grid[(row,col)]=meta
+                self.sensor_grid[(row,col)]=mesh.metadata['gast_nav_sensor_solids']
             else:
                 # LEGACY metadata is a tag/binding only, not a replacement for
                 # its existing terrain-specific oracle or command generator.

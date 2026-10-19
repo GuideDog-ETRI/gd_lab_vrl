@@ -12,6 +12,7 @@ def generator_class():
         def __init__(self,cfg,device='cpu'):
             super().__init__(cfg,device=device)
             cfg.nav_scene_grid=self.scene_grid
+            cfg.nav_sensor_grid=self.sensor_grid
     return CombinedGenerator
 
 

@@ -1,0 +1,15 @@
+# D-5 diagnostic assumptions, not deployment stopping guarantees.
+current_body_margin_m: 0.02
+delay_s: 0.04
+deceleration: 0.5
+angular_deceleration: 1.0
+gait_margin: 0.04
+turn_radius: 0.76
+reverse_overshoot_deg: 3.0
+samples: 17
+lateral_drift_m: 0.05 # diagnostic residual allowance; validated against ALL recorded trials
+qualification_file: logs/gast/nav_v1/update179/sweep_qualification.json
+
+scope: diagnostic
+sweep_qualification_gate: false
+calibration_file: logs/gast/nav_v1/update180/sweep_calibration.json

@@ -37,6 +37,7 @@ export TRITON_CACHE_DIR="$GAST_TRITON_CACHE_ROOT/warmup"
 unset CUDA_CACHE_PATH
 export TORCH_HOME="$launch/runtime/cache/torch" NUMBA_CACHE_DIR="$launch/runtime/cache/numba"
 mkdir -p "$launch/runtime/home" "$TRITON_CACHE_DIR"
+if [[ "${GAST_NAV_MAP_BACKEND:-triton}" != torch ]]; then
 # A fresh single-process compile precedes torchrun; bounded and inference-only.
 CUDA_VISIBLE_DEVICES=0 APPTAINERENV_CUDA_VISIBLE_DEVICES=0 \
  timeout --signal=TERM --kill-after=5s 30s apptainer exec --nv --writable-tmpfs \
@@ -47,6 +48,9 @@ for rank in 0 1 2; do
  mkdir -p "$GAST_TRITON_CACHE_ROOT/$rank"
  cp -a "$GAST_TRITON_CACHE_ROOT/warmup/." "$GAST_TRITON_CACHE_ROOT/$rank/"
 done
+else
+ printf '%s\n' '{"backend":"torch","triton_warmup":"skipped"}' > "$root/logs/gast/nav_v1/$GAST_RUN_ID/warmup.log"
+fi
 if [[ "$mode" = warmup ]]; then exit 0; fi
 nproc=3
 if [[ "${GAST_NAV_SINGLE_RANK_SMOKE:-0}" = 1 ]]; then
@@ -54,7 +58,11 @@ if [[ "${GAST_NAV_SINGLE_RANK_SMOKE:-0}" = 1 ]]; then
  nproc=1
  export CUDA_VISIBLE_DEVICES=0 APPTAINERENV_CUDA_VISIBLE_DEVICES=0
 fi
+# Reassert in the very shell that execs Apptainer, with one shared core path.
+cd "$root/logs/gast/nav_v1/$GAST_RUN_ID"
+ulimit -c unlimited
+printf 'core_limit=%s cwd=%s\n' "$(ulimit -c)" "$PWD" > core_setup.txt
 exec apptainer exec --nv --writable-tmpfs  --bind "$launch/runtime/usd:/tmp/IsaacLab" \
   "${GD_LAB_SIF:?set GD_LAB_SIF}" "${GD_LAB_PYTHON:?set GD_LAB_PYTHON}" -B \
   -m torch.distributed.run --standalone --nnodes=1 --nproc_per_node="$nproc" \
-  scripts/gast_nav/train.py "$mode_flag" --distributed --total_envs 4096 --headless "$@"
+  "$root/scripts/gast_nav/train.py" "$mode_flag" --distributed --total_envs 4096 --headless "$@"

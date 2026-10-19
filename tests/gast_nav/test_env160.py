@@ -195,7 +195,7 @@ def test_control_state_switch_hold_and_zero_history():
     from gd_lab.gast_nav.landing_fsm import LandingObservation
     from gd_lab.gast_nav.supervisor import HealthInput
     from tensordict import TensorDict
-    runtime=ControlRuntime([tile('nav_corridor')],CFG,RUNTIME,seed=42)
+    runtime=ControlRuntime([tile('nav_corridor')],dict(CFG,supervisor_mode='enforce'),RUNTIME,seed=42)
     runtime.reset([0],now_ms=0,yaws=[0.])
     o=LandingObservation(True,False,False,False,True,0.,0.,False,False)
     def tick(time,health):

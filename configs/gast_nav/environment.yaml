@@ -1,3 +1,4 @@
+supervisor_mode: shadow  # D-8 training; standalone/deployment ControlRuntime defaults enforce
 seed: 42
 physics_dt: 0.005
 policy_decimation: 2
@@ -15,8 +16,9 @@ commands:
   stop_start_toggle_s: 1.0
   brake_distance_m: 0.5
   brake_deceleration_mps2: 0.5
-  # Development simulation command cap; not a physical safety certification.
-  simulation_turn_cap_radps: 0.2
+  # UPDATE162 S1: commanded -0.3/-0.6/-1.0 -> measured -0.34/-0.61/-0.98 rad/s.
+  # Simulation envelope; deployment runtime verification remains separate.
+  simulation_turn_cap_radps: 1.0
 inertia:
   enabled: true
   optional_scene_probability: 0.3
@@ -33,6 +35,10 @@ inertia:
   gravity_bias_limit: 0.05
   gravity_mps2: 9.81
 sensors:
+  lower_depth:
+    enabled: true
+    profile: vendor_new
+    sampling_scale: 1  # canonical 80x45 pixels per camera; native source permits up to 8
   azimuth_count: 24
   elevation_count: 8
   elevation_deg: [-75.0, 75.0]
@@ -49,6 +55,9 @@ sensors:
   support_min_scatter: 1.0e-6
   ray_max_distance_m: 6.0
 rewards:
+  stair_end_stop: 0.2
+  stair_end_motion: -1.0
+  stopped_yaw_rate_radps: 0.05
   progress: 1.0
   overspeed: -1.0
   clearance: -2.0
@@ -89,6 +98,13 @@ landing_sensor:
   descent_drop_m: 0.10
   slip_speed_mps: 0.15
 observability:
+  r1_static_history: false
+  r2_unknown_components: false
+  certification_ttl_s: 2.0
+  unknown_fraction_limit: 0.10
+  unknown_cluster_area_m2: 0.01
+  self_body_margin_m: 0.02  # C2.3b current URDF collision projection only
+  required_bands: [B1, B2]  # C2.3a: B3 remains a policy/map input, not unknown-stop evidence.
   unknown_hold_s: 3.0
   forward_m: 0.8
   turn_radius_m: 0.76  # measured body-shape turn radius 0.71 + allowed centre drift 0.05 (R5 gate); margin extra

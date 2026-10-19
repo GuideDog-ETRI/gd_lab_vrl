@@ -27,6 +27,8 @@ class GastNavEnvCfg(GastRayIrV21Gap50TeacherCfg):
     def __post_init__(self):
         super().__post_init__()
         base,stage=settings(self.nav_stage)
+        if base.get('supervisor_mode')=='shadow':
+            base['rewards'].update(unknown_stop=.1,unknown_entry=-.1)
         self.nav_settings=base;self.nav_stage_settings=stage
         self.sim.dt=base['physics_dt'];self.decimation=base['policy_decimation']
         gen=self.scene.terrain.terrain_generator

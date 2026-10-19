@@ -16,7 +16,10 @@ def main():
     diagnostic_dir.mkdir(parents=True,exist_ok=True)
     stack_file=(diagnostic_dir/('rank'+os.environ.get('RANK','0')+'_stacks.txt')).open('ab',buffering=0)
     faulthandler.enable(file=stack_file,all_threads=True)
-    faulthandler.dump_traceback_later(120,repeat=True,file=stack_file)
+    # CPython's background traceback walker can race frame/code destruction.
+    # Keep native fault/SIGUSR2 handlers; periodic dumps are opt-in diagnostics.
+    if os.environ.get('GAST_NAV_PERIODIC_STACKS')=='1':
+        faulthandler.dump_traceback_later(120,repeat=True,file=stack_file)
     faulthandler.register(signal.SIGUSR2,file=stack_file,all_threads=True)
     def stamp(event):
         row={'event':event,'rank':os.environ.get('RANK','0'),'time':time.time()}
@@ -44,6 +47,7 @@ def main():
     parser.add_argument('--max_iterations',type=int)
     parser.add_argument('--save_interval',type=int)
     parser.add_argument('--resume',type=Path)
+    parser.add_argument('--easy-c184',action='store_true')
     parser.add_argument('--run_id',default=os.environ.get('GAST_RUN_ID'))
     parser.add_argument('--output',type=Path,default=ROOT/'tests/gast_nav/update160b_smoke')
     from isaaclab.app import AppLauncher
@@ -119,9 +123,19 @@ def main():
             cfg.scene.terrain.terrain_generator.num_rows=2
             cfg.scene.terrain.terrain_generator.num_cols=20
             cfg.scene.terrain.max_init_terrain_level=0
+        if args.easy_c184:
+            if not args.train or world!=1 or args.total_envs!=256 or args.max_iterations>20:
+                raise ValueError('UPDATE184 local smoke scope')
+            from gd_lab.gast_nav.fixture184 import configure184
+            cfg=configure184(cfg,diagnostic_dir,envs=256)
+            # The full-pixel static oracle is diagnostic, not the old 120s pilot pipeline.
+            pilot_settings=dict(pilot_settings,iteration_hard_timeout_s=1800.,iteration_limit_s=1800.)
         stamp('env_before')
         env=gym.make('Gd-GastNavV1-Rbq10-Dreamwaq-v0',cfg=cfg).unwrapped
         stamp('env_after')
+        if args.easy_c184:
+            env._contact174_force_gate=True
+            (diagnostic_dir/'resolved_config.json').write_text(json.dumps(cfg.nav_settings,indent=2))
         if args.smoke:
             terrain=env.scene.terrain;grid=terrain.cfg.terrain_generator.nav_scene_grid
             # Deterministic scene coverage without replacing actual mesh or metadata.
@@ -178,14 +192,11 @@ def main():
             assert force_error<1e-4
         else:
             from gd_lab.gast_nav.pilot_runner import run_training
-            # The host core_pattern is 'core'. Limit core ownership to the previous
-            # crashing rank so a multi-rank failure cannot fill disk with duplicate cores.
+            # All ranks share the run's one literal 'core' path (core_uses_pid=0).
             import resource
-            core_dir=diagnostic_dir/'core'
-            core_dir.mkdir(exist_ok=True)
-            resource.setrlimit(resource.RLIMIT_CORE,
-                (resource.RLIM_INFINITY,resource.RLIM_INFINITY) if rank==1 else (0,resource.RLIM_INFINITY))
-            os.chdir(core_dir)
+            resource.setrlimit(resource.RLIMIT_CORE,(resource.RLIM_INFINITY,resource.RLIM_INFINITY))
+            os.chdir(diagnostic_dir)
+            stamp('core_limit:'+str(resource.getrlimit(resource.RLIMIT_CORE)))
             faulthandler.enable(file=stack_file,all_threads=True)
             faulthandler.register(signal.SIGUSR2,file=stack_file,all_threads=True)
             stamp('runner_before')

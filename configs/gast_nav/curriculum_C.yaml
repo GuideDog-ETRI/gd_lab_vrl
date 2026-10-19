@@ -1,0 +1,29 @@
+# UPDATE167 preparation only; not automatically enabled by any stage.
+# Activate only after B-1 certificate/swept integration and C READY validation.
+scene_limits:
+  passage_min_width_m: 1.0
+  turn_min_delta_m: 0.2
+  v_cap_max_mps: 0.6
+  measured_nav_caps_mps: [0.4, 0.6]
+  measured_turn_rates_radps: [-0.3, -0.6]
+  stairs_min_width_m: 1.2
+  stairs_box_count: [0, 0]
+reward_overrides:
+  unknown_stop: 0.05
+  unknown_entry: -0.05
+  stopped_yaw_rate_radps: 0.05
+swept_candidate:
+  command_delay_s: 0.04
+  extra_control_ticks: 1
+  brake_deceleration_mps2: 0.5
+  provisional_turn_deceleration_radps2: 1.0
+  turn_reverse_overshoot_deg: 3.0
+  rw_xy_m_sqrt_s: 0.015
+  rw_yaw_deg_sqrt_s: 0.3
+  k_slip: 0.03  # dimensionless; UPDATE157 noise per 20 ms sample
+  white_xy_m: 0.005
+  white_yaw_deg: 0.2
+  pose_delay_s: 0.04
+  support_error_m: 0.02
+  envelope_quantile: 0.99
+  envelope_margin_m: 0.02

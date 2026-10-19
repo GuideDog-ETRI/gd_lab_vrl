@@ -45,3 +45,12 @@ CONDITION_KEYS = ("y_off", "margin", "turn_cap")    # v_cap lives in NAV1 only
 #   policy side (C1/C3/C4, Codex5090): migration.py, actor_critic.py, trainable.py, ppo.py,
 #                             commands.py (NAV1/ACK), landing_fsm.py, supervisor.py
 #   shared: this file (change only by agreement through Claude).
+
+# UPDATE179 / D-5: independent observation, old nav_features remains 16-wide.
+ROUTE_OBS_KEY = "nav_route_features"
+ROUTE_FEATURE_KEYS = ("route_yaw_sin", "route_yaw_cos", "route_lateral_error_m")
+ROUTE_FEATURE_DIM = len(ROUTE_FEATURE_KEYS)
+ROUTE_FEATURE_VERSION = 1
+# route_axis_yaw in NAV1 is world/odom yaw. Encode sin/cos(axis - body yaw).
+# Lateral = (robot - closest path point) dot directed path left normal, metres.
+# It is geometric crosstrack, NOT crosstrack minus the separately supplied c.y_off.
