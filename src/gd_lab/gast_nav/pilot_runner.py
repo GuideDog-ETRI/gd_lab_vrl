@@ -90,8 +90,8 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
         limit=float(limit);pilot_settings=dict(pilot_settings,iteration_limit_s=limit,iteration_hard_timeout_s=max(2*limit,pilot_settings['iteration_hard_timeout_s']))
     a0_iterations = int(os.environ.get('GAST_NAV_A0_ITERATIONS', '0'))
     if a0_iterations:
-        if args.pilot or not args.train or args.stage != 'A0' or args.resume:
-            raise ValueError('continuous A requires fresh --train --stage A0')
+        if args.pilot or not args.train or args.stage != 'A0':
+            raise ValueError('continuous A requires --train --stage A0 (fresh or resumed before the A0 boundary)')
         if not 1 <= a0_iterations <= 300 or not a0_iterations < args.max_iterations <= 3000:
             raise ValueError('continuous A exceeds authorized A0/total bounds')
     policy.train()
@@ -267,9 +267,9 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
             # Online Top-5 (D-9): rates summed over ranks, criteria JSON re-read each iteration (rank 0).
             counts=torch.cat((env.nav.top5_take(),torch.tensor([terminations,timeouts],device=args.device,dtype=torch.float64)))
             if world>1:dist.all_reduce(counts)
-            row=top5_rates(counts[:10].tolist(),counts[10].item(),counts[11].item())
+            row=top5_rates(counts.tolist())  # this iteration only (logged; the window uses summed counts)
             if rank==0:
-                decision=online_top5.observe(iteration+1,row,args.stage)
+                decision=online_top5.observe(iteration+1,counts.tolist(),args.stage)
                 kept=online_top5.consider(decision,lambda path:checkpoint(iteration+1,str(path.relative_to(log))))
                 with (log/'top5_decisions.jsonl').open('a') as f:f.write(json.dumps(dict(decision,rates=row,kept=kept),allow_nan=False,default=str)+'\n')
                 if decision['criteria_message']:print(json.dumps({'top5':decision['criteria_message']}),flush=True)
