@@ -1213,3 +1213,13 @@ NAV1-ACK(6장)로 다음을 gdm에 돌려준다: 적용된 조건, hold 사유, 
 | 학습 smoke | 실행기 준비(GPU 1장, 256 env, A0 10 iter → A 10 iter, 저장 간격 5, `--resume` 1회) | `scripts/gast_nav/train_local184.sh` |
 - 기존 3906 실험·학습 코드는 수정하지 않는다. GAST-Nav 전용 디렉토리만 변경한다.
 
+**검증과 단계 A 시작 (2026-10-19 저녁)**
+| 문제 정의 | 결과 | 반영 방향 |
+|---|---|---|
+| 그림자 감독기 쉬운 장면 진단 (64 env, 600 tick) | HOLD 0%, progress 0.52, 반례 통과 | C READY 통과 |
+| 정밀 오라클을 켠 학습 (`--easy-c184`) | 300 s/iter (256 env) | 평가·배포 검증 전용 |
+| 기본 shadow 학습 (OBS1 unknown, 정상 장면, 3906 지형 입력) | 로컬 15 s/iter (256 env), A0→A 전환·저장·재개 정상 | 본 학습 설정 |
+| onvlm2 2-GPU DDP | NCCL P2P·SHM 경로가 bare broadcast에서도 illegal memory access. 소켓 경로는 정상 | 실행기 기본 `NCCL_P2P_DISABLE=1 NCCL_SHM_DISABLE=1`(`GAST_NAV_NCCL_SOCKET`) |
+| onvlm2 2-GPU smoke (4096 env, 10 iter) | A0 83–92 s, A 93–102 s/iter, NaN 없음, checksum 정상, 62 GB/GPU | rollout이 62→72 s로 증가하는 경향을 본 학습에서 감시 |
+| 단계 A 시작 | run `gast_nav_v1_A_20261019`, onvlm2 GPU 0·1(GPU 2·3은 다른 사용자 사용 중), 4096 env, A0 300 → A, 최대 3000 iter, 저장 50, iteration 제한 200 s, 커밋 `1542a6f` | 예상 약 80–85시간 |
+
