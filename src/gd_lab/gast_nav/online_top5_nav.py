@@ -196,13 +196,14 @@ class OnlineTop5:
         return True
 
     def state(self):
-        return {"records": [(s, i, str(p)) for s, i, p in self.records], "baseline": self.baseline, "unknown_baseline": self.unknown_baseline,
-                "history": list(self.history)[-max(DEFAULTS["window"], 200):]}
+        return {"rate_mode": "sums", "records": [(s, i, str(p)) for s, i, p in self.records], "baseline": self.baseline,
+                "unknown_baseline": self.unknown_baseline, "history": list(self.history)[-max(DEFAULTS["window"], 200):]}
 
     def load_state(self, state):
         self.records = [(s, i, Path(p)) for s, i, p in state.get("records", []) if Path(p).is_file()]
-        self.baseline = state.get("baseline")
-        self.unknown_baseline = state.get("unknown_baseline")
+        if state.get("rate_mode") == "sums":  # baselines from the rate-averaging version are invalid; re-measure
+            self.baseline = state.get("baseline")
+            self.unknown_baseline = state.get("unknown_baseline")
         for row in state.get("history", []):
             if "counts" in row:  # rows from the first (rate-averaging) version are dropped
                 self.history.append(row)

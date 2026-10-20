@@ -54,3 +54,14 @@ def test_state_roundtrip_and_old_rows_dropped(tmp_path):
  s=t.state();s['history'].append({'iteration':80,'P':.5})
  u=OnlineTop5(tmp_path/'best',tmp_path/'c.json');u.load_state(s)
  assert u.baseline==t.baseline and len(u.history)==len(t.history)
+
+
+def test_old_state_baselines_are_remeasured(tmp_path):
+    top5 = OnlineTop5(tmp_path / "best", tmp_path / "criteria.json")
+    top5.load_state({"baseline": 0.41, "unknown_baseline": 0.63, "history": [{"iteration": 1, "rates": {}}]})
+    assert top5.baseline is None and top5.unknown_baseline is None and not top5.history
+    fresh = OnlineTop5(tmp_path / "best2", tmp_path / "criteria2.json")
+    fresh.baseline, fresh.unknown_baseline = 0.9, 0.6
+    again = OnlineTop5(tmp_path / "best3", tmp_path / "criteria3.json")
+    again.load_state(fresh.state())
+    assert again.baseline == 0.9 and again.unknown_baseline == 0.6
