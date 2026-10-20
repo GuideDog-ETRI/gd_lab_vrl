@@ -30,7 +30,7 @@ def test_gates_spacing_baseline_and_score(tmp_path):
  assert abs(t.baseline-.9)<1e-9 and abs(t.unknown_baseline-.01)<1e-9
  s=.35*.5+.15*.8+.2*.98+.1*.99+.1*.9+.1*.9;assert abs(d['score']-s)<1e-9
  assert t.consider(d,lambda p:p.write_text('x'))
- d=t.observe(450,counts(P=.9),'A');assert 'spacing' in d['reasons']
+ d=t.observe(402,counts(P=.9),'A');assert d['eligible'] and t.consider(d,lambda p:p.write_text('x'))  # no spacing: neighbour kept too
  for i in range(451,560):d=t.observe(i,counts(C=.2),'A')
  assert 'termination rate' in d['reasons']
  for i in range(560,620):d=t.observe(i,counts(U=.2),'A')
