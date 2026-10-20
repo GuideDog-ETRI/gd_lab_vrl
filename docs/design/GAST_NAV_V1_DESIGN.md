@@ -1227,7 +1227,7 @@ NAV1-ACK(6장)로 다음을 gdm에 돌려준다: 적용된 조건, hold 사유, 
 
 이전 교사 학습(`src/gd_lab/rl/online_top5.py`)처럼 **학습 중에 기준을 바꿀 수 있게** 한다. 구현은 `src/gd_lab/gast_nav/online_top5_nav.py`(기존 파일은 수정하지 않음).
 
-**점수** (최근 `window`=50 iter 평균)
+**점수** (최근 `window`=50 iter의 카운터 **합계로 나눈 비율**. 에피소드가 한꺼번에 끝나는 주기 때문에 iter별 비율은 0.05~0.9로 출렁이므로 평균하지 않는다, 2026-10-20)
 
 > **S = 0.35·P + 0.15·T + 0.20·(1 − C) + 0.10·(1 − U) + 0.10·(1 − R) + 0.10·L**
 
@@ -1241,16 +1241,16 @@ NAV1-ACK(6장)로 다음을 gdm에 돌려준다: 적용된 조건, hold 사유, 
 | L | LEGACY 성공률 | LEGACY 에피소드 종료 중 time-out으로 끝난 비율 |
 
 **후보 자격(gate)**
-- 단계 A이고 iteration ≥ 400, 기존 후보와 100 iter 이상 간격
+- 단계 A이고 iteration ≥ 400. **간격 없음**: 매 iteration 기존 Top-5와 비교해 최저점보다 높으면 교체한다(사용자 2026-10-20). 오류 재시작용 주기 저장(`latest.pt`)은 Top-5와 별개이고, 그 iteration이 Top-5에 들면 둘 다 저장된다
 - C ≤ 0.09
 - U ≤ U 기준선 + 0.05: 정책 지도는 몸 주변이 대부분 unknown이라 동결 3906도 NAV tick의 약 절반에서 unknown에 들어간다(로컬 smoke). 그래서 고정값이 아닌 상대 기준이다
 - L ≥ L 기준선 − 0.02
-- 기준선(U, L)은 학습 첫 50 iter 평균이다. 이 구간의 정책은 adapter가 0으로 시작하므로 3906과 같다. JSON에서 직접 값을 줄 수도 있다
+- 기준선(U, L)은 `baseline_start_iteration`부터 50 iter의 합계 비율이다(기본 21: 첫 time-out이 iter 약 20에 나온다. 이 구간 정책은 adapter가 0에서 시작해 3906에 가깝다). JSON에서 직접 값을 줄 수도 있다. 비율 평균 방식으로 저장된 체크포인트에서 재개하면 기준선을 버리고 다시 잰다. 실행 `gast_nav_v1_A_20261019_r400`은 iter 401–450 실측값(L 0.9971, U 0.6566)을 JSON으로 고정했다
 
 **온라인 변경**
 - 기준 파일: `logs/gast/nav_v1/<run>/top5_criteria.json`. rank 0이 매 iteration 파일의 변경 시각·크기를 확인하고, 바뀌면 다시 읽는다.
 - 잘못된 값이면 마지막 정상 값을 유지하고 학습은 멈추지 않는다.
-- 바꿀 수 있는 키: `w_P, w_T, w_C, w_U, w_R, w_L, window, top5_start_iteration, top5_min_spacing, max_termination_rate, max_unknown_entry_increase, unknown_baseline, max_legacy_drop, legacy_baseline, baseline_iterations`
+- 바꿀 수 있는 키: `w_P, w_T, w_C, w_U, w_R, w_L, window, top5_start_iteration, top5_min_spacing, max_termination_rate, max_unknown_entry_increase, unknown_baseline, max_legacy_drop, legacy_baseline, baseline_iterations, baseline_start_iteration`
 - 매 iteration 결정은 `top5_decisions.jsonl`에, 현재 Top-5는 `best_top5/top5.json`에 기록한다.
 - 최종 선택은 Top-5 후보를 MuJoCo와 E1으로 다시 평가해 정한다(11장).
 
