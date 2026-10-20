@@ -13,7 +13,7 @@ commands:
   resample_s: 5.0
   condition_change_probability: 0.1
   condition_rate_per_s: {y_off: 0.02, margin: 0.01, turn_cap: 0.1}
-  stop_start_toggle_s: 1.0
+  stop_start_toggle_s: 2.5  # 2026-10-21: 1.0 s flipped go before the ~1 s deceleration finished (stop_start T 0.26)
   brake_distance_m: 0.5
   brake_deceleration_mps2: 0.5
   # UPDATE162 S1: commanded -0.3/-0.6/-1.0 -> measured -0.34/-0.61/-0.98 rad/s.

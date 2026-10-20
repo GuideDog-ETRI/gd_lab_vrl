@@ -53,6 +53,9 @@ def reward_terms(*,mode,go,phase,feasible,observed,v_path,v_cap,speed,yaw_rate,t
         stable=torch.zeros_like(wait) if support_stable is None else support_stable.bool()
         terms['stair_end_stop']=torch.where(wait & stopped & stable & (yaw_rate.abs()<cfg.get('stopped_yaw_rate_radps',.05)),1.,0.)
         terms['stair_end_motion']=torch.where(wait,speed+yaw_rate.abs(),0.)
+        # 2026-10-21 (RL replay): go stays 1 during the stair-end wait, so progress paid for moving on
+        # against stair_end_motion. No progress while the wait holds.
+        terms['progress']=torch.where(wait,0.,terms['progress'])
     return terms,{name:value*cfg[name] for name,value in terms.items()}
 
 def legacy_reward_masks(mode,phase,go,hold):
