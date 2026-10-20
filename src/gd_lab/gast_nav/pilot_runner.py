@@ -131,7 +131,11 @@ def run_training(*,env,policy,obs,args,root,migration,pilot_settings):
         restore_family_start_levels(env.scene.terrain,env.scene.env_origins,families,saved.get('family_levels',{}))
         raw,_=env.reset();obs=TensorDict(raw,batch_size=[env.num_envs],device=args.device)
         top.records=[(s,i,Path(p)) for s,i,p in saved.get('top5',[]) if Path(p).is_file() and Path(p).parent.resolve()==top.directory.resolve()]
-        if 'online_top5' in saved:online_top5.load_state(saved['online_top5'])
+        if 'online_top5' in saved:
+            online_top5.load_state(saved['online_top5'])
+            if os.environ.get('GAST_NAV_TOP5_FRESH')=='1':
+                # Reward/task changed at this resume: old scores are not comparable. Files stay in the old run.
+                online_top5.records=[]
     optimizer_steps=0
     original_step=alg.optimizer.step
     def counted_step(*a,**kw):

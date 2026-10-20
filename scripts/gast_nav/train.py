@@ -190,6 +190,10 @@ def main():
                 cylinder_enabled=int(env.nav.cylinder.enabled.sum()),cylinder_C_steps=20)
             assert 0 in controllers and 1 in controllers
             assert force_error<1e-4
+        elif os.environ.get('GAST_NAV_REPLAY_OUT'):
+            # RL replay recording (tools/rl_replay); no training, no checkpoint writes.
+            from gd_lab.gast_nav.replay_nav import record_nav_replay
+            result.update(record_nav_replay(env=env,policy=policy,obs=obs,args=args,root=ROOT))
         else:
             from gd_lab.gast_nav.pilot_runner import run_training
             # All ranks share the run's one literal 'core' path (core_uses_pid=0).

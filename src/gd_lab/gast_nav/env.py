@@ -524,9 +524,20 @@ class NavState:
             speed_b=d.root_lin_vel_b[:,:2].norm(dim=-1);yaw_b=d.root_ang_vel_b[:,2].abs()
             stopped=(speed_b<self.cfg['rewards']['stopped_speed_mps'])&(yaw_b<self.cfg['rewards'].get('stopped_yaw_rate_radps',.05))
             need_stop=(nav|turn)&(~self.go.bool()|self.stair_end184.wait)
+            self.last_need_stop=need_stop;self.last_stopped=stopped
             c=self.top5_counts
             c[0]+=(vpath/vcap).clamp(0,1)[nav_go].sum();c[1]+=nav_go.sum()
             c[2]+=(need_stop&stopped).sum();c[3]+=need_stop.sum()
+            if os.environ.get('GAST_NAV_STOP_DIAG'):
+                # Off by default. Per need-stop tick: why T is low (2026-10-21 diagnosis).
+                if not hasattr(self,'stop_off_s'):self.stop_off_s=torch.zeros_like(speed_b);self.stop_rows=[]
+                self.stop_off_s=torch.where(need_stop,self.stop_off_s+env.step_dt,torch.zeros_like(self.stop_off_s))
+                ids=need_stop.nonzero().flatten()[:64].tolist();tasks=self.control.commands.task
+                self.stop_rows+=[(tasks[i],int(self.mode[i]),bool(self.stair_end184.wait[i]),round(float(self.stop_off_s[i]),3),
+                                  round(float(speed_b[i]),4),round(float(yaw_b[i]),4)) for i in ids]
+                if len(self.stop_rows)>=2000:
+                    with open(os.environ['GAST_NAV_STOP_DIAG'],'a') as f:f.writelines(' '.join(map(str,r))+'\n' for r in self.stop_rows)
+                    self.stop_rows=[]
             c[4]+=(self.entered_unknown.bool()&nav).sum();c[5]+=nav.sum()
             c[6]+=(torch.rad2deg(self.positive_yaw)/3.).clamp(0,1)[turn].sum();c[7]+=turn.sum()
             self.stair_end184.tick(foot_z=d.body_pos_w[:,self.foot_ids,2],contacts=feet_contact,pitch=pitch,roll=roll,
@@ -539,6 +550,7 @@ class NavState:
             entered_forbidden=self.clearance<self.features[:,14],cfg=self.cfg['rewards'],stair_mask=stair,
             support_stable=self.support_stable,entered_unknown=self.entered_unknown,supervisor_mode=self.cfg.get('supervisor_mode','enforce'),
             stair_end_wait=self.stair_end184.wait if self.cfg.get('supervisor_mode')=='shadow' else None)
+        self.reward_weighted=weighted  # per-env rates; RL replay splits nav_total with these
         self.reward_log={k:float(v.mean()) for k,v in weighted.items()}
         return sum(weighted.values())
 

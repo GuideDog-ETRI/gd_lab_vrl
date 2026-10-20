@@ -66,4 +66,6 @@ def masked_term(original,mask_name):
 def nav_reward(env):
     nav=getattr(env,'nav',None)
     if nav is None:return torch.zeros(env.num_envs,device=env.device)
-    return nav.compute_rewards()
+    total=nav.compute_rewards()
+    nav.reward_weighted_rm=nav.reward_weighted  # the RewardManager tick (prepare() recomputes after resets)
+    return total
