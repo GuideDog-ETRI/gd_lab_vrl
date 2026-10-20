@@ -13,7 +13,8 @@ oscillate between ~0.05 and ~0.9 and must not be averaged; finding 2026-10-20):
     R  reverse rotation    mean clamp(CCW accumulated deg / 3, 0, 1) over TURN ticks
     L  LEGACY success      LEGACY episodes ended by time-out / LEGACY episodes ended
 
-A candidate is eligible only when it is in stage A, past top5_start_iteration,
+A candidate is compared with the kept entries on every iteration (user 2026-10-20: no spacing;
+periodic latest.pt saves are separate crash recovery). It is eligible only when it is in stage A, past top5_start_iteration,
 at least top5_min_spacing iterations from every kept entry, and passes the gates
 C <= max_termination_rate, U <= unknown_baseline + max_unknown_entry_increase,
 L >= legacy_baseline - max_legacy_drop. A baseline < 0 means "measure it":
@@ -38,7 +39,7 @@ DEFAULTS = {
     "w_P": 0.35, "w_T": 0.15, "w_C": 0.20, "w_U": 0.10, "w_R": 0.10, "w_L": 0.10,
     "window": 50,
     "top5_start_iteration": 400,
-    "top5_min_spacing": 100,
+    "top5_min_spacing": 1,
     "max_termination_rate": 0.09,
     "max_unknown_entry_increase": 0.05,
     "unknown_baseline": -1.0,
