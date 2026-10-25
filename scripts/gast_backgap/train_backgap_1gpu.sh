@@ -4,6 +4,9 @@
 # - Start: 3906_top1 (f3e7afe5...) via --warm_start_rayir: same weights, new PPO, CENet optimizer and terrain levels restored.
 # - Task Gd-GastRayIrV21Gap50Back-Rbq10-Dreamwaq-v0 = 3906 task + reversed gap commands (p_back .4 -> .7, |v| <= 1.0 m/s)
 #   + direction-aware hop penalties. Same gap widths/height offsets and curriculum as forward.
+# - Continuation: BACKGAP_SOURCE=<model_N.pt of this task> BACKGAP_SOURCE_SHA256=<sha> BACKGAP_UPDATES=<n>
+#   GD_LAB_BACKGAP_RAMP_STEPS=0 (p_back already 0.7); weights/CENet/terrain levels restored, new PPO, iteration from 0.
+# - BACKGAP_TASK=Gd-GastRayIrV21Gap50BackV2-Rbq10-Dreamwaq-v0: V2 (backward clean attempts + backward nose-up penalty).
 # - train: 1024 envs x 100 steps x 3000 updates, seed 42, save 100, online Top-5 every update (spacing 1) from 200.
 set -euo pipefail
 script="$(realpath "${BASH_SOURCE[0]}")"
@@ -13,11 +16,11 @@ gpu="${2:-0}"
 shift $(( $# >= 2 ? 2 : 1 ))
 case "$mode" in
   smoke) envs=64; horizon=16; updates=5; save=5 ;;
-  train) envs=1024; horizon=100; updates=3000; save=100 ;;
+  train) envs=1024; horizon=100; updates=${BACKGAP_UPDATES:-3000}; save=100 ;;
   *) echo "bad mode: $mode" >&2; exit 2 ;;
 esac
 teacher="${BACKGAP_SOURCE:-/home/user/gd_project/archive/gd_lab_vrl_worktrees/gast_nav_v1/checkpoints/teachers/gast/rayir_top5_20261016/3906_gap50_from_dwb38000/best_top5/3906_top1.pt}"
-sha=f3e7afe53ea8be0f2dd777f331af417aba20b13b5e5be5470ec3d939470f4d98
+sha=${BACKGAP_SOURCE_SHA256:-f3e7afe53ea8be0f2dd777f331af417aba20b13b5e5be5470ec3d939470f4d98}
 test -s "$teacher" || { echo "missing 3906: $teacher" >&2; exit 2; }
 cd "$root"
 export PYTHONPATH="$root/src" TRAIN_ARM=4 PYTHONUNBUFFERED=1 OMNI_KIT_ACCEPT_EULA=YES
@@ -37,7 +40,7 @@ exec apptainer exec --nv --writable-tmpfs --bind "$root/logs/usd_tmp:/tmp/IsaacL
  "${GD_LAB_SIF:-/home/user/workspace/gd_lab_isaaclab.sif}" \
  "${GD_LAB_PYTHON:-/home/user/workspace/venv_apptainer/bin/python}" -m torch.distributed.run --standalone --nnodes=1 \
  --nproc_per_node=1 scripts/gast_backgap/train_backgap.py --headless --distributed --total_envs "$envs" --seed 42 \
- --task Gd-GastRayIrV21Gap50Back-Rbq10-Dreamwaq-v0 --warm_start_rayir "$teacher" --warm_start_sha256 "$sha" \
+ --task "${BACKGAP_TASK:-Gd-GastRayIrV21Gap50Back-Rbq10-Dreamwaq-v0}" --warm_start_rayir "$teacher" --warm_start_sha256 "$sha" \
  --policy_lr 1e-4 --terrain_lr 3e-4 \
  --logger tensorboard --experiment_name gast/backgap --max_iterations "$updates" \
  agent.num_steps_per_env="$horizon" agent.algorithm.num_mini_batches=4 agent.algorithm.num_learning_epochs=5 \

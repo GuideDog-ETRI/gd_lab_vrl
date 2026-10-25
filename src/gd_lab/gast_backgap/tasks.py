@@ -20,6 +20,8 @@ from gd_lab.gast.tasks import GastRayIrV21Gap50TeacherCfg
 from gd_lab.mdp.gap_stair_v2_math import sample_v21_speed_in_ceiling, speed_ceiling
 from gd_lab.mdp.gap_stair_v21 import GapHindHop, V21VelocityCommand
 from gd_lab.mdp.platform_gap_terms import boarding_family_mask
+from gd_lab.mdp.platform_gap_attempts import CONTACT_FORCE
+from gd_lab.mdp.platform_gap_finetune import GapMonitor
 
 BACK_SPEED_MAX = 1.0
 P_BACK_START, P_BACK_END = 0.4, 0.7
@@ -100,7 +102,62 @@ class GastRayIrV21Gap50BackTeacherCfg(GastRayIrV21Gap50TeacherCfg):
                                                    params={"sensor_cfg": front, "backward": True})
 
 
+class MotionDirectionGapMonitor(GapMonitor):
+    """V2 (2026-10-24): ``GapMonitor`` whose attempt direction is the walking direction, not the heading.
+
+    The attempt tracker picks the slot "in front" from ``heading.cos() >= 0``. Walking backward the robot moves away
+    from that slot, so a backward crossing never became an attempt: no clean bonus (platform_gap_clean,
+    gap_foot_clean) and no clean G in the Top-5. Here the tracker gets "moving toward +x" = heading +x XOR backward.
+    Intrusion cost is per slot and already direction-free.
+    """
+
+    def __call__(self, env, asset_cfg: SceneEntityCfg, sensor_cfg: SceneEntityCfg, strict_contact: bool = False):
+        if self._crossing is None:
+            self._check_order(env)
+            self._check_feet(env, asset_cfg, sensor_cfg)
+        robot = env.scene[asset_cfg.name]
+        feet = robot.data.body_pos_w[:, asset_cfg.body_ids]
+        origins = env.scene.env_origins
+        slots, lower = self.geometry.for_envs(env)
+        force = env.scene[sensor_cfg.name].data.net_forces_w[:, sensor_cfg.body_ids].norm(dim=-1)
+        cmd = env.command_manager.get_term("base_velocity")
+        backward = cmd.backward if hasattr(cmd, "backward") else cmd.vel_command_b[:, 0] < 0
+        toward_plus_x = (robot.data.heading_w.cos() >= 0) ^ backward
+        result = self.tracker.update(
+            feet[..., 0] - origins[:, None, 0], feet[..., 2], slots, lower + origins[:, None, 2],
+            toward_plus_x, boarding_family_mask(env), self._crossing.last_event, force > CONTACT_FORCE,
+        )
+        self.cost, self.clean_event = result.cost, result.clean_event
+        return torch.zeros(env.num_envs, device=env.device)
+
+
+def backward_nose_up(env, limit_deg: float = 8.0):
+    """V2: per second, nose-up pitch above ``limit_deg`` (rad) on gap tiles while the command is backward.
+
+    MuJoCo (2026-10-23): backing over a gap lifts the front 10-20 deg; failed runs kept rising to 70-90 deg and
+    flipped backward. The v2.1 gap pitch term (projected gravity x squared) is ~0.07 at 15 deg.
+    nose-up angle = asin(-g_x) with g = projected gravity in the body frame.
+    """
+    g = env.scene["robot"].data.projected_gravity_b
+    nose_up = torch.asin((-g[:, 0]).clamp(-1.0, 1.0))
+    cmd = env.command_manager.get_term("base_velocity")
+    backward = cmd.backward if hasattr(cmd, "backward") else cmd.vel_command_b[:, 0] < 0
+    excess = (nose_up - math.radians(limit_deg)).clamp_min(0.0)
+    return excess * (backward & boarding_family_mask(env)).float()
+
+
+@configclass
+class GastRayIrV21Gap50BackV2TeacherCfg(GastRayIrV21Gap50BackTeacherCfg):
+    """V2: backward crossings count as attempts (clean bonus, clean G) + backward nose-up penalty on gap tiles."""
+
+    def __post_init__(self):
+        super().__post_init__()
+        self.rewards.platform_gap_monitor.func = MotionDirectionGapMonitor
+        self.rewards.backward_nose_up = RewardTermCfg(func=backward_nose_up, weight=-5.0, params={"limit_deg": 8.0})
+
+
 TASK = "GastRayIrV21Gap50Back"
 TASK_ID = "Gd-GastRayIrV21Gap50Back-Rbq10-Dreamwaq-v0"
+TASK_ID_V2 = "Gd-GastRayIrV21Gap50BackV2-Rbq10-Dreamwaq-v0"
 SOURCE_TASK_ID = "Gd-GastRayIrV21Gap50-Rbq10-Dreamwaq-v0"
 assert math.isclose(BACK_SPEED_MAX, 1.0)
