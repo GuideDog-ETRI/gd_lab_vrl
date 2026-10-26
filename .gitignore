@@ -23,3 +23,6 @@ tests/gast_nav/cpu_results.log
 tests/gast_nav/update*_smoke/
 tests/gast_nav/update*_smoke_console.txt
 tests/gast_nav/update*_cpu*_result.txt
+
+# local only (not in GitHub)
+/archive/
