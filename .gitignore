@@ -16,3 +16,6 @@ wandb/
 *.safetensors
 *.mp4
 *.webm
+
+# local only (not in GitHub)
+/archive/
