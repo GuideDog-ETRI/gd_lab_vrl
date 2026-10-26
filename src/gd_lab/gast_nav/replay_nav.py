@@ -81,10 +81,31 @@ def record_nav_replay(*, env, policy, obs, args, root):
                 super().after_step(reward, done)
 
             def finish(self, bootstrap, out):
-                self.rec = {k: [v[:keep] for v in rows] for k, rows in self.rec.items()}
-                self.n = min(keep, self.n)
-                self.meta['num_envs'] = self.n
-                return super().finish(bootstrap[:keep], out)
+                # Envs are tiled by scene kind, so the first ids are often all LEGACY, and the envs with the
+                # most need-stop ticks just stand still. Keep, per task (round-robin), the envs with the most
+                # stop<->go switches and a balanced moving/stopped share, so the replay shows both.
+                need = torch.stack(self.rec['need_stop'], 1)
+                switches = (need[:, 1:] != need[:, :-1]).sum(1).float()
+                share = need.mean(1)
+                score = switches * 10 + torch.minimum(share, 1 - share)
+                task = torch.stack(self.rec['task'], 1).mode(1).values.long()
+                order = score.argsort(descending=True).tolist()
+                picked, per_task = [], {}
+                for rank in range(keep):
+                    for i in order:
+                        t = int(task[i])
+                        if t != TASKS.index('legacy') and i not in picked and per_task.get(t, 0) == rank and switches[i] > 0:
+                            picked.append(i); per_task[t] = rank + 1
+                        if len(picked) == keep:
+                            break
+                    if len(picked) == keep:
+                        break
+                picked += [i for i in order if i not in picked][:keep - len(picked)]
+                index = torch.tensor(picked, device=bootstrap.device)
+                self.rec = {k: [v[index] for v in rows] for k, rows in self.rec.items()}
+                self.n = len(picked)
+                self.meta.update(num_envs=self.n, source_env_ids=picked)
+                return super().finish(bootstrap[index], out)
 
         env.reward_manager = shim  # only for RolloutLog.__init__ (term names)
         log = NavLog(env, task='Gd-GastNavV1-Rbq10-Dreamwaq-v0', checkpoint=str(args.resume), gamma=0.99, lam=0.95,
