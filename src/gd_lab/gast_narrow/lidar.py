@@ -77,11 +77,19 @@ def _quat_to_matrix(q):
 
 
 class NarrowLidarMap(ManagerTermBase):
-    """Observation term: [N, FRAMES*NY*NX] occupancy, refreshed every PERIOD_S per env (random phase)."""
+    """Observation term: [N, FRAMES*NY*NX] occupancy, refreshed every PERIOD_S per env (random phase).
+    Subclasses may change the cell size (CELL_X along x, CELL_Y along y); the defaults are v1's 5 cm."""
+
+    CELL_X, CELL_Y = CELL, CELL
+    NX, NY = NX, NY
 
     def __init__(self, cfg, env):
         super().__init__(cfg, env)
+        import os
         from gd_lab.teachers.bivt.raycast_visibility import warp_mesh_cast
+        if os.environ.get("NARROW_WARP_VERIFY") == "1":  # debugging: warp checks every launch (slow)
+            import warp as wp
+            wp.config.verify_cuda = True
         scanner = env.scene["height_scanner"]
         self.cast = warp_mesh_cast(scanner.meshes[scanner.cfg.mesh_prim_paths[0]])
         d = env.device
@@ -92,7 +100,7 @@ class NarrowLidarMap(ManagerTermBase):
         el, az = livox_grid()
         self.livox_el, self.livox_az = el.to(d), az.to(d)
         n = env.num_envs
-        self.frames = torch.zeros(n, FRAMES, NY * NX, device=d)
+        self.frames = torch.zeros(n, FRAMES, self.NY * self.NX, device=d)
         self.phase = torch.randint(0, self.period, (n,), device=d)
         self.mount_dp = torch.zeros(n, 2, 3, device=d)
         self.mount_dr = torch.eye(3, device=d).repeat(n, 2, 1, 1)
@@ -100,6 +108,7 @@ class NarrowLidarMap(ManagerTermBase):
         self.counts = torch.zeros(3, device=d, dtype=torch.float64)  # [captures, occupied cells, cells]
         self.foot_ids = env.scene["robot"].find_bodies(".*_foot")[0]
         self.pending = torch.ones(n, dtype=torch.bool, device=d)
+        self.sensor_on = None  # v2: [n, 2] (Ouster, Mid-360) per-env availability; None = both always on
 
     def reset(self, env_ids=None):
         ids = torch.arange(self.num_envs, device=self.device) if env_ids is None else torch.as_tensor(
@@ -132,7 +141,7 @@ class NarrowLidarMap(ManagerTermBase):
             pos, quat = robot.root_pos_w[sub], robot.root_quat_w[sub]
             R_body = _quat_to_matrix(quat)                                         # [n,3,3]
             ouster, livox = self._rays(n)
-            occ = torch.zeros(n, NY * NX, device=self.device)
+            occ = torch.zeros(n, self.NY * self.NX, device=self.device)
             if fill_both:
                 ground = pos[:, 2] - NOMINAL_HEIGHT
             else:
@@ -149,15 +158,18 @@ class NarrowLidarMap(ManagerTermBase):
                 dist = dist + torch.randn_like(dist) * 0.01
                 ok = torch.isfinite(dist) & (dist >= rmin) & (dist < MAX_RANGE)
                 ok &= torch.rand_like(dist) >= 0.05
+                if self.sensor_on is not None:
+                    ok &= self.sensor_on[sub, k, None]
                 hit = origin[:, None] + d_w * torch.where(ok, dist, torch.zeros_like(dist))[..., None]
                 rel = hit[..., :2] - pos[:, None, :2]
                 bx = cy[:, None] * rel[..., 0] + sy[:, None] * rel[..., 1]
                 by = -sy[:, None] * rel[..., 0] + cy[:, None] * rel[..., 1]
                 h = hit[..., 2] - ground[:, None]
-                ix = ((bx - X_MIN) / CELL).floor().long()
-                iy = ((by - Y_MIN) / CELL).floor().long()
-                keep = ok & (h >= BAND[0]) & (h <= BAND[1]) & (ix >= 0) & (ix < NX) & (iy >= 0) & (iy < NY)
-                flat = torch.where(keep, iy * NX + ix, torch.zeros_like(ix))
+                ix = ((bx - X_MIN) / self.CELL_X).floor().long()
+                iy = ((by - Y_MIN) / self.CELL_Y).floor().long()
+                keep = ok & (h >= BAND[0]) & (h <= BAND[1])
+                keep &= (ix >= 0) & (ix < self.NX) & (iy >= 0) & (iy < self.NY)
+                flat = torch.where(keep, iy * self.NX + ix, torch.zeros_like(ix))
                 occ.scatter_reduce_(1, flat, keep.float(), reduce="amax")
             drop = torch.rand(n, device=self.device) < 0.03
             if fill_both:
@@ -180,6 +192,51 @@ class NarrowLidarMap(ManagerTermBase):
         if len(due):
             self._capture(due)
         return self.frames.flatten(1)
+
+
+class NarrowLidarMapV2(NarrowLidarMap):
+    """v2 (warm start from v1 1748, so the v1 map grid is kept: 5 cm cells, [2, 30, 48]).
+    Single-sensor loss per episode: 10 % Ouster only, 10 % Mid-360 only, and 10 % lose one sensor at a random
+    time (0..8 s) for the rest of the episode. The map keeps its meaning (returns of the sensors still on).
+    LiDAR off (joystick mode, the deployment feeds an all-zero map): 10 % of the episodes on non-narrow tiles have
+    both sensors off, so 6566's gap/stair walking holds with a zero map."""
+
+    ONLY_P, LATE_P, LATE_MAX_S, OFF_P = 0.10, 0.10, 8.0, 0.10
+
+    def __init__(self, cfg, env):
+        super().__init__(cfg, env)
+        n, d = env.num_envs, env.device
+        self.sensor_on = torch.ones(n, 2, dtype=torch.bool, device=d)
+        self.loss_step = torch.full((n,), -1, dtype=torch.long, device=d)
+        self.loss_sensor = torch.zeros(n, dtype=torch.long, device=d)
+
+    def reset(self, env_ids=None):
+        super().reset(env_ids)
+        ids = torch.arange(self.num_envs, device=self.device) if env_ids is None else torch.as_tensor(
+            env_ids, device=self.device, dtype=torch.long)
+        if not len(ids):
+            return
+        n, d = len(ids), self.device
+        u = torch.rand(n, device=d)
+        on = torch.ones(n, 2, dtype=torch.bool, device=d)
+        on[u < self.ONLY_P, 1] = False                                   # Ouster only
+        on[(u >= self.ONLY_P) & (u < 2 * self.ONLY_P), 0] = False         # Mid-360 only
+        from gd_lab.gast_narrow.state import narrow_state
+        off = ~narrow_state(self._env).narrow[ids] & (torch.rand(n, device=d) < self.OFF_P)
+        on[off] = False
+        self.sensor_on[ids] = on
+        late = (u >= 2 * self.ONLY_P) & (u < 2 * self.ONLY_P + self.LATE_P)
+        steps = (torch.rand(n, device=d) * self.LATE_MAX_S / self._env.step_dt).long()
+        self.loss_step[ids] = torch.where(late, steps, torch.full_like(steps, -1))
+        self.loss_sensor[ids] = torch.randint(0, 2, (n,), device=d)
+
+    def __call__(self, env):
+        lost = (self.loss_step >= 0) & (env.episode_length_buf >= self.loss_step)
+        lost &= self.sensor_on.any(-1)
+        if bool(lost.any()):
+            rows = lost.nonzero().flatten()
+            self.sensor_on[rows, self.loss_sensor[rows]] = False
+        return super().__call__(env)
 
 
 def _small_rotation(angles):

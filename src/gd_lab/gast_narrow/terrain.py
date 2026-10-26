@@ -11,8 +11,13 @@ from gd_lab.gast_narrow import geometry
 from gd_lab.mdp.terrains.gap_metadata_generator import GapMetadataTerrainGenerator
 
 
+def tile_geometry(difficulty: float, cfg: "NarrowPassageTerrainCfg") -> dict:
+    width = geometry.width_from_difficulty(difficulty, cfg.w_max, cfg.w_min)
+    return geometry.build(cfg.kind, width, cfg.sign, geometry.dead_end_x(difficulty))
+
+
 def narrow_passage_terrain(difficulty: float, cfg: "NarrowPassageTerrainCfg"):
-    geo = geometry.build(cfg.kind, geometry.width_from_difficulty(difficulty), cfg.sign)
+    geo = tile_geometry(difficulty, cfg)
     cx, cy = cfg.size[0] / 2.0, cfg.size[1] / 2.0
     meshes = [make_plane(cfg.size, 0.0, center_zero=False)]
     for x0, x1, y0, y1 in geo["rects"]:
@@ -27,6 +32,8 @@ class NarrowPassageTerrainCfg(SubTerrainBaseCfg):
     function = narrow_passage_terrain
     kind: str = "corridor"
     sign: int = 1
+    w_max: float = geometry.W_MAX
+    w_min: float = geometry.W_MIN
 
 
 class NarrowTerrainGenerator(GapMetadataTerrainGenerator):
@@ -45,8 +52,7 @@ class NarrowTerrainGenerator(GapMetadataTerrainGenerator):
 
     def _add_sub_terrain(self, mesh, origin, row, col, sub_terrain_cfg):
         if isinstance(sub_terrain_cfg, NarrowPassageTerrainCfg):
-            geo = geometry.build(sub_terrain_cfg.kind, geometry.width_from_difficulty(self._last_difficulty),
-                                 sub_terrain_cfg.sign)
+            geo = tile_geometry(self._last_difficulty, sub_terrain_cfg)
             geo.update(row=row, col=col, difficulty=float(self._last_difficulty))
             self.cfg.narrow_tile_metadata[row][col] = geo
         return super()._add_sub_terrain(mesh, origin, row, col, sub_terrain_cfg)

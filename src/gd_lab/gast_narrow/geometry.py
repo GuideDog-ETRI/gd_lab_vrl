@@ -8,7 +8,10 @@ Kinds (width w from the curriculum difficulty, W_MAX at level 0 -> W_MIN at the 
 - door     : two transverse walls (x in [0, 0.2] and [1.6, 1.8]) with openings of width w; the second opening is
              shifted laterally by ``sign`` * DOOR_SHIFT (gate -> gate offset as at ticket gates / train doors).
 - bend     : corridor along +x into a 90 deg corner at x = 1.0, leaving along ``sign`` * y.
+- dead_end : (v2) the corridor closed by a cross wall at x = dead_end_x(difficulty); never passable.
 The path is the passage centre line (what gdm's local path would follow); success = past the exit line.
+``block_s`` (v2) = path arclength of the line the robot front must not cross when the passage is blocked for it:
+the start of the narrow section (corridor/bend walls, first door), or the dead-end wall minus FRONT_MARGIN.
 """
 from __future__ import annotations
 
@@ -18,17 +21,25 @@ W_MAX, W_MIN = 1.20, 0.60
 WALL_T, WALL_H = 0.10, 1.00
 DOOR_SHIFT = 0.25
 SPAWN_X = -2.2
-KINDS = {"corridor": 1, "door": 2, "bend": 3}
+KINDS = {"corridor": 1, "door": 2, "bend": 3, "dead_end": 4}
+PATH_START = -3.5
+FRONT_MARGIN = 0.10
 MAX_RECTS, MAX_PATH = 6, 4
 FAR = 1.0e3
 
 
-def width_from_difficulty(difficulty: float) -> float:
+def width_from_difficulty(difficulty: float, w_max: float = W_MAX, w_min: float = W_MIN) -> float:
     d = min(1.0, max(0.0, float(difficulty)))
-    return W_MAX - (W_MAX - W_MIN) * d
+    return w_max - (w_max - w_min) * d
 
 
-def build(kind: str, width: float, sign: int) -> dict:
+def dead_end_x(difficulty: float) -> float:
+    """Dead-end wall position: 1.5 m into the corridor (easy, seen late) .. at its mouth -1.2 m (hard)."""
+    d = min(1.0, max(0.0, float(difficulty)))
+    return 1.5 - 2.7 * d
+
+
+def build(kind: str, width: float, sign: int, end_x: float = 0.0) -> dict:
     """{'rects': [(x0, x1, y0, y1)], 'path': [(x, y)], 'exit': (axis, direction, value)}."""
     w, t = float(width), WALL_T
     h = w / 2
@@ -54,9 +65,17 @@ def build(kind: str, width: float, sign: int) -> dict:
             rects = [(x0, x1, -y1, -y0) for x0, x1, y0, y1 in rects]
         path = [(-3.5, 0.0), (cx, 0.0), (cx, 3.5 * s)]
         exit_ = (1, s, 2.6)
+    elif kind == "dead_end":
+        e = float(end_x)
+        rects = [(-1.5, e + t, h, h + t), (-1.5, e + t, -h - t, -h), (e, e + t, -h, h)]
+        path = [(-3.5, 0.0), (3.5, 0.0)]
+        exit_ = (0, 1.0, FAR)
     else:
         raise ValueError(f"unknown narrow kind {kind!r}")
-    return {"kind": kind, "width": w, "sign": int(sign), "rects": rects, "path": path, "exit": exit_}
+    entry = {"corridor": -1.5, "door": 0.0, "bend": -1.5}.get(kind)
+    block_s = (entry if entry is not None else float(end_x) - FRONT_MARGIN) - PATH_START
+    return {"kind": kind, "width": w, "sign": int(sign), "rects": rects, "path": path, "exit": exit_,
+            "block_s": block_s}
 
 
 def padded(geometry: dict | None) -> tuple[list, list, tuple, int]:

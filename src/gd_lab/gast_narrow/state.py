@@ -85,6 +85,7 @@ class NarrowTables:
         exit_ = torch.zeros(rows, cols, 3)
         kind = torch.zeros(rows, cols, dtype=torch.long)
         width = torch.zeros(rows, cols)
+        block_s = torch.zeros(rows, cols)
         for r in range(rows):
             for c in range(cols):
                 g = meta[r][c]
@@ -94,8 +95,10 @@ class NarrowTables:
                 exit_[r, c] = torch.tensor(ee)
                 kind[r, c] = kk
                 width[r, c] = g["width"] if g else 0.0
+                block_s[r, c] = g.get("block_s", 0.0) if g else 0.0
         d = env.device
         self.rects, self.path, self.exit, self.kind, self.width = (x.to(d) for x in (rects, path, exit_, kind, width))
+        self.block_s = block_s.to(d)
         self.narrow_columns = sorted({c for c in range(cols) if any(meta[r][c] for r in range(rows))})
 
 
@@ -133,6 +136,7 @@ class NarrowState:
         self.kind = t.kind[r, c]
         self.narrow = self.kind > 0
         self.width = t.width[r, c]
+        self.block_s = t.block_s[r, c]
         rects, path, exit_ = t.rects[r, c], t.path[r, c], t.exit[r, c]
         self.path_e = path
         robot = env.scene["robot"].data
