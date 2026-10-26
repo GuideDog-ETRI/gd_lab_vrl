@@ -23,9 +23,10 @@ class LidarEncoder(nn.Module):
     def __init__(self, latent=LIDAR_LATENT):
         super().__init__()
         self.cnn = nn.Sequential(
-            nn.Conv2d(lidar.FRAMES, 16, 5, stride=2, padding=2), nn.ELU(),   # 15 x 24
-            nn.Conv2d(16, 32, 3, stride=2, padding=1), nn.ELU(),             # 8 x 12
-            nn.Conv2d(32, 32, 3, stride=2, padding=1), nn.ELU(),             # 4 x 6
+            # Small channel counts: PPO stores 1024 x 100 maps and runs mirrored minibatches of ~51k (GPU memory).
+            nn.Conv2d(lidar.FRAMES, 8, 5, stride=2, padding=2), nn.ELU(),    # 15 x 24
+            nn.Conv2d(8, 16, 3, stride=2, padding=1), nn.ELU(),              # 8 x 12
+            nn.Conv2d(16, 32, 3, stride=2, padding=1), nn.ELU(),             # 4 x 6
             nn.Flatten())
         self.head = nn.Sequential(nn.Linear(32 * 4 * 6, 64), nn.ELU(), nn.Linear(64, latent))
 
