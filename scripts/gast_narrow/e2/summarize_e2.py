@@ -12,6 +12,7 @@ Definitions (each env = its first episode):
   narrow   passable rows: pass = exit passed without base contact; touch-free = wall touch < 0.1 s
            blocked rows: hold = 1.5 s still before the line, no breach; breach = front crossed the line
   E1       gap clean/reached, stairs passed/reached (the E1 harness definitions)
+Episodes that ended within the first 0.05 s are dropped (stale contact at the start; counted in summary.json).
 Retention metrics (gap cross/clean, stairs pass, terrain pass; fall as 1 - fall) are compared with the baseline;
 more than max_drop_pt below it is flagged.
 """
@@ -23,6 +24,9 @@ from collections import defaultdict
 from pathlib import Path
 
 import yaml
+
+
+INVALID_START_S = 0.05
 
 
 def pct(x):
@@ -69,6 +73,9 @@ def load_trials(out: Path):
         r = json.loads(f.read_text())
         by = defaultdict(list)
         for row in r["rows"]:
+            # Ended within the first 0.05 s: the reset carried a stale contact (spawn artefact), not a policy result.
+            if row["duration"] <= INVALID_START_S:
+                continue
             by[row["cell"]].append(row)
         res[cond][model] = {c["key"]: (c, cell_metrics(c, by[c["index"]])) for c in r["cells"]}
     return res

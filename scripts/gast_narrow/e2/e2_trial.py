@@ -356,6 +356,11 @@ def record_and_reset(self, env_ids):
 raw._reset_idx = types.MethodType(record_and_reset, raw)
 
 obs, _ = venv.reset()
+# One unrecorded step at the new tiles, then reset again: the first reset after moving the origins can carry the
+# previous pose's contact history (base_contact on step 1, ~5 % of episodes in the first E2 run).
+with torch.inference_mode():  # the step leaves inference tensors in the env buffers, so reset inside it too
+    venv.step(policy(obs))
+    obs, _ = venv.reset()
 armed["on"] = True
 dt = raw.step_dt
 max_steps = int(SECONDS / dt) + 10
