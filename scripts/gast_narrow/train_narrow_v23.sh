@@ -15,6 +15,7 @@ root="$(cd "$(dirname "$script")/../.." && pwd)"
 mode="${1:?usage: train_narrow_v23.sh smoke|pilot|train [overrides]}"
 shift
 gpus="${NARROW_GPUS:-${CUDA_VISIBLE_DEVICES:-0}}"
+[[ "$(hostname -s)" != OnVLM2* || ",$gpus," != *",3,"* ]] || { echo "GPU 3 is not ours on onvlm2" >&2; exit 2; }
 nproc=$(awk -F, '{print NF}' <<<"$gpus")
 case "$mode" in
   smoke) envs=192; horizon=16; updates=5; save=5 ;;
