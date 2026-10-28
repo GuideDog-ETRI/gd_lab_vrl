@@ -1,5 +1,7 @@
 """Collectives for auxiliary optimizers and observation normalization."""
 import hashlib
+import os
+
 import torch
 import torch.distributed as dist
 
@@ -43,8 +45,30 @@ def update_normalizer(normalizer, values):
         return
     x = values.double()
     moments = torch.cat((x.sum(0).flatten(), x.square().sum(0).flatten(), x.new_tensor([x.shape[0]])))
+    if os.environ.get("GD_LAB_NORMALIZER_DEFER", "0") == "1":
+        # Deferred: sum this rank's moments over the rollout; flush_normalizer reduces them once per update.
+        # Per-step all_reduces (2 x horizon per update) stalled 512-rank runs on the socket transport.
+        acc = getattr(normalizer, "_deferred_moments", None)
+        normalizer._deferred_moments = moments if acc is None else acc + moments
+        return
     dist.all_reduce(moments)
-    width = x.shape[-1]
+    _apply_moments(normalizer, moments)
+
+
+@torch.no_grad()
+def flush_normalizer(normalizer):
+    """All-reduce and apply the moments update_normalizer deferred (no-op when nothing is pending)."""
+    moments = getattr(normalizer, "_deferred_moments", None)
+    if moments is None:
+        return
+    normalizer._deferred_moments = None
+    if active():
+        dist.all_reduce(moments)
+    _apply_moments(normalizer, moments)
+
+
+def _apply_moments(normalizer, moments):
+    width = (moments.numel() - 1) // 2
     n = moments[-1]
     if n == 0:  # every rank filtered all rows out; same decision on every rank
         return

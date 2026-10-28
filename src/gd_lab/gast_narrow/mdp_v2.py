@@ -141,6 +141,12 @@ def reset_narrow_v2(env, env_ids):
 
 
 class NarrowV2VelocityCommand(NarrowVelocityCommand):
+    vx_range = VX_RANGE  # per-episode forward command on narrow tiles (v2.3 widens it)
+
+    def _lookahead(self, state):
+        """Arclength ahead of the robot that the heading command aims at (scalar or [N])."""
+        return LOOKAHEAD
+
     def __init__(self, cfg, env):
         super().__init__(cfg, env)
         n, d = self.num_envs, self.device
@@ -175,7 +181,7 @@ class NarrowV2VelocityCommand(NarrowVelocityCommand):
             self.stop_used[ids] = False
         out = super().reset(env_ids)
         if len(ids):  # after super(): v1 draws its vx/bias there; v2 replaces them
-            lo, hi = VX_RANGE
+            lo, hi = self.vx_range
             self.narrow_vx[ids] = lo + (hi - lo) * torch.rand(len(ids), device=self.device)
             self.narrow_bias[ids] = (torch.rand(len(ids), device=self.device) * 2 - 1) * torch.deg2rad(bias)
         return out
@@ -190,7 +196,7 @@ class NarrowV2VelocityCommand(NarrowVelocityCommand):
         self.narrow_timer -= dt
         due = mask & (self.narrow_timer <= 0)
         if bool(due.any()):
-            goal = point_at(state.path_e, state.s + LOOKAHEAD)
+            goal = point_at(state.path_e, state.s + self._lookahead(state))
             target = torch.atan2(goal[:, 1] - state.local[:, 1], goal[:, 0] - state.local[:, 0]) + self.narrow_bias
             wz = (WZ_GAIN * _wrap(target - state.yaw)).clamp(-WZ_MAX, WZ_MAX)
             wz = (wz + torch.randn_like(wz) * NOISE_WZ).clamp(-WZ_MAX, WZ_MAX)

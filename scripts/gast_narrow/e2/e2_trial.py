@@ -163,6 +163,7 @@ def e2_spawn(env, env_ids):
 
 
 env_cfg.events.e2_spawn = EventTermCfg(func=e2_spawn, mode="reset")
+env_cfg.commands.base_velocity.debug_vis = False  # marker USDs come from S3 (hangs on offline compute nodes)
 
 env = gym.make(TASK, cfg=env_cfg)
 ensure_prev_prev_action_tracking(env.unwrapped)
@@ -306,6 +307,9 @@ err_v = torch.zeros(n, device=device)
 err_w = torch.zeros(n, device=device)
 moving_t = torch.zeros(n, device=device)
 pitch_max = torch.zeros(n, device=device)
+nose_up_max = torch.zeros(n, device=device)  # signed: front up (deg), asin(-g_x) as backward_nose_up
+nose_t10 = torch.zeros(n, device=device)
+nose_t15 = torch.zeros(n, device=device)
 _reset_idx = raw._reset_idx
 
 
@@ -336,7 +340,9 @@ def record_and_reset(self, env_ids):
         blocked, slack, margin, width = L(ep.blocked), L(ep.slack), L(ep.margin), L(st.width)
         extra = {k: L(v) for k, v in (("r_max", radius_max), ("r_min", radius_min), ("passed_r", passed_r),
                                          ("pass_t", pass_t), ("err_v", err_v), ("err_w", err_w),
-                                         ("moving_t", moving_t), ("pitch_max_deg", pitch_max))}
+                                         ("moving_t", moving_t), ("pitch_max_deg", pitch_max),
+                                         ("nose_up_max_deg", nose_up_max), ("nose_up_t10", nose_t10),
+                                         ("nose_up_t15", nose_t15))}
         cells_ = L(cell_of)
         for j, env_id in enumerate(ids.tolist()):
             row = {"env": env_id, "cell": cells_[j], "base_contact": bool(base[j]), "timeout": bool(timeout[j]),
@@ -391,6 +397,10 @@ for step in range(max_steps):
     g = robot.data.projected_gravity_b
     pitch = torch.rad2deg(torch.atan2(g[:, 0].abs(), -g[:, 2]))
     pitch_max = torch.where(live, torch.maximum(pitch_max, pitch), pitch_max)
+    nose = torch.rad2deg(torch.asin((-g[:, 0]).clamp(-1.0, 1.0)))
+    nose_up_max = torch.where(live, torch.maximum(nose_up_max, nose), nose_up_max)
+    nose_t10 += (live & (nose > 10.0)).float() * dt
+    nose_t15 += (live & (nose > 15.0)).float() * dt
     # Decided before the time-out: a gap env leaving its tile (later slots / falls would be on a neighbour tile),
     # a stair/slope env at the far end of its flight. Record now and reset (the reset episode is not used).
     decided = ~recorded & (((spec.mode == 1) & (r >= GAP_LEAVE_R)) | ((spec.mode == 2) & passed_r))

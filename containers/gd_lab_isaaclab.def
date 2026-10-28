@@ -3,9 +3,13 @@ From: nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
 
 %post
     export DEBIAN_FRONTEND=noninteractive
+    # Some HPC compute nodes allow outbound HTTPS only: switch every apt source to https.
+    https_apt() { sed -i 's|http://\([a-z.]*\)ubuntu.com|https://\1ubuntu.com|g; s|http://ppa.launchpadcontent.net|https://ppa.launchpadcontent.net|g' /etc/apt/sources.list.d/* /etc/apt/sources.list 2>/dev/null || true; }
+    https_apt
     apt-get update && apt-get install -y --no-install-recommends \
         software-properties-common gnupg ca-certificates curl
-    add-apt-repository -y ppa:deadsnakes/ppa
+    add-apt-repository -y ppa:deadsnakes/ppa -n
+    https_apt
     apt-get update && apt-get install -y --no-install-recommends \
         python3.11 python3.11-venv python3.11-dev git \
         libgl1 libglu1-mesa libglvnd0 libegl1 libgles2 libglib2.0-0 \

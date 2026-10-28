@@ -14,6 +14,7 @@ from gd_lab.gast_narrow import geometry
 # Trunk collision box 0.8 x 0.20 x 0.12 (rbq10_simple.urdf): edge points in the trunk frame, radius 0.
 TRUNK_POINTS = [(x, y, 0.0) for x in (-0.40, 0.0, 0.40) for y in (-0.10, 0.10)]
 BODY_RADII = {"_hip": 0.05, "_calf": 0.04, "_foot": 0.03}
+SHIN_RADIUS = 0.035
 SUCCESS_HOLD_S = 0.5
 
 
@@ -116,6 +117,20 @@ class NarrowState:
             names += list(body_names)
             radii += [radius] * len(body_ids)
             left += [n[1] == "L" for n in body_names]
+        # Optional shin points (v2.3: env.cfg.narrow_shin_fracs): calf origin (knee) -> foot, radius SHIN_RADIUS.
+        self.shin_fracs = tuple(getattr(env.cfg, "narrow_shin_fracs", ()))
+        self.shin_calf, self.shin_foot = [], []
+        if self.shin_fracs:
+            calf_ids, calf_names = robot.find_bodies(".*_calf")
+            foot_ids, foot_names = robot.find_bodies(".*_foot")
+            foot_by_leg = {n.split("_")[0]: i for i, n in zip(foot_ids, foot_names)}
+            for i, n in zip(calf_ids, calf_names):
+                leg = n.split("_")[0]
+                self.shin_calf.append(i)
+                self.shin_foot.append(foot_by_leg[leg])
+                for _ in self.shin_fracs:
+                    radii.append(SHIN_RADIUS)
+                    left.append(n[1] == "L")
         self.body_ids = torch.tensor(ids, device=env.device, dtype=torch.long)
         trunk = torch.tensor(TRUNK_POINTS, device=env.device)
         self.trunk_points = trunk
@@ -147,6 +162,11 @@ class NarrowState:
         self.yaw = robot.heading_w
         trunk_w = root[:, None] + _quat_apply(quat, self.trunk_points.expand(root.shape[0], -1, -1))
         bodies = robot.body_pos_w[:, self.body_ids]
+        if self.shin_fracs:
+            knee = robot.body_pos_w[:, self.shin_calf]
+            foot = robot.body_pos_w[:, self.shin_foot]
+            shin = [knee + f * (foot - knee) for f in self.shin_fracs]  # each [N, 4, 3]
+            bodies = torch.cat((bodies, torch.stack(shin, 2).flatten(1, 2)), 1)
         pts = torch.cat((trunk_w, bodies), 1)[..., :2] - origin[:, None, :2]
         self.clearance = rect_distance(pts, rects) - self.radii  # [N, M]
         big = torch.full_like(self.clearance, 9.0)

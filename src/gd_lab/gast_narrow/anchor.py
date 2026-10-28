@@ -8,6 +8,10 @@ the live policy with the 6566 weights widened by zero columns (LiDAR latent + ma
 Narrow tiles (privileged flag narrow_priv[..., 5] = 1) keep plain PPO, so stand / pass keep being learned there.
 
 Env: NARROW_ANCHOR_CKPT (6566 checkpoint), NARROW_ANCHOR_WEIGHT (default 1.0), NARROW_ANCHOR_EPOCHS (default 1).
+v2.3: NARROW_ANCHOR_GAP_NOSE=1 also drops the samples the gap_nose_up reward flags (gap tile AND nose-up above its
+limit; tasks_v23 hands the mask over with set_gap_nose_mask each step). 6566 lifts its front 20-30 deg crossing gaps
+forward; gap_nose_up corrects those moments and the anchor must not undo them. A pitch-only rule (no tile check) also
+dropped stair / slope climbing (5 % of all samples in the 30-update test) and so weakened the stair anchor.
 """
 from __future__ import annotations
 
@@ -19,8 +23,15 @@ from torch import nn
 
 from gd_lab.gast.teacher import GastPPO
 from gd_lab.gast_narrow.model import PRIV_GROUP
+from gd_lab.rl.distributed import flush_normalizer
 
 NARROW_FLAG = 5  # narrow_priv index of the "on a narrow tile" flag (narrow_privileged_v2)
+_gap_nose_mask = None  # [num_envs] bool, this env step (set by tasks_v23.gap_nose_up)
+
+
+def set_gap_nose_mask(mask: torch.Tensor) -> None:
+    global _gap_nose_mask
+    _gap_nose_mask = mask
 
 
 def widen_to(state: dict, target: dict) -> dict:
@@ -73,12 +84,54 @@ class NarrowAnchorPPO(GastPPO):
         self._anchor = anchor
         self._anchor_weight = float(os.environ.get("NARROW_ANCHOR_WEIGHT", "1.0"))
         self._anchor_epochs = int(os.environ.get("NARROW_ANCHOR_EPOCHS", "1"))
-        print(f"[NARROW_ANCHOR] 6566 anchor from {path}: weight={self._anchor_weight} epochs={self._anchor_epochs}",
-              flush=True)
+        print(f"[NARROW_ANCHOR] 6566 anchor from {path}: weight={self._anchor_weight} epochs={self._anchor_epochs} "
+              f"gap_nose={self._gap_nose_enabled()}", flush=True)
+
+    @staticmethod
+    def _gap_nose_enabled() -> bool:
+        return os.environ.get("NARROW_ANCHOR_GAP_NOSE", "0") == "1"
+
+    def process_env_step(self, obs, rewards, dones, extras):
+        # NARROW_HEARTBEAT=k: rank 0 prints a timestamp every k rollout steps (first rollouts of large runs are silent).
+        beat = int(os.environ.get("NARROW_HEARTBEAT", "0"))
+        everyone = os.environ.get("NARROW_HEARTBEAT_ALL", "0") == "1"
+        if beat and self.storage.step % beat == 0 and (everyone or int(os.environ.get("RANK", "0")) == 0):
+            import socket
+            import time
+            print(f"[HEARTBEAT] {time.strftime('%H:%M:%S')} rank {os.environ.get('RANK', '0')} "
+                  f"{socket.gethostname().split('.')[0]} rollout step {self.storage.step}", flush=True)
+        # Before super(): storage.step is still the index of the transition this step completes.
+        if self._gap_nose_enabled():
+            if _gap_nose_mask is None:
+                raise RuntimeError("NARROW_ANCHOR_GAP_NOSE=1 but no gap_nose_up mask (task without the term?)")
+            buf = getattr(self, "_gap_nose_buf", None)
+            if buf is None:
+                buf = self._gap_nose_buf = torch.zeros(self.storage.num_transitions_per_env, _gap_nose_mask.shape[0],
+                                                       dtype=torch.bool, device=self.device)
+            buf[self.storage.step] = _gap_nose_mask.to(self.device)
+        return super().process_env_step(obs, rewards, dones, extras)
+
+    @staticmethod
+    def _phase(name: str) -> None:
+        """NARROW_HEARTBEAT_ALL=1: every rank stamps the update phases (finding the rank others wait for)."""
+        if os.environ.get("NARROW_HEARTBEAT_ALL", "0") == "1":
+            import socket
+            import time
+            print(f"[PHASE] {time.strftime('%H:%M:%S')} rank {os.environ.get('RANK', '0')} "
+                  f"{socket.gethostname().split('.')[0]} {name}", flush=True)
 
     def update(self) -> dict[str, float]:
+        self._phase("update-start")
+        # GD_LAB_NORMALIZER_DEFER=1: the rollout's normalizer moments are reduced once here (same ranks, same order).
+        for name in ("actor_obs_normalizer", "critic_obs_normalizer"):
+            normalizer = getattr(self.policy, name, None)
+            if normalizer is not None and hasattr(normalizer, "_deferred_moments"):
+                flush_normalizer(normalizer)
+        self._phase("ppo-start")
         loss_dict = super().update()
+        self._phase("ppo-done")
         loss_dict.update(self._anchor_update())
+        self._phase("anchor-done")
         return loss_dict
 
     def _anchor_update(self) -> dict[str, float]:
@@ -86,6 +139,11 @@ class NarrowAnchorPPO(GastPPO):
             self._build_anchor()
         obs_all = self.storage.observations.flatten(0, 1)
         retention = obs_all[PRIV_GROUP][..., NARROW_FLAG] < 0.5
+        nose_frac = 0.0
+        if self._gap_nose_enabled():
+            nose_up = self._gap_nose_buf.flatten(0, 1)  # [T, N] -> T-major, as storage.observations.flatten(0, 1)
+            nose_frac = float((nose_up & retention).float().mean())
+            retention = retention & ~nose_up
         n = retention.shape[0]
         mini = n // self.num_mini_batches
         total, frac, steps = 0.0, float(retention.float().mean()), 0
@@ -109,4 +167,5 @@ class NarrowAnchorPPO(GastPPO):
                 self.optimizer.step()
                 total += float(loss.detach()) / max(self._anchor_weight, 1e-9)
                 steps += 1
-        return {"anchor_mse": total / max(steps, 1), "anchor_retention_fraction": frac}
+        return {"anchor_mse": total / max(steps, 1), "anchor_retention_fraction": frac,
+                "anchor_nose_excluded_fraction": nose_frac}

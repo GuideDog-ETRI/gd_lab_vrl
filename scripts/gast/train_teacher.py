@@ -158,7 +158,8 @@ def main(env_cfg: ManagerBasedRLEnvCfg, agent_cfg: RslRlBaseRunnerCfg):
             raise ValueError("Distributed training requires a GPU device.")
         env_cfg.sim.device = f"cuda:{app_launcher.local_rank}"
         agent_cfg.device = f"cuda:{app_launcher.local_rank}"
-        seed = agent_cfg.seed + app_launcher.local_rank
+        # Global rank: with several nodes the local rank repeats, and equal seeds duplicate rollouts across nodes.
+        seed = agent_cfg.seed + int(os.environ.get("RANK", app_launcher.local_rank))
         env_cfg.seed = seed
         agent_cfg.seed = seed
 

@@ -38,6 +38,31 @@ def mean(xs):
     return sum(xs) / len(xs) if xs else None
 
 
+def nose_metrics(rows):
+    """Gap nose-up (front up, deg; e2_trial nose_up_*): mean / 90th percentile of the episode max, share > 20 deg,
+    mean seconds above 15 deg. Empty for result.json files written before the metric existed."""
+    ups = sorted(r["nose_up_max_deg"] for r in rows if "nose_up_max_deg" in r)
+    if not ups:
+        return {}
+    return dict(nose=mean(ups), nose_p90=ups[min(len(ups) - 1, int(0.9 * len(ups)))],
+                nose20=sum(u > 20.0 for u in ups) / len(ups), nose_t15=mean([r["nose_up_t15"] for r in rows]))
+
+
+DEG_KEYS, SEC_KEYS = ("nose", "nose_p90"), ("nose_t15",)
+
+
+def fmt(key, v):
+    if v is None:
+        return "-"
+    if key in ("track", "clearance"):
+        return f"{v:.3f}"
+    if key in DEG_KEYS:
+        return f"{v:.1f}°"
+    if key in SEC_KEYS:
+        return f"{v:.2f} s"
+    return pct(v)
+
+
 def cell_metrics(cell, rows):
     s = cell["suite"]
     n = len(rows)
@@ -47,7 +72,8 @@ def cell_metrics(cell, rows):
         att = [sum(x) for x in zip(*[r["gap_attempts"] for r in rows])]  # started, clean, nonclean, retreat, reverse, end
         decided = sum(att[1:5])
         return dict(n=n, cross=cross, clean=att[1] / decided if decided else None, attempts=decided, fall=fall,
-                    foot_drop=sum(r.get("sum_platform_gap_foot_drop", 0.0) != 0.0 for r in rows) / n)
+                    foot_drop=sum(r.get("sum_platform_gap_foot_drop", 0.0) != 0.0 for r in rows) / n,
+                    **nose_metrics(rows))
     if s in ("stairs", "terrain"):
         ok = sum(r["passed_r"] for r in rows) / n
         track = mean([r["err_v"] / r["moving_t"] for r in rows if r["moving_t"] > 0.5])
@@ -139,15 +165,14 @@ def main():
                 cell = per[present[0]][k][0]
                 extra = f" (폭 {cell['actual_width']:.2f})" if "actual_width" in cell and suite in ("narrow",) else ""
                 lines.append(f"| {k}{extra} | {label} | " + " | ".join(
-                    (f"{v:.3f}" if key in ("track", "clearance") else pct(v)) if v is not None else "-"
-                    for v in vals) + " |")
+                    fmt(key, v) for v in vals) + " |")
         lines.append(f"| **평균** | | " + " | ".join("" for _ in present) + " |")
         for (label, key, retention), by_m in agg.items():
             avg = {m: mean(v) for m, v in by_m.items()}
             cells_ = []
             for m in present:
                 v = avg.get(m)
-                txt = "-" if v is None else (f"{v:.3f}" if key in ("track", "clearance") else pct(v))
+                txt = fmt(key, v)
                 if retention and v is not None and base in avg and avg[base] is not None and m != base:
                     good = v if key != "fall" else 1 - v
                     ref = avg[base] if key != "fall" else 1 - avg[base]
@@ -166,7 +191,9 @@ def main():
         lines.append(f"## 조건 {cond} (라이다 {c['lidar']}, 탑재물 {c.get('payload_kg')} kg, 밀기 {c.get('push')}, "
                      f"계단 외란 {c.get('stair_disturbance')})")
         lines.append("")
-        table("갭", cond, "gap", [("건넘", "cross", True), ("clean/시도", "clean", True), ("넘어짐", "fall", True)])
+        table("갭", cond, "gap", [("건넘", "cross", True), ("clean/시도", "clean", True), ("넘어짐", "fall", True),
+                                  ("머리 들림 최대 평균", "nose", False), ("머리 들림 최대 p90", "nose_p90", False),
+                                  ("20° 초과", "nose20", False), ("15° 초과 시간", "nose_t15", False)])
         table("계단", cond, "stairs", [("통과", "pass_", True), ("넘어짐", "fall", True), ("몸통 접촉", "body", False)])
         table("경사·거친 지면", cond, "terrain", [("통과", "pass_", True), ("넘어짐", "fall", True),
                                              ("속도 오차 m/s", "track", False)])
