@@ -1,0 +1,91 @@
+# E2: fixed-condition evaluation of everything the GAST Ray+IR lineage has learned (docs/design/GAST_E2_EVAL_DESIGN.md).
+#   python3 scripts/gast_narrow/e2/run_e2.py configs/gast_narrow/e2/v22_top5.yaml [--only gap,narrow] [--models v2u1111]
+# Turn test items on/off with `enabled`, pick which conditions run which suites with `conditions.<name>.suites`.
+# Relative paths are relative to the repository root.
+name: v22_top5
+out_root: logs/e2
+seed: 42
+seconds: 20.0                 # episode length (every env contributes its first episode)
+
+hardware:
+  gpus: [0, 1, 2]             # onvlm2: GPU 3 is refused by run_e2.py
+  e2_slots_per_gpu: 2
+  e1_slots_per_gpu: 3
+  sif: /data/users/bsseo/gd_lab_isaaclab.sif
+  python: /data/users/bsseo/venv/bin/python
+
+models:                       # v2.2 Top-5 vs 6566 (gap reference), 1111 (v2 Top-1) and 465 (v2.2 start)
+  b6566: checkpoints/gast_narrow/backgapv2_6566.pt
+  v2u1111: checkpoints/gast_narrow/narrowv2_1111.pt
+  v21u465: checkpoints/gast_narrow/narrowv21_465.pt
+  v22u300: logs/gast/narrow_v22/narrow_v22_465_4096x100_400_20261027/best_top5/300_top1.pt
+  v22u274: logs/gast/narrow_v22/narrow_v22_465_4096x100_400_20261027/best_top5/274_top2.pt
+  v22u272: logs/gast/narrow_v22/narrow_v22_465_4096x100_400_20261027/best_top5/272_top3.pt
+  v22u371: logs/gast/narrow_v22/narrow_v22_465_4096x100_400_20261027/best_top5/371_top4.pt
+  v22u131: logs/gast/narrow_v22/narrow_v22_465_4096x100_400_20261027/best_top5/131_top5.pt
+
+suites:
+  gap:                        # platform gap crossing, heading locked to +/-x, fixed speed
+    enabled: true
+    directions: [forward, backward]
+    levels: [7, 11, 14]
+    speeds: [0.5, 0.9]
+    envs: 48
+  stairs:                     # straight flights; up/down mapped per family (pyramid: down = outward, *_inv: up = outward)
+    enabled: true
+    families: [pyramid_stairs, pyramid_stairs_inv, pyramid_stairs_wide, pyramid_stairs_inv_wide, pyramid_stairs_nose,
+               pyramid_stairs_inv_nose]
+    directions: [up, down]
+    levels: [9, 14]
+    speed: 0.8
+    envs: 32
+  terrain:                    # slopes / rough / ring fences, outward from the centre, speed tracking
+    enabled: true
+    families: [hf_pyramid_slope, hf_pyramid_slope_inv, random_rough, ring_fence]
+    levels: [14]
+    direction: outward
+    speed: 1.0
+    envs: 32
+  narrow:                     # v2 gdm-like command; width target -> closest tile; margin m pinned
+    enabled: true
+    families: [narrow_corridor, narrow_door_pos, narrow_door_neg, narrow_bend_left, narrow_bend_right]
+    cases:                    # passable when width >= 0.48 + 2 m
+      - {name: pass_wide,   width: 0.80, margin: 0.10}
+      - {name: pass_tight,  width: 0.66, margin: 0.05}
+      - {name: block_margin, width: 0.66, margin: 0.15}   # same width as pass_tight: only m differs
+      - {name: block_narrow, width: 0.52, margin: 0.10}
+    envs: 32
+  dead_end:
+    enabled: true
+    families: [narrow_dead_end]
+    levels: [7, 14]
+    margin: 0.10
+    envs: 32
+
+conditions:                   # one Isaac run per model and condition; `suites` = which suites it runs
+  nominal:     {enabled: true, lidar: both,   payload_kg: 5.0, push: false, stair_disturbance: false,
+                suites: [gap, stairs, terrain, narrow, dead_end]}
+  lidar_off:   {enabled: true, lidar: "off",    payload_kg: 5.0, push: false, stair_disturbance: false,
+                suites: [gap, stairs, terrain]}
+  ouster_only: {enabled: true, lidar: ouster, payload_kg: 5.0, push: false, stair_disturbance: false,
+                suites: [narrow, dead_end]}
+  mid360_only: {enabled: true, lidar: mid360, payload_kg: 5.0, push: false, stair_disturbance: false,
+                suites: [narrow, dead_end]}
+  disturbed:   {enabled: true, lidar: both,   payload_kg: 5.0, push: true,  stair_disturbance: true,
+                suites: [gap, stairs]}
+  no_payload:  {enabled: true, lidar: both,   payload_kg: 0.0, push: false, stair_disturbance: false,
+                suites: [gap, stairs]}
+
+e1:                           # the E1 harness (Isaac c_teacher_full, vx 1.0 forward, LiDAR map zero + m folded)
+  enabled: false
+  harness: /data/users/bsseo/gd_lab_vrl_worktrees/update136_e1rayir
+  params_from: models136/d3906/params
+  arms: [v25or, G]            # v25or = deployed LiDAR height-map processor, G = ground-truth map, GV also possible
+  families: {gap: gap, stdown: stairs_inv, stup: pyramid_stairs}   # E1 labels (stdown = stairs_inv tiles)
+  seeds: [42, 43, 44, 45]
+  ir: [native]                # native | zero
+  margin_obs: 0.0             # (m - 0.10) / 0.05 folded into the policy
+
+report:
+  baseline: b6566             # retention metrics are compared with this model
+  max_drop_pt: 2.0            # flag a model when a retention metric is more than this many points below the baseline
