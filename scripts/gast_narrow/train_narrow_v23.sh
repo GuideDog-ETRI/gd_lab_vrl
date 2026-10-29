@@ -131,5 +131,6 @@ exec apptainer exec --nv --writable-tmpfs "${home_opt[@]}" --bind "$usd_tmp:/tmp
  --task Gd-GastNarrowV23-Rbq10-Dreamwaq-v0 --warm_start_rayir "$teacher" --warm_start_sha256 "$sha" \
  --policy_lr 1e-4 --terrain_lr 3e-4 \
  --logger tensorboard --experiment_name gast/narrow_v23 --max_iterations "$updates" \
- agent.num_steps_per_env="$horizon" agent.algorithm.num_mini_batches=4 agent.algorithm.num_learning_epochs=5 \
- agent.algorithm.schedule=fixed agent.save_interval="$save" agent.top5_min_spacing=1 "$@"
+ agent.num_steps_per_env="$horizon" agent.algorithm.num_mini_batches="${NARROW_MINIBATCHES:-4}" \
+ agent.algorithm.num_learning_epochs="${NARROW_EPOCHS:-5}" agent.algorithm.schedule="${NARROW_SCHEDULE:-fixed}" \
+ agent.save_interval="$save" agent.top5_min_spacing=1 "$@"

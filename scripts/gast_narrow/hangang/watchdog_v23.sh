@@ -2,10 +2,12 @@
 # Overnight watchdog for a v2.3 training job: every POLL_S checks progress; a hang (no new iteration line for
 # HANG_S) or a failed job is resubmitted from the newest checkpoint of the run (up to MAX_RESTARTS), excluding the
 # nodes given in EXCLUDE. On a clean finish it submits the full E2 (6566, 371 and the run's Top-5) on one node.
-#   bash watchdog_v23.sh <job id> <iterations of that job> <node spec> <exclude list>
+# A node whose srun task fails to launch ("launch failed", e.g. "Error configuring interconnect") is added to EXCLUDE
+# and the job is resubmitted at once from the same checkpoint (the other nodes would wait for it forever).
+#   bash watchdog_v23.sh <job id> <iterations of that job> <node spec> <exclude list> <checkpoint the job started from>
 set -uo pipefail
 G=/scratch/t515a05/gd_lab; REPO=$G/gd_lab_vrl; JOBS=$G/jobs
-JOB=$1 TOTAL=$2 NODES=$3 EXCLUDE=$4
+JOB=$1 TOTAL=$2 NODES=$3 EXCLUDE=$4 CK=${5:-}
 POLL_S=${POLL_S:-300} HANG_S=${HANG_S:-1200} MAX_RESTARTS=${MAX_RESTARTS:-2}
 restarts=0
 log() { echo "[watchdog $(date +%m-%d_%H:%M:%S)] $*"; }
@@ -56,6 +58,33 @@ while true; do
     fi
     reason="job ended without completing ($state)"
   else
+    bad=$(grep -a -o "task [0-9]* launch failed" $G/logs/v23_main_$JOB.out 2>/dev/null | head -1 | awk '{print $2}')
+    if [[ -n $bad && -n $CK ]]; then
+      host=$(scontrol show hostnames "$(squeue -h -j "$JOB" -o %N)" | sed -n "$((bad + 1))p")
+      log "PROBLEM: job $JOB task $bad on $host failed to launch: $(grep -a 'launch failed' $G/logs/v23_main_$JOB.out | head -1)"
+      scancel "$JOB"; sleep 20; EXCLUDE="$EXCLUDE,$host"
+      JOB=$(submit "$NODES" "$CK" "$TOTAL"); log "restart (launch failure): job $JOB from $CK, exclude $EXCLUDE"
+      last_line="" last_change=$(date +%s); sleep "$POLL_S"; continue
+    fi
+    # Straggler (needs NARROW_HEARTBEAT_ALL=1): a rank that never logged a rollout step while the other ranks of its node
+    # reached update-start, STRAGGLER_S after start -> its node is excluded and the job resubmitted.
+    if [[ -n $CK && -z $(rank_log "$JOB") ]] && (( $(date +%s) - last_change > ${STRAGGLER_S:-480} )); then
+      host=""
+      for d in $G/logs/ranklogs_$JOB/*/attempt_0; do
+        for lr in 0 1 2 3; do
+          [[ -f $d/$lr/stdout.log ]] || continue
+          if ! grep -a -q "rollout step" "$d/$lr/stdout.log" && grep -a -q "update-start" $d/*/stdout.log; then
+            host=$(grep -a -h -o "rank [0-9]* node[0-9]*" $d/*/stdout.log | head -1 | awk '{print $3}'); break 2
+          fi
+        done
+      done
+      if [[ -n $host ]]; then
+        log "PROBLEM: job $JOB has a rank on $host that never finished a rollout step (others are waiting)"
+        scancel "$JOB"; sleep 20; EXCLUDE="$EXCLUDE,$host"
+        JOB=$(submit "$NODES" "$CK" "$TOTAL"); log "restart (stalled rank): job $JOB from $CK, exclude $EXCLUDE"
+        last_line="" last_change=$(date +%s); sleep "$POLL_S"; continue
+      fi
+    fi
     f=$(rank_log "$JOB")
     line=$([[ -n $f ]] && grep -a "Learning iteration" "$f" | tail -1 | tr -s ' ')
     now=$(date +%s)
@@ -69,9 +98,12 @@ while true; do
   fi
   log "PROBLEM: $reason"
   (( restarts < MAX_RESTARTS )) || { log "restart limit reached; leaving it stopped"; exit 1; }
-  CK=$(ls -t "$REPO/logs/gast/narrow_v23/$RUN"/model_*.pt 2>/dev/null | head -1)
-  [[ -n $CK ]] || { log "no checkpoint in $RUN; cannot resume"; exit 1; }
-  DONE=$(basename "$CK" .pt | sed 's/model_//'); LEFT=$(( TOTAL - DONE ))
+  NEWCK=$(ls -t "$REPO/logs/gast/narrow_v23/$RUN"/model_*.pt "$REPO/logs/gast/narrow_v23/$RUN"/best_top5/*_top*.pt 2>/dev/null \
+          | awk -F/ '{n=$NF; sub(/^model_/,"",n); sub(/_top[0-9]\.pt$|\.pt$/,"",n); print n+0, $0}' | sort -n | tail -1)
+  if [[ -n $NEWCK ]]; then DONE=${NEWCK%% *}; CK=${NEWCK#* }
+  elif [[ -n ${CK:-} ]]; then DONE=0; log "no checkpoint in $RUN; reusing $CK"
+  else log "no checkpoint in $RUN; cannot resume"; exit 1; fi
+  LEFT=$(( TOTAL - DONE ))
   (( LEFT > 0 )) || { log "nothing left"; exit 0; }
   restarts=$((restarts + 1))
   JOB=$(submit "$NODES" "$CK" "$LEFT"); TOTAL=$LEFT

@@ -78,7 +78,9 @@ def _from_371(alg, checkpoint_path, policy_lr, terrain_lr, *, expected_sha256, e
     from gd_lab.gast_narrow.tasks_v2 import NARROW_FAMILIES
     if expected_task != TASK_ID:
         raise ValueError(f"train_narrow_v23.py runs only {TASK_ID}, got {expected_task}")
-    if alg.schedule != "fixed":
+    # adaptive (KL) is allowed only on request: rsl-rl then sets every param group to one lr, so the terrain group
+    # loses its own rate (NARROW_SCHEDULE=adaptive, PPO setting comparison 2026-10-29).
+    if alg.schedule != "fixed" and not (alg.schedule == "adaptive" and os.environ.get("NARROW_SCHEDULE") == "adaptive"):
         raise ValueError("narrow fine-tune requires fixed schedule")
     with open(checkpoint_path, "rb") as f:
         digest = hashlib.sha256(f.read()).hexdigest()

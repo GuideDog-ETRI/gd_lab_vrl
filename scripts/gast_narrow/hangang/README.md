@@ -17,3 +17,13 @@ LD_PRELOAD libgomp + libcarb for aarch64 isaacsim; `srun --cpus-per-task=$SLURM_
 with the host aws-ofi-nccl 1.20.0 + libfabric 2.3.1 (hwloc / libnl-3 / libpciaccess bound from the host);
 `NCCL_PROTO=^LL128`; static torchrun rendezvous on a job-specific port; per-rank stdout/stderr files
 (`--log_dir ... --redirects 3`, needed beyond ~100 nodes); per-node Kit home on /tmp; Kit console at Error.
+
+Monitoring and evaluation helpers (added 2026-10-29):
+- `watchdog_v23.sh`: polls a training job; excludes nodes whose srun task fails to launch or whose rank stalls, restarts
+  from the newest checkpoint on a hang, and submits the final E2 when the run completes.
+- `notify_events.sh [EVERY]`: exits on a watchdog event or every EVERY iterations (periodic reports).
+- `ab_watch.sh`: watches the four 8-node PPO-setting runs listed in logs/ab_jobs.txt.
+- `final_e2_split.sh`, `final_e2_takeover.sh`: final E2 split one model per node (replaces the watchdog's single-node E2).
+- `e2_multi.sbatch`: several E2 configs in one job, one node each (natStr allows 5 jobs per user).
+
+The operator report (Hangang environment findings and suggestions) is in `docs/hangang/`.

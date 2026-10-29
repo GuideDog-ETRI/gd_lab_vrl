@@ -1,4 +1,4 @@
-# E2 on Hangang GH200 (full suites): readiness check with an early v2.3 checkpoint; the model list is swapped for
+# E2 on Hangang GH200 (full suites, 512 envs per cell: cell 95% CI ~ +-4 pt, suite mean ~ +-0.5 pt): readiness check with an early v2.3 checkpoint; the model list is swapped for
 # the final v2.3 Top-5 after training.
 # E2: fixed-condition evaluation of everything the GAST Ray+IR lineage has learned (docs/design/GAST_E2_EVAL_DESIGN.md).
 #   python3 scripts/gast_narrow/e2/run_e2.py configs/gast_narrow/e2/v22_top5.yaml [--only gap,narrow] [--models v2u1111]
@@ -11,7 +11,7 @@ seconds: 20.0                 # episode length (every env contributes its first 
 
 hardware:
   gpus: [0, 1, 2, 3]          # one GH200 node (natStr, --exclusive)
-  e2_slots_per_gpu: 2
+  e2_slots_per_gpu: 1          # 512 envs per cell (~25k envs per run): one run per GPU
   e1_slots_per_gpu: 3
   sif: /scratch/t515a05/gd_lab/gd_lab_isaaclab.sif
   python: /scratch/t515a05/gd_lab/venv/bin/python
@@ -27,7 +27,7 @@ suites:
     directions: [forward, backward]
     levels: [7, 11, 14]
     speeds: [0.5, 0.9]
-    envs: 48
+    envs: 512
   stairs:                     # straight flights; up/down mapped per family (pyramid: down = outward, *_inv: up = outward)
     enabled: true
     families: [pyramid_stairs, pyramid_stairs_inv, pyramid_stairs_wide, pyramid_stairs_inv_wide, pyramid_stairs_nose,
@@ -35,14 +35,14 @@ suites:
     directions: [up, down]
     levels: [9, 14]
     speed: 0.8
-    envs: 32
+    envs: 512
   terrain:                    # slopes / rough / ring fences, outward from the centre, speed tracking
     enabled: true
     families: [hf_pyramid_slope, hf_pyramid_slope_inv, random_rough, ring_fence]
     levels: [14]
     direction: outward
     speed: 1.0
-    envs: 32
+    envs: 512
   narrow:                     # v2 gdm-like command; width target -> closest tile; margin m pinned
     enabled: true
     families: [narrow_corridor, narrow_door_pos, narrow_door_neg, narrow_bend_left, narrow_bend_right]
@@ -51,13 +51,13 @@ suites:
       - {name: pass_tight,  width: 0.66, margin: 0.05}
       - {name: block_margin, width: 0.66, margin: 0.15}   # same width as pass_tight: only m differs
       - {name: block_narrow, width: 0.52, margin: 0.10}
-    envs: 32
+    envs: 512
   dead_end:
     enabled: true
     families: [narrow_dead_end]
     levels: [7, 14]
     margin: 0.10
-    envs: 32
+    envs: 512
 
 conditions:                   # one Isaac run per model and condition; `suites` = which suites it runs
   nominal:     {enabled: true, lidar: both,   payload_kg: 5.0, push: false, stair_disturbance: false,

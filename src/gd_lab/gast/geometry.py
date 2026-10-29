@@ -215,4 +215,7 @@ def warp_memory(memory, previous_pose, current_pose, mode="bilinear"):
     gy = (sa*x + ca*y + ty[:, None, None]) / .5
     grid = torch.stack((gx, gy), -1).to(memory.dtype)
     old = memory.transpose(1, 2).reshape(-1, memory.shape[-1], 11, 17)
-    return F.grid_sample(old, grid, mode=mode, align_corners=True).flatten(2).transpose(1, 2)
+    # cuDNN grid_sample rejects batches above 65535 (CUDNN_STATUS_NOT_SUPPORTED, e.g. E2 at 512 envs per cell);
+    # the native kernel gives the same result.
+    with torch.backends.cudnn.flags(enabled=old.shape[0] <= 65535):
+        return F.grid_sample(old, grid, mode=mode, align_corners=True).flatten(2).transpose(1, 2)

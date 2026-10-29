@@ -289,6 +289,7 @@ def resample(self, env_ids):
 cmd._resample_command = types.MethodType(resample, cmd)
 
 venv = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
+agent_cfg.num_steps_per_env = 1  # evaluation never fills the PPO rollout buffer (100 steps x 31k envs = 53 GB)
 from gd_lab.rl.runner import DreamwaqRunner  # noqa: E402
 runner = DreamwaqRunner(venv, agent_cfg.to_dict(), log_dir=None, device=device)
 saved = torch.load(args.model, map_location=device, weights_only=False)
