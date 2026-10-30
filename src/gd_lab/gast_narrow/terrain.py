@@ -20,10 +20,11 @@ def narrow_passage_terrain(difficulty: float, cfg: "NarrowPassageTerrainCfg"):
     geo = tile_geometry(difficulty, cfg)
     cx, cy = cfg.size[0] / 2.0, cfg.size[1] / 2.0
     meshes = [make_plane(cfg.size, 0.0, center_zero=False)]
-    for x0, x1, y0, y1 in geo["rects"]:
+    heights = geo.get("heights") or [geometry.WALL_H] * len(geo["rects"])  # v2.4 turn pockets: low bench fronts
+    for (x0, x1, y0, y1), h in zip(geo["rects"], heights):
         transform = np.eye(4)
-        transform[:3, 3] = (cx + (x0 + x1) / 2, cy + (y0 + y1) / 2, geometry.WALL_H / 2)
-        meshes.append(trimesh.creation.box((x1 - x0, y1 - y0, geometry.WALL_H), transform))
+        transform[:3, 3] = (cx + (x0 + x1) / 2, cy + (y0 + y1) / 2, h / 2)
+        meshes.append(trimesh.creation.box((x1 - x0, y1 - y0, h), transform))
     return meshes, np.array((cx, cy, 0.0))
 
 
