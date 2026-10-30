@@ -162,11 +162,11 @@ def gates(candidate, reference, criteria=None):
     criteria = criteria or {}
     m = candidate["criteria_metrics"]
     hold, breach = m.get("narrow_hold_rate"), m.get("narrow_breach_rate")
-    if "min_narrow_hold_rate" in criteria:
-        result["narrow_hold_pass"] = hold is not None and hold >= criteria["min_narrow_hold_rate"]
+    if "min_narrow_hold_rate" in criteria:  # no blocked episode in the window: nothing to judge, pass
+        result["narrow_hold_pass"] = hold is None or hold >= criteria["min_narrow_hold_rate"]
         result["terrain_mean_level_pass"] = result["terrain_mean_level_pass"] and result["narrow_hold_pass"]
     if "max_narrow_breach_rate" in criteria:
-        result["narrow_breach_pass"] = breach is not None and breach <= criteria["max_narrow_breach_rate"]
+        result["narrow_breach_pass"] = breach is None or breach <= criteria["max_narrow_breach_rate"]
         result["terrain_mean_level_pass"] = result["terrain_mean_level_pass"] and result["narrow_breach_pass"]
     return result
 
@@ -177,3 +177,6 @@ def install():
     runner.install_episode_collector = install_episode_collector
     online_top5.score_episodes = score_episodes
     online_top5.gates = gates
+    # The criteria file may set these (the reloader rejects keys missing from the defaults); off by default.
+    online_top5.DEFAULT_TOP5_CRITERIA.setdefault("min_narrow_hold_rate", 0.0)
+    online_top5.DEFAULT_TOP5_CRITERIA.setdefault("max_narrow_breach_rate", 1.0)
