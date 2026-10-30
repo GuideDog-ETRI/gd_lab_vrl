@@ -21,9 +21,12 @@ hardware:
 
 models:
   v23u602: checkpoints/gast_narrow/narrow_v23_gh200_20261029/v23_gh200_it602_top5.pt
-  v24t1: logs/gast/narrow_v24/narrow_v24c_602_4096x100_600_20261030/best_top5/176_top1.pt   # <- final Top-1
-  # v24t2: logs/gast/narrow_v24/narrow_v24c_602_4096x100_600_20261030/best_top5/<it>_top2.pt
-  # v24t3: ...
+  # Final Top-5 of narrow_v24h (v2.4d, 5120 x 100 envs, 800 updates, 2026-10-31); E2 run 10-31 04:34-07:xx.
+  v24t1: logs/gast/narrow_v24/narrow_v24h_602_5120x100_800_20261031/best_top5/653_top1.pt
+  v24t2: logs/gast/narrow_v24/narrow_v24h_602_5120x100_800_20261031/best_top5/372_top2.pt
+  v24t3: logs/gast/narrow_v24/narrow_v24h_602_5120x100_800_20261031/best_top5/301_top3.pt
+  v24t4: logs/gast/narrow_v24/narrow_v24h_602_5120x100_800_20261031/best_top5/598_top4.pt
+  v24t5: logs/gast/narrow_v24/narrow_v24h_602_5120x100_800_20261031/best_top5/327_top5.pt
 
 suites:
   turn:                       # in-place turn pockets (v24 only): tile closest to the target radius, actual radius decides turnable
