@@ -279,3 +279,15 @@ a6000 3차 학습(`narrow_v24e_602_5120x100_800_20261031`, v2.4c 플래그 입�
 |---|---|---|
 | 정지 anchor 목표를 정책 자신(μ(o \| cmd=0, flag=0), detached)으로 둠 | it9까지 stand MSE 3.06 → 0.56으로 내려가다 it12부터 value loss·base_contact 종료가 오르고 it13 stand MSE 35.8, it16 2.3e4, 행동 발산(action_rate −3.5e13). it28에서 저장 정지(model_28은 사용 불가) | 움직이는 자기참조 목표: μ(o) − μ(o')는 명령 열 가중치 × 명령과 플래그 열로만 생기는데, 그래디언트가 공유 첫 층의 명령 열까지 깎아 플래그 없는 표본의 명령 반응을 바꾸고 PPO와 진동·증폭 |
 | 수정 | — | 목표를 **고정된 시작 정책 사본**(`NARROW_STAND_ANCHOR_CKPT` → `NARROW_SOURCE`(602) → 6566 순, flag 열 0으로 넓힌 frozen copy)의 μ(o \| cmd=0, flag=0)으로. 6566 유지 anchor와 같은 성격의 회귀라 자기참조가 없음. 가중치 1.0 유지. 로컬 1-GPU 1024 env × 30 update 파일럿으로 발산 재현 여부를 먼저 확인 |
+
+## 14. 5차 학습 결과와 hold 판정 결함 (2026-10-31, v2.4d)
+
+a6000 5차(`narrow_v24g`, 고정 목표 정지 anchor, 7e45c81)는 발산 없이 anchor MSE 0.08까지 맞췄지만 it50~56 `turn_stop_rate` 0.0으로 it58 저장 정지. 같은 model_58을 로컬 E2(결정적 추론)의 회전 불가 tight 셀에서 돌리면 **held 15/16, 15/16, 8/16, 12/16, 침범 0** — 정책은 서는 법을 배웠다. 온라인 기록 경로를 로컬 파일럿(1024 env, 온라인 Top-5 it1부터, row 덤프)으로 재현해 원인을 두 가지 찾음.
+
+| 문제 정의 | 결과 | 반영 방향 |
+|---|---|---|
+| 온라인 지표 0 vs E2 hold 50~94 % | 20 s 내내 선 stop 에피소드(회전 < 12°, 이동 < 0.10 m)도 최장 still 구간 0.14~0.26 s. 조건별 통과율: \|ωz\| < 0.15 → 70~79 %, 속도 < 0.10 → 75~95 %, drift ≤ 0.10 → 76~100 %. PPO 행동 노이즈(std 0.57)로 서 있는 로봇의 순간 ωz가 4스텝에 한 번꼴로 임계를 넘어 **"1.5 s 연속"이 학습 중엔 성립 불가**. hold 판정은 hold 보너스(+4)·success 종료·tight 커리큘럼 상승에도 쓰이므로 다섯 번의 학습 모두에서 정지 보상이 지급된 적이 없고 tight 레벨이 0에 묶임 | still 판정의 ωz·평면 속도를 **저역 필터(시정수 `STILL_TAU` 0.3 s)** 값으로 (`TurnEpisode.wz_f / v_f`). drift ≤ 0.10, < 15°, 1.5 s 정의는 그대로. E2도 같은 monitor를 쓰지만 결정적 추론이라 결과는 거의 같다 |
+| 학습 시작 전체 reset 때 기록되는 가짜 row | 길이 0.01 s·종료 항목 없음·drift 0인 row가 턴 env 수만큼(1024 env에서 155개) 기록됨 | `record_and_reset`에서 에피소드 길이 0인 env는 건너뜀 (P/H 등 v2 지표에도 같은 오염이 있었음) |
+| 진단 도구 | — | `GD_LAB_TOP5_DUMP=path`: 회전 row를 JSON lines로 덤프(종료 항목, drift, turned, hold_max, 조건별 스텝 수). `TurnEpisode.hold_max / diag` 계측 유지 |
+
+검증: 로컬 파일럿(model_58, 1024 env × 8 update)에서 `turn_stop_rate` > 0 확인 뒤 a6000 6차(`narrow_v24h`, 602 시작). 관문: it55 안에 `turn_stop_rate` > 0.3, tight 레벨 상승.

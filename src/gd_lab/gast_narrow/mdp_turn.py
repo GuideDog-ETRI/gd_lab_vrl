@@ -31,6 +31,7 @@ DONE_TOL_DEG = 5.0
 PAUSE_P, PAUSE_S = 0.2, (1.0, 2.0)
 DRIFT_FREE, DRIFT_OK, DRIFT_FAIL = 0.05, 0.10, 0.20
 BREACH_DEG, STILL_WZ = 15.0, 0.15
+STILL_TAU = 0.3             # s, low-pass on wz / planar speed for the still test (see TurnEpisode)
 SPAWN_JITTER, SPAWN_YAW_NOISE_DEG = 0.03, 15.0
 # Spawn footprint (trunk + legs in stance, half sizes) for choosing an axis-aligned start yaw that fits the pocket.
 FOOTPRINT = [(x, y) for x in (-0.45, 0.0, 0.45) for y in (-0.25, 0.25)]
@@ -53,6 +54,15 @@ class TurnEpisode:
         self.drift_max = torch.zeros(n, device=d)
         self.reached = torch.zeros(n, dtype=torch.bool, device=d)
         self.hold_time = torch.zeros(n, device=d)
+        # diagnostics (stop tiles): longest still streak, and per-condition step counts while not yet over 15 deg
+        self.hold_max = torch.zeros(n, device=d)
+        # v2.4d: the still test uses low-pass filtered velocities (STILL_TAU). Under the PPO action noise (std 0.57)
+        # a standing robot's instantaneous |wz| exceeds STILL_WZ on 21-30 % of the steps, so a 1.5 s streak of raw
+        # stillness never happened online (longest 0.14-0.26 s over 20 s episodes) -- no hold bonus, no tight
+        # curriculum, stop rate 0 in five runs, while the same policy held 50-94 % under deterministic inference (E2).
+        self.wz_f = torch.zeros(n, device=d)
+        self.v_f = torch.zeros(n, 2, device=d)
+        self.diag = torch.zeros(n, 5, device=d)  # steps: candidate, wz ok, speed ok, drift ok, all three
 
 
 def turn_episode(env) -> TurnEpisode:
@@ -139,6 +149,10 @@ def reset_turn(env, env_ids):
     turn.drift_max[ids] = 0.0
     turn.reached[ids] = False
     turn.hold_time[ids] = 0.0
+    turn.hold_max[ids] = 0.0
+    turn.diag[ids] = 0.0
+    turn.wz_f[ids] = 0.0
+    turn.v_f[ids] = 0.0
 
 
 class NarrowV24VelocityCommand:
@@ -203,12 +217,19 @@ def update_turn(env, monitor):
     monitor.passed |= new_pass
     monitor.pass_event |= new_pass
     robot = env.scene["robot"].data
-    wz = robot.root_ang_vel_b[:, 2].abs()
-    speed = robot.root_lin_vel_b[:, :2].norm(dim=-1)
+    alpha = min(1.0, dt / STILL_TAU)
+    turn.wz_f = turn.wz_f + alpha * (robot.root_ang_vel_b[:, 2] - turn.wz_f)
+    turn.v_f = turn.v_f + alpha * (robot.root_lin_vel_b[:, :2] - turn.v_f)
+    wz = turn.wz_f.abs()
+    speed = turn.v_f.norm(dim=-1)
     stop = mask & ~turn.turnable
     over = turn.turned.abs() > math.radians(BREACH_DEG)
-    still = stop & ~over & ~monitor.breached & (wz < STILL_WZ) & (speed < mdp_v2.STILL_SPEED) & (drift <= DRIFT_OK)
+    wz_ok, v_ok, d_ok = wz < STILL_WZ, speed < mdp_v2.STILL_SPEED, drift <= DRIFT_OK
+    still = stop & ~over & ~monitor.breached & wz_ok & v_ok & d_ok
     turn.hold_time = torch.where(still, turn.hold_time + dt, torch.zeros_like(turn.hold_time))
+    turn.hold_max = torch.maximum(turn.hold_max, turn.hold_time)
+    cand = stop & ~over & ~monitor.breached
+    turn.diag += torch.stack((cand, cand & wz_ok, cand & v_ok, cand & d_ok, still), -1).float()
     new_hold = still & (turn.hold_time >= mdp_v2.HOLD_S) & ~monitor.held
     monitor.held |= new_hold
     monitor.hold_event |= new_hold

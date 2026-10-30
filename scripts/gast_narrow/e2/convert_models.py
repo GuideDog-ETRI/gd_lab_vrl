@@ -5,7 +5,7 @@
   convert_models.py --to e1 SRC OUT     -> 3906/6566 shape for the E1 harness (LiDAR map zero, margin m folded)
 
 Shapes (actor first layer in, critic first layer in): Ray+IR 6566/3906 (235, 298), Narrow v1 (251, 304),
-Narrow v2 (252, 307). Actor input = [base 235, LiDAR latent 16, margin 1]; critic = [base 298, privileged 6 or 9].
+Narrow v2 (252, 307), Narrow v2.4c (253, 307: + turn-block flag; --to v2 keeps it). Actor input = [base 235, LiDAR latent 16, margin 1]; critic = [base 298, privileged 6 or 9].
 --to v2 adds zero columns (and a zero LiDAR encoder for 6566), so the converted policy acts exactly as the source.
 --to e1 folds the constant latent c = enc(zero map) and the margin obs into the first-layer bias (exact up to
 float rounding): actor.0(x) = W[:, :235] x + b + W[:, 235:251] c + W[:, 251] * margin_obs.
@@ -24,7 +24,7 @@ ENCODER = {"cnn.0.weight": (8, 2, 5, 5), "cnn.0.bias": (8,), "cnn.2.weight": (16
 
 def kind_of(sd):
     a, c = sd["actor.0.weight"].shape[1], sd["critic.0.weight"].shape[1]
-    kinds = {(235, 298): "rayir", (251, 304): "narrow_v1", (252, 307): "narrow_v2"}
+    kinds = {(235, 298): "rayir", (251, 304): "narrow_v1", (252, 307): "narrow_v2", (253, 307): "narrow_v24c"}
     if (a, c) not in kinds:
         raise ValueError(f"unknown checkpoint shape actor.0 in={a} critic.0 in={c}")
     return kinds[(a, c)]
@@ -39,6 +39,8 @@ def widen(w, total):
 def to_v2(sd):
     kind = kind_of(sd)
     new = {k: v.clone() for k, v in sd.items()}
+    if kind == "narrow_v24c":  # v2 + the turn-block actor column: kept as is (e2_trial widens v2 models to it)
+        return kind, new
     if kind == "rayir":
         for name, shape in ENCODER.items():
             new["lidar_encoder." + name] = torch.zeros(shape)

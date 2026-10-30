@@ -15,6 +15,9 @@ import math
 import types
 from collections import defaultdict
 
+import json
+import os
+
 import torch
 
 from gd_lab.gast_narrow import narrow_top5 as v1
@@ -30,6 +33,7 @@ def install_episode_collector(env, family_columns):
     records: list[dict] = []
     original_reset = raw._reset_idx
     column_family = {column: family for family, columns in family_columns.items() for column in columns}
+    dump = os.environ.get("GD_LAB_TOP5_DUMP")
 
     def record_and_reset(self, ids):
         terrain = self.scene.terrain
@@ -60,10 +64,15 @@ def install_episode_collector(env, family_columns):
         blocked = episode.blocked[ids].detach().cpu().tolist()
         slack = episode.slack[ids].detach().cpu().tolist()
         margin = episode.margin[ids].detach().cpu().tolist()
+        turn = getattr(self, "_narrow_turn", None)
+        turnable = turn.turnable[ids].detach().cpu().tolist() if turn is not None else None
+        term_flags = {name: self.termination_manager.get_term(name)[ids].detach().cpu().tolist()
+                      for name in self.termination_manager.active_terms} if dump else {}
         max_level = max(1, self.scene.terrain.cfg.terrain_generator.num_rows - 1)
+        lengths = self.episode_length_buf[ids].detach().cpu().tolist()
         for index, column in enumerate(types_):
             family = column_family.get(column)
-            if family is None:
+            if family is None or lengths[index] == 0:  # a full reset (start of training): no episode to record
                 continue
             seconds = duration[index]
             track = sum(sums.get(name, [0.0] * len(types_))[index] for name in
@@ -91,6 +100,17 @@ def install_episode_collector(env, family_columns):
                            min_clearance=float(min(clearance[index], 1.0)))
             if online_top5.validate_episode(row):
                 records.append(row)
+                if dump and family.startswith("narrow_turn"):  # GD_LAB_TOP5_DUMP=path: turn rows as JSON lines
+                    row_dump = dict(row, seconds=seconds, held=bool(held[index]), breached=bool(breached[index]),
+                                    base=bool(base[index]), turnable=bool(turnable[index]) if turnable else None,
+                                    terms=[name for name, flags in term_flags.items() if flags[index]],
+                                    drift=float(turn.drift[ids][index]) if turn is not None else None,
+                                    turned_deg=float(math.degrees(turn.turned[ids][index])) if turn is not None else None,
+                                    blocked_v2=bool(blocked[index]),
+                                    hold_max=float(turn.hold_max[ids][index]) if turn is not None else None,
+                                    diag=turn.diag[ids][index].tolist() if turn is not None else None)
+                    with open(dump, "a") as f:
+                        f.write(json.dumps(row_dump) + "\n")
         return original_reset(ids)
 
     raw._reset_idx = types.MethodType(record_and_reset, raw)
