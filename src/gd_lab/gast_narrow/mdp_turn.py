@@ -308,3 +308,35 @@ def narrow_levels_v24(env, env_ids, min_moving_time: float = 2.0):
         up = monitor.success[turning] & (monitor.touch_time[turning] < 0.2) & ~failed
         env.scene.terrain.update_env_origins(turning, up, ~up)
     return env.scene.terrain.terrain_levels.float().mean()
+
+
+def should_stand(env):
+    """Where the command keeps asking to move but the policy must stand: turn tiles where the turn is not possible,
+    and v2 blocked zones before the line (not yet breached)."""
+    _, _, _, zone, breach = mdp_v2.zone_state(env)
+    turn = turn_episode(env)
+    return (_turn_mask(env) & ~turn.turnable) | (zone & ~breach)
+
+
+def feet_cadence_overrun_stand_gated(env, command_name, sensor_cfg, target_air_time: float = 0.4,
+                                     target_contact_time: float = 0.6, cmd_threshold: float = 0.1,
+                                     overrun_cap: float | None = 0.5):
+    """The base cadence bound, off where the robot should stand: it charged up to 2 /s for feet kept on the ground
+    under a turn / forward command there, which pays for marching in place instead of standing."""
+    from gd_lab.mdp.rewards import feet_cadence_overrun
+    base = feet_cadence_overrun(env, command_name, sensor_cfg, target_air_time, target_contact_time, cmd_threshold,
+                                overrun_cap)
+    return base * (~should_stand(env)).float()
+
+
+def stand_still_feet_contact_stand(env, sensor_cfg, command_name: str = "base_velocity",
+                                   command_threshold: float = 0.1, force_threshold: float = 10.0,
+                                   exclude_terrain_families=()):
+    """The base lifted-feet count at standstill, also charged where the robot should stand (its command gate is
+    closed there because the command is not zero)."""
+    from gd_lab.mdp.rewards import stand_still_feet_contact
+    base = stand_still_feet_contact(env, sensor_cfg, command_name, command_threshold, force_threshold,
+                                    exclude_terrain_families)
+    forces = env.scene.sensors[sensor_cfg.name].data.net_forces_w_history[:, :, sensor_cfg.body_ids, :]
+    lifted = (~(forces.norm(dim=-1).max(dim=1).values > force_threshold)).float().sum(dim=1)
+    return base + lifted * should_stand(env).float()

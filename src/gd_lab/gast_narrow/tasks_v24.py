@@ -10,6 +10,8 @@ Changes (network, anchor, other narrow tiles and the retention tiles as v2.3):
   turnable = r_free >= R_SWEEP + m; success -> the v2 pass / hold / breach events; new rewards turn_stand +0.5,
   turn_drift -2, turn_overspin -1; yaw tracking off where the turn is not possible; centering off; drift > 0.2 m ends.
 - critic: the same 9 narrow inputs, turn state in slots 2 / 4 / 7 / 8 on turn tiles.
+- standing under a moving command (turn impossible, v2 blocked zone): feet_cadence_overrun off there (it paid for
+  marching in place), stand_still_feet_contact on there.
 - gap nose-up (602 still lifts its front crossing gaps: E2 mean 10.4 deg, p90 13 deg; MuJoCo more): gap_nose_up limit
   10 -> 5 deg (the anchor skips the flagged samples as before), and gap_nose_peak pays -NOSE_PEAK_WEIGHT per rad of the
   crossing's peak nose-up above 5 deg at the moment the crossing is credited (the per-second term alone is cheap for
@@ -21,6 +23,7 @@ import torch
 from isaaclab.managers import EventTermCfg, ManagerTermBase, ObservationTermCfg, RewardTermCfg, TerminationTermCfg
 from isaaclab.utils import configclass
 
+import gd_lab.mdp.rewards as gd_rew
 from gd_lab.gast_narrow import mdp, mdp_turn, mdp_v2
 from gd_lab.gast_narrow.lidar import NarrowLidarMapV24
 from gd_lab.gast_narrow.tasks_v23 import GastNarrowV23RunnerCfg, GastNarrowV23TeacherCfg, NarrowV23VelocityCommand
@@ -119,6 +122,12 @@ class GastNarrowV24TeacherCfg(GastNarrowV23TeacherCfg):
         self.rewards.turn_drift = RewardTermCfg(func=mdp_turn.turn_drift, weight=TURN_DRIFT_WEIGHT)
         self.rewards.turn_overspin = RewardTermCfg(func=mdp_turn.turn_overspin, weight=TURN_OVERSPIN_WEIGHT)
         self.terminations.turn_drift = TerminationTermCfg(func=mdp_turn.turn_drift_done)
+        # Standing where the command still asks to move (turn impossible, blocked zone): the cadence bound off,
+        # the lifted-feet count on (see mdp_turn.should_stand).
+        assert self.rewards.feet_cadence_overrun.func is gd_rew.feet_cadence_overrun
+        self.rewards.feet_cadence_overrun.func = mdp_turn.feet_cadence_overrun_stand_gated
+        assert self.rewards.stand_still_feet_contact.func is gd_rew.stand_still_feet_contact
+        self.rewards.stand_still_feet_contact.func = mdp_turn.stand_still_feet_contact_stand
         self.rewards.gap_nose_up.params["limit_deg"] = NOSE_LIMIT_DEG
         self.rewards.gap_nose_peak = RewardTermCfg(func=GapNosePeak, weight=NOSE_PEAK_WEIGHT,
                                                    params={"limit_deg": NOSE_LIMIT_DEG})
