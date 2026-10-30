@@ -22,7 +22,7 @@ export APPTAINERENV_LD_PRELOAD=/lib/aarch64-linux-gnu/libgomp.so.1:/usr/local/li
 per=${PER_GPU:-2048}
 head=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -1)
 export NARROW_GPUS=0,1,2,3 NARROW_NCCL_WORKAROUND=0 NARROW_NNODES=$SLURM_NNODES NARROW_RDZV_ENDPOINT=$head:$((20000 + SLURM_JOB_ID % 20000))
-export NARROW_TOTAL_ENVS=$((per * 4 * SLURM_NNODES)) NARROW_UPDATES=${NARROW_UPDATES:-1500} NARROW_SAVE_EVERY=50
+export NARROW_TOTAL_ENVS=$((per * 4 * SLURM_NNODES)) NARROW_UPDATES=${NARROW_UPDATES:-1200} NARROW_SAVE_EVERY=50
 export NARROW_TRAIN_PY=scripts/gast_narrow/train_lineage_a.py NARROW_TASK=Gd-GastRayIrV21Gap50BackV2-Rbq10-Dreamwaq-v0
 export NARROW_EXPERIMENT=gast/lineage16_a GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_backgap/online_top5.json
 export NARROW_SOURCE=${NARROW_SOURCE:-$G/gd_lab_vrl/checkpoints/teachers/gast/rayir_top5_20261016/3906_gap50_from_dwb38000/best_top5/3906_top1.pt}

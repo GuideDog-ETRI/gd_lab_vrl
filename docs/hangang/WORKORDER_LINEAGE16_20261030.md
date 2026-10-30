@@ -9,8 +9,8 @@
 
 | 단계 | 출발 | 학습 내용 | 앵커 | 기본 update |
 |---|---|---|---|---|
-| A. 후진 갭 | 3906 (`f3e7afe5…`) | 6566 레시피 그대로: 과제 `Gd-GastRayIrV21Gap50BackV2` (후진 명령 0.4→0.7, 이동 방향 기준 clean, 후진 앞쪽 들림 벌점) | 없음 | 1,500 |
-| B. 통로 전체 | A의 E2 최고 모델 | v2.3 레시피 전체를 한 번에: LiDAR 지도·측면 여유 입력, 막히면 서기, 지형 44열, 통과 보너스·과속·멈춤 벌점, 안전 속도, 정강이 측정점, 갭 머리 들림 벌점 | A 모델 (통로가 아닌 곳, 머리 들림 표본 제외) | 1,500 |
+| A. 후진 갭 | 3906 (`f3e7afe5…`) | 6566 레시피 그대로: 과제 `Gd-GastRayIrV21Gap50BackV2` (후진 명령 0.4→0.7, 이동 방향 기준 clean, 후진 앞쪽 들림 벌점) | 없음 | 1,200 (it600 E2로 조기 종료 판단) |
+| B. 통로·회전 | A의 E2 최고 모델 | v2.4 레시피(`LINEAGE_RECIPE=v24` 기본): v2.3 통로 전체 + 제자리 회전 + 후방 Mid-360 + 갭 머리 들림 강화. `LINEAGE_RECIPE=v23`이면 v2.3만 | A 모델 (통로·회전 타일, 머리 들림 표본 제외) | 1,200 (it300·600·900 E2가 평탄하면 중단) |
 
 B는 A 모델(LiDAR 없음)에서 시작한다. LiDAR 인코더는 새로 만들고, actor/critic 첫 층의 새 입력 열은 0으로 넣는다
 (시작 시점 정책 = A 모델). 1748을 6566에서 만들 때와 같은 방식이다(`train_narrow_v23.py`).
@@ -19,7 +19,7 @@ B는 A 모델(LiDAR 없음)에서 시작한다. LiDAR 인코더는 새로 만들
 
 - **16노드 × GPU 4장 = 64장** (natStr 522노드의 약 3%). 학습 작업은 한 번에 하나만 띄운다.
 - GPU당 env 2,048 → 전체 131,072 env. iteration당 시간 예상 약 50~55 s (1노드 46.5 s, 118노드 59~64 s 실측 사이 값, 16노드 실측 아님).
-- 작업당 24 h 제한: 1,500 update ≈ 21~23 h로 작업 하나에 들어가도록 잡았다. 넘치면 이어 학습(아래).
+- 작업당 24 h 제한: 1,200 update ≈ 17 h로 작업 하나에 들어가고, 전체 2일 안에 끝나도록 잡았다(시간 예산: `HANGANG_FINAL_PLAN_20261030.md` 2절). 넘치면 이어 학습(아래).
 - 시작 실패·멈춤 노드 3대는 미리 제외(`--exclude=node1730,node1395,node1402`).
 - E2는 학습이 끝난 뒤 1~2노드로 돌린다(`e2_multi.sbatch`).
 
@@ -53,7 +53,7 @@ E2로 확인한 기준점 + 흔들림 2 SD로 다시 정한다** (파일은 실�
 cd /scratch/t515a05/gd_lab/gd_lab_vrl && git fetch origin && git checkout gh200 && git pull --ff-only
 cd scripts/gast_narrow/hangang
 
-# A: 3906에서 후진 갭 (16노드, 1,500 update)
+# A: 3906에서 후진 갭 (16노드, 1,200 update)
 sbatch lineage16_a.sbatch
 # A가 24 h 안에 안 끝나면: 마지막 저장본에서 이어 학습 (PPO 옵티마이저는 새로, 램프 재시작 없음)
 NARROW_SOURCE=<.../model_N.pt> NARROW_SOURCE_SHA256=$(sha256sum <.../model_N.pt> | cut -d' ' -f1) \
@@ -61,7 +61,7 @@ NARROW_SOURCE=<.../model_N.pt> NARROW_SOURCE_SHA256=$(sha256sum <.../model_N.pt>
 
 # A E2 (300·600·1,000·1,500 저장본 + 6566 비교) → 후진 갭·전진 갭·계단이 6566 이상인 최고 모델 선택
 
-# B: A 최고 모델에서 통로 전체 (16노드, 1,500 update)
+# B: A 최고 모델에서 통로·회전 (16노드, 1,200 update)
 STAGE_A=<A 최고 .pt> STAGE_A_SHA256=<sha> sbatch lineage16_b.sbatch
 # 이어 학습: STAGE_A/STAGE_A_SHA256는 그대로, NARROW_SOURCE=<B의 model_N.pt> NARROW_SOURCE_SHA256=<sha> NARROW_UPDATES=<남은 수>
 ```

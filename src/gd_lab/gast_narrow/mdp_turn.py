@@ -7,7 +7,8 @@ whether the turn is possible: turnable = r_free >= R_SWEEP + m (no draw within +
   the paced pass bonus pays); the command then goes to 0.
 - not turnable: the command still asks to turn; success = HOLD_S still (|wz| < STILL_WZ, speed < STILL_SPEED) with less
   than BREACH_DEG turned (-> the v2 hold event); turning more than BREACH_DEG = breach (-> the v2 breach event, ends).
-- drift above DRIFT_FAIL ends the episode (failure) on every turn tile.
+- drift above DRIFT_FAIL ends the episode (failure) on every turn tile, and so does reaching the target angle with a
+  drift above DRIFT_OK on the way (the turn is done but not clean: no pass, no point in standing until the time-out).
 The v2 narrow zone logic (blocked passages along a path) is off on turn tiles: episode.blocked stays False there.
 """
 from __future__ import annotations
@@ -252,7 +253,9 @@ def turn_overspin(env):
 
 
 def turn_drift_done(env):
-    return _turn_mask(env) & (turn_episode(env).drift > DRIFT_FAIL)
+    turn = turn_episode(env)
+    drifted_turn = turn.reached & (turn.drift_max > DRIFT_OK) & ~mdp_v2._monitor(env).passed
+    return _turn_mask(env) & ((turn.drift > DRIFT_FAIL) | drifted_turn)
 
 
 def track_ang_vel_z_turn_gated(env, command_name: str, std_base: float = 0.3, alpha: float = 0.3,

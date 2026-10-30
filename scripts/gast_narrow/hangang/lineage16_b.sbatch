@@ -23,8 +23,12 @@ export APPTAINERENV_LD_PRELOAD=/lib/aarch64-linux-gnu/libgomp.so.1:/usr/local/li
 per=${PER_GPU:-2048}
 head=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -1)
 export NARROW_GPUS=0,1,2,3 NARROW_NCCL_WORKAROUND=0 NARROW_NNODES=$SLURM_NNODES NARROW_RDZV_ENDPOINT=$head:$((20000 + SLURM_JOB_ID % 20000))
-export NARROW_TOTAL_ENVS=$((per * 4 * SLURM_NNODES)) NARROW_UPDATES=${NARROW_UPDATES:-1500} NARROW_SAVE_EVERY=50
+export NARROW_TOTAL_ENVS=$((per * 4 * SLURM_NNODES)) NARROW_UPDATES=${NARROW_UPDATES:-1200} NARROW_SAVE_EVERY=50
 export NARROW_EXPERIMENT=gast/lineage16_b GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b.json
+# LINEAGE_RECIPE=v24 (default): the v2.4 task (v2.3 + in-place turns, rear Mid-360, stronger gap nose-up); v23: the v2.3 task.
+if [[ ${LINEAGE_RECIPE:-v24} == v24 ]]; then
+  export NARROW_TRAIN_PY=scripts/gast_narrow/train_narrow_v24.py NARROW_TASK=Gd-GastNarrowV24-Rbq10-Dreamwaq-v0
+fi
 export NARROW_SOURCE=${NARROW_SOURCE:-$STAGE_A} NARROW_SOURCE_SHA256=${NARROW_SOURCE_SHA256:-$STAGE_A_SHA256}
 export NARROW_ANCHOR_CKPT=$STAGE_A
 export GAST_RUN_ID=lineage16_b_${SLURM_NNODES}n_${per}x4_${NARROW_UPDATES}_$(date +%Y%m%d)_${SLURM_JOB_ID}

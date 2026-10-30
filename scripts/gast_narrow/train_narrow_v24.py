@@ -135,8 +135,8 @@ def _from_602(alg, checkpoint_path, policy_lr, terrain_lr, *, expected_sha256, e
     if source == TASK_ID and c.get("optimizer_state_dict"):
         alg.optimizer.load_state_dict(c["optimizer_state_dict"])
         ppo_optimizer = "restored"
-    from gd_lab.gast_narrow.tasks_v24 import TURN_FAMILIES
-    for family in (*NARROW_FAMILIES, *TURN_FAMILIES):
+    from gd_lab.gast_narrow.tasks_v24 import TIGHT_FAMILY, TURN_FAMILIES
+    for family in (*NARROW_FAMILIES, *TURN_FAMILIES, TIGHT_FAMILY[0]):
         means.setdefault(family, 0.0)
     kind = {TASK_ID: "narrow_v24_continue", SOURCE_TASK_ID: "narrow_v23", BACKGAP_TASK_ID: "backgap_v2"}[source]
     return dict(source=checkpoint_path, source_sha256=digest, source_iteration=int(c["iter"]), source_task=source,
