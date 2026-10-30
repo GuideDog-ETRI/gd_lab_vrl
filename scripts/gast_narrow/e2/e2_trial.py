@@ -3,9 +3,11 @@
 
   apptainer exec ... python scripts/gast_narrow/e2/e2_trial.py --plan plan.json --model model_v2.pt --out <dir>
 
-``plan.json`` (written by run_e2.py) holds the condition (LiDAR mode, payload, pushes, stair disturbance, seed,
-seconds) and the list of cells. A cell pins its envs to one (terrain row, column) and, for the retention terrain,
-to one command; narrow cells keep the v2 gdm-like command and pin the requested margin m.
+``plan.json`` (written by run_e2.py) holds the task (v2 or v24 env), the condition (LiDAR mode, rear Mid-360,
+payload, pushes, stair disturbance, seed, seconds) and the list of cells. A cell pins its envs to one (terrain row,
+column) and, for the retention terrain, to one command; narrow cells keep the v2 gdm-like command and pin the
+requested margin m (and, on the v24 task, the passage direction: forward or tail first); turn cells (v24) pin the
+margin, the turn direction, the target angle and the turn rate, with no pause window.
 Each env contributes its FIRST episode only (no curriculum, the terrain levels stay fixed). The model must be
 v2-shaped (convert_models.py --to v2): 6566 / 1748 are widened with zero columns, so they act exactly as trained.
 
@@ -48,24 +50,31 @@ from gd_lab.core import registry  # noqa: E402
 from gd_lab.core.experiments import training_arm_overrides  # noqa: E402
 from gd_lab.managers.action_history import ensure_prev_prev_action_tracking  # noqa: E402
 
-TASK = "Gd-GastNarrowV2-Rbq10-Dreamwaq-v0"
-registry.register_task(task="GastNarrowV2", robot="Rbq10", method="Dreamwaq",
-                       env_cfg="gd_lab.gast_narrow.tasks_v2:GastNarrowV2TeacherCfg",
-                       agent_cfg="gd_lab.gast_narrow.model:GastNarrowV2RunnerCfg")
-from gd_lab.gast_narrow import geometry, mdp_v2  # noqa: E402
-from gd_lab.gast_narrow.state import narrow_state  # noqa: E402
-from gd_lab.mdp.terrain_families import family_column_masks  # noqa: E402
-
 plan = json.loads(Path(args.plan).read_text())
 cond = plan["condition"]
 cells = plan["cells"]
 SEED = int(plan["seed"])
 SECONDS = float(plan["seconds"])
+TASK_KIND = plan.get("task", "v2")  # v2: the GAST-Narrow v2 env (44 columns); v24: v2.4 (58 columns, turn tiles)
+TASKS = {"v2": ("GastNarrowV2", "gd_lab.gast_narrow.tasks_v2:GastNarrowV2TeacherCfg",
+                "gd_lab.gast_narrow.model:GastNarrowV2RunnerCfg"),
+         "v24": ("GastNarrowV24", "gd_lab.gast_narrow.tasks_v24:GastNarrowV24TeacherCfg",
+                 "gd_lab.gast_narrow.tasks_v24:GastNarrowV24RunnerCfg")}
+task_name, env_entry, agent_entry = TASKS[TASK_KIND]
+TASK = registry.register_task(task=task_name, robot="Rbq10", method="Dreamwaq", env_cfg=env_entry, agent_cfg=agent_entry)
+from gd_lab.gast_narrow import geometry, mdp_v2  # noqa: E402
+from gd_lab.gast_narrow.state import narrow_state  # noqa: E402
+from gd_lab.mdp.terrain_families import family_column_masks  # noqa: E402
+
+V24 = TASK_KIND == "v24"
+if V24:
+    from gd_lab.gast_narrow import mdp_turn  # noqa: E402
 STAIR_OUT_R, STAIR_IN_R = float(plan.get("stair_outer_r", 3.6)), float(plan.get("stair_inner_r", 1.0))
 GAP_LEAVE_R = float(plan.get("gap_leave_r", 3.8))  # Chebyshev radius at which a gap env leaves its 8 m tile
 LIDAR_ON = {"both": (True, True), "ouster": (True, False), "mid360": (False, True), "off": (False, False)}
 LIDAR_ON[False] = LIDAR_ON["off"]  # YAML 1.1 reads a bare `off` as false
 UP_OUTWARD = ("_inv",)  # *_inv tiles: the pit is in the centre, walking outward climbs; the others descend outward
+MODE_TURN = 3
 
 
 def stair_motion_outward(family, direction):
@@ -149,7 +158,7 @@ def e2_spawn(env, env_ids):
         state = getattr(env, "_narrow_state", None)
         if state is not None:
             state.reset_counter += 1
-    pinned = ids[~torch.isnan(spec.margin[ids])]
+    pinned = ids[~torch.isnan(spec.margin[ids]) & (spec.mode[ids] != MODE_TURN)]
     if len(pinned):
         state = narrow_state(env)
         episode = mdp_v2.narrow_episode(env)
@@ -160,6 +169,43 @@ def e2_spawn(env, env_ids):
         episode.margin[pinned] = m
         episode.blocked[pinned] = (dead_end | (width < threshold)) & state.narrow[pinned]
         episode.slack[pinned] = torch.where(state.narrow[pinned], width - threshold, torch.zeros_like(m))
+    if V24:
+        e2_spawn_v24(env, ids)
+
+
+def e2_spawn_v24(env, ids):
+    """v2.4 tiles. Turn cells: the margin, turnable (from the ACTUAL tile radius, the training rule), the target
+    angle and the direction replace reset_turn's draws (the start pose stays as reset_turn placed it). Narrow cells:
+    the passage direction replaces reset_narrow_back's 25 % draw (spawn yaw turned back where it differs)."""
+    state = narrow_state(env)
+    episode = mdp_v2.narrow_episode(env)
+    turn = mdp_turn.turn_episode(env)
+    tids = ids[spec.mode[ids] == MODE_TURN]
+    if len(tids):
+        m = spec.margin[tids]
+        slack = state.width[tids] - (mdp_turn.R_SWEEP + m)
+        episode.margin[tids] = m
+        episode.blocked[tids] = False
+        episode.slack[tids] = slack
+        turn.turnable[tids] = slack >= 0
+        turn.target[tids] = spec.turn_angle[tids]
+        turn.direction[tids] = spec.turn_dir[tids]
+    nids = ids[spec.mode[ids] == 0]
+    if len(nids):
+        back = mdp_turn.narrow_back(env)
+        eligible = torch.zeros(len(nids), dtype=torch.bool, device=env.device)
+        for k in mdp_turn.BACK_KINDS:
+            eligible |= state.kind[nids] == k
+        want = spec.back[nids] & eligible & ~episode.blocked[nids]
+        flip = nids[want != back[nids]]
+        if len(flip):
+            robot = env.scene["robot"]
+            pose = torch.cat((robot.data.root_pos_w[flip], robot.data.root_quat_w[flip]), -1).clone()
+            w, z = pose[:, 3].clone(), pose[:, 6].clone()  # yaw-only quaternion: yaw + pi (as reset_narrow_back)
+            pose[:, 3], pose[:, 6] = -z, w
+            robot.write_root_pose_to_sim(pose, env_ids=flip)
+            state.reset_counter += 1
+        back[nids] = want
 
 
 env_cfg.events.e2_spawn = EventTermCfg(func=e2_spawn, mode="reset")
@@ -180,7 +226,24 @@ spec.speed = torch.zeros(n, device=device)
 spec.backward = torch.zeros(n, dtype=torch.bool, device=device)
 spec.outward = torch.ones(n, dtype=torch.bool, device=device)
 spec.margin = torch.full((n,), float("nan"), device=device)
-spec.lidar = torch.tensor([LIDAR_ON[cond.get("lidar", "both")]], device=device).expand(n, 2).clone()
+spec.back = torch.zeros(n, dtype=torch.bool, device=device)        # v24 narrow cells: tail first
+spec.turn_dir = torch.ones(n, device=device)                        # v24 turn cells: +1 left, -1 right
+spec.turn_angle = torch.zeros(n, device=device)                     # rad
+spec.turn_rate = torch.zeros(n, device=device)                      # rad/s
+lidar_term = raw.observation_manager._group_obs_class_term_cfgs["narrow_lidar"][0].func
+N_SENSORS = lidar_term.sensor_on.shape[1]  # 2 (Ouster, Mid-360) on v2; 3 (+ rear Mid-360) on v24
+
+
+def lidar_flags(mode, rear):
+    """Condition / cell LiDAR mode (+ the rear Mid-360 switch on v24) -> per-sensor on flags."""
+    flags = LIDAR_ON[mode]
+    if N_SENSORS == 3:
+        flags = flags + (bool(rear) and mode not in ("off", False),)
+    return flags
+
+
+spec.lidar = torch.tensor([lidar_flags(cond.get("lidar", "both"), cond.get("rear", True))],
+                          device=device).expand(n, N_SENSORS).clone()
 cell_of = torch.zeros(n, dtype=torch.long, device=device)
 levels = torch.zeros(n, dtype=torch.long, device=device)
 types_ = torch.zeros(n, dtype=torch.long, device=device)
@@ -202,6 +265,17 @@ for index, cell in enumerate(cells):
         _, row, col = best
         rows_, cols_ = [row] * k, [col] * k
         info.update(row=row, col=col, actual_width=narrow_meta[row][col]["width"])
+    elif cell["suite"] == "turn":
+        # tile with the free radius closest to the target, outside the +/-TURN_BAND draw band of r = R_SWEEP + m
+        # (the training never asks for a turn there); turnable follows from the actual radius as in training.
+        threshold = mdp_turn.R_SWEEP + float(cell["margin"])
+        tiles = [(r, c, narrow_meta[r][c]["width"]) for r in range(gen.num_rows) for c in cols
+                 if narrow_meta[r][c] is not None]
+        clear = [t for t in tiles if abs(t[2] - threshold) >= mdp_turn.TURN_BAND]
+        row, col, radius = min(clear or tiles, key=lambda t: abs(t[2] - cell["radius"]))
+        rows_, cols_ = [row] * k, [col] * k
+        info.update(row=row, col=col, actual_radius=radius, slack=radius - threshold, turnable=radius >= threshold,
+                    ambiguous=not clear)
     else:
         row = int(cell["level"])
         rows_ = [row] * k
@@ -223,19 +297,26 @@ for index, cell in enumerate(cells):
         spec.mode[ids] = 2
         spec.speed[ids] = float(cell["speed"])
         spec.outward[ids] = stair_motion_outward(fam, cell.get("direction", "outward"))
+    elif cell["suite"] == "turn":
+        spec.mode[ids] = MODE_TURN
+        spec.turn_dir[ids] = -1.0 if cell["direction"] == "right" else 1.0
+        spec.turn_angle[ids] = math.radians(float(cell["angle_deg"]))
+        spec.turn_rate[ids] = float(cell["rate"])
+    elif cell["suite"] in ("narrow", "dead_end"):
+        spec.back[ids] = cell.get("direction", "forward") == "backward"
     if "margin" in cell:
         spec.margin[ids] = float(cell["margin"])
     if "lidar" in cell:
-        spec.lidar[ids] = torch.tensor(LIDAR_ON[cell["lidar"]], device=device)
+        spec.lidar[ids] = torch.tensor(lidar_flags(cell["lidar"], cell.get("rear", cond.get("rear", True))), device=device)
     cell_info.append(info)
 assert start == n
+assert V24 or not bool(((spec.mode == MODE_TURN) | spec.back).any()), "turn / backward cells need task: v24"
 
 terrain.terrain_levels[:] = levels
 terrain.terrain_types[:] = types_
 raw.scene.env_origins[:] = terrain.terrain_origins[levels, types_]
 
 # ---------------------------------------------------------------- hooks: LiDAR mode, commands
-lidar_term = raw.observation_manager._group_obs_class_term_cfgs["narrow_lidar"][0].func
 spec.cast = lidar_term.cast  # warp ray cast on the terrain mesh (inward stair spawn height)
 _lidar_reset = lidar_term.reset
 
@@ -287,6 +368,17 @@ def resample(self, env_ids):
 
 
 cmd._resample_command = types.MethodType(resample, cmd)
+if V24:  # turn cells: the cell's turn rate, no pause window (the training draws 0.3..0.8 rad/s, pauses on 20 %)
+    _reset_turn = cmd._reset_turn
+
+    def reset_turn_pinned(ids):
+        _reset_turn(ids)
+        t = ids[spec.mode[ids] == MODE_TURN]
+        if len(t):
+            cmd.turn_rate[t] = spec.turn_rate[t]
+            cmd.pause_at[t] = 1e6
+
+    cmd._reset_turn = reset_turn_pinned
 
 venv = RslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 agent_cfg.num_steps_per_env = 1  # evaluation never fills the PPO rollout buffer (100 steps x 31k envs = 53 GB)
@@ -311,6 +403,7 @@ pitch_max = torch.zeros(n, device=device)
 nose_up_max = torch.zeros(n, device=device)  # signed: front up (deg), asin(-g_x) as backward_nose_up
 nose_t10 = torch.zeros(n, device=device)
 nose_t15 = torch.zeros(n, device=device)
+reach_t = torch.full((n,), -1.0, device=device)  # turn cells: episode time at which the target angle was reached
 _reset_idx = raw._reset_idx
 
 
@@ -344,6 +437,14 @@ def record_and_reset(self, env_ids):
                                          ("moving_t", moving_t), ("pitch_max_deg", pitch_max),
                                          ("nose_up_max_deg", nose_up_max), ("nose_up_t10", nose_t10),
                                          ("nose_up_t15", nose_t15))}
+        if V24:  # turn tracker (mdp_turn): meaningful on turn cells, zeros elsewhere; backward = tail first
+            turn = mdp_turn.turn_episode(self)
+            drift_done = self.termination_manager.get_term("turn_drift")
+            extra.update({k: L(v) for k, v in (
+                ("turnable", turn.turnable), ("turned_deg", torch.rad2deg(turn.turned * turn.direction)),
+                ("drift_max", turn.drift_max), ("reached", turn.reached), ("reach_t", reach_t),
+                ("target_deg", torch.rad2deg(turn.target)), ("direction", turn.direction), ("drift_done", drift_done),
+                ("backward", mdp_turn.narrow_back(self)))})
         cells_ = L(cell_of)
         for j, env_id in enumerate(ids.tolist()):
             row = {"env": env_id, "cell": cells_[j], "base_contact": bool(base[j]), "timeout": bool(timeout[j]),
@@ -391,7 +492,11 @@ for step in range(max_steps):
     c = cmd.vel_command_b
     v = robot.data.root_lin_vel_b
     w = robot.data.root_ang_vel_b[:, 2]
-    moving = live & (c[:, :2].norm(dim=-1) > 0.1) & (spec.mode > 0) & ~passed_r
+    moving = live & (c[:, :2].norm(dim=-1) > 0.1) & (spec.mode > 0) & (spec.mode != MODE_TURN) & ~passed_r
+    if V24:  # turn cells: tracking error of the turn command until the target angle is reached
+        turn = mdp_turn.turn_episode(raw)
+        moving |= live & (spec.mode == MODE_TURN) & (c[:, 2].abs() > 0.1) & ~turn.reached
+        reach_t = torch.where(live & turn.reached & (reach_t < 0), t_ep, reach_t)
     err_v += moving.float() * (v[:, :2] - c[:, :2]).norm(dim=-1) * dt
     err_w += moving.float() * (w - c[:, 2]).abs() * dt
     moving_t += moving.float() * dt
@@ -405,6 +510,9 @@ for step in range(max_steps):
     # Decided before the time-out: a gap env leaving its tile (later slots / falls would be on a neighbour tile),
     # a stair/slope env at the far end of its flight. Record now and reset (the reset episode is not used).
     decided = ~recorded & (((spec.mode == 1) & (r >= GAP_LEAVE_R)) | ((spec.mode == 2) & passed_r))
+    if V24:  # a turn env is decided by the pass (clean turn) or breach event; a hold runs to the time-out
+        mon = term("narrow_monitor")
+        decided |= ~recorded & (spec.mode == MODE_TURN) & (mon.passed | mon.breached)
     if bool(decided.any()):
         with torch.inference_mode():  # env buffers are inference tensors (written inside venv.step)
             record_and_reset(raw, decided.nonzero().flatten())
@@ -417,7 +525,7 @@ if missing:  # still running at the end (should not happen: episodes time out at
         record_and_reset(raw, torch.tensor(missing, device=device))
 out = Path(args.out)
 out.mkdir(parents=True, exist_ok=True)
-result = {"schema": "e2_trial_v1", "condition": cond, "seed": SEED, "seconds": SECONDS, "num_envs": n,
+result = {"schema": "e2_trial_v1", "task": TASK_KIND, "condition": cond, "seed": SEED, "seconds": SECONDS, "num_envs": n,
           "model": str(args.model), "steps": step + 1, "wall_s": round(time.time() - t0, 1), "censored": len(missing),
           "cells": cell_info, "rows": rows}
 (out / "result.json").write_text(json.dumps(result))

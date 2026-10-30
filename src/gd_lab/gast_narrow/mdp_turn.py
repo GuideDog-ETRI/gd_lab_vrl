@@ -231,13 +231,29 @@ def _turn_mask(env):
 
 
 def turn_stand(env, sigma_wz: float = 0.2, sigma_v: float = 0.10):
-    """Per second on turn tiles where the turn is not possible: exp(-(wz/0.2)^2 - (v/0.1)^2)."""
+    """Per second on turn tiles where the turn is not possible: exp(-(wz/0.2)^2 - (v/0.1)^2). Paid after a breach
+    too (v2.4b): the first run never stood (stop rate 0 % for 600 updates), so every step of standing must pay."""
     turn = turn_episode(env)
     robot = env.scene["robot"].data
     wz = robot.root_ang_vel_b[:, 2]
     speed = robot.root_lin_vel_b[:, :2].norm(dim=-1)
-    active = _turn_mask(env) & ~turn.turnable & ~mdp_v2._monitor(env).breached
+    active = _turn_mask(env) & ~turn.turnable
     return torch.exp(-(wz / sigma_wz) ** 2 - (speed / sigma_v) ** 2) * active.float()
+
+
+def turn_wrong_spin(env):
+    """Per second on turn tiles where the turn is not possible: |wz| (rad/s). v2.4b: the first run turned on every
+    such tile (breach 40-90 %) because turning cost nothing until the 15 deg breach (-4, episode over), and with the
+    mean episode return negative, ending early paid. Spinning now costs from the first step and the breach no longer
+    ends the episode (narrow_breach_done_no_turn), so standing is the only way out."""
+    turn = turn_episode(env)
+    wz = env.scene["robot"].data.root_ang_vel_b[:, 2].abs()
+    return wz * (_turn_mask(env) & ~turn.turnable).float()
+
+
+def narrow_breach_done_no_turn(env):
+    """v2's breach termination, off on turn tiles (see turn_wrong_spin)."""
+    return mdp_v2.narrow_breach_done(env) & ~_turn_mask(env)
 
 
 def turn_drift(env):

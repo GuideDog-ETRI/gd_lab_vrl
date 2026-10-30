@@ -29,6 +29,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[3]
 HERE = Path(__file__).resolve().parent
+ROBOT_WIDTH = 0.48  # mdp_v2.ROBOT_WIDTH (host side: no torch / gd_lab import); passable when width >= 0.48 + 2 m
 
 
 def resolve(path: str | Path) -> Path:
@@ -56,9 +57,21 @@ def build_cells(cfg: dict, suites: list[str]) -> list[dict]:
                               speed=g["speed"], envs=g["envs"], key=f"terrain/{f}/L{lv}"))
     if "narrow" in suites:
         g = s["narrow"]
-        for f, case in itertools.product(g["families"], g["cases"]):
+        for f, case, d in itertools.product(g["families"], g["cases"], g.get("directions", ["forward"])):
+            if d == "backward" and case["width"] < ROBOT_WIDTH + 2 * case["margin"]:
+                continue  # blocked passages are always driven forward (the v2 zone watches the robot front)
+            tag = "/back" if d == "backward" else ""
             cells.append(dict(suite="narrow", family=f, case=case["name"], width=case["width"], margin=case["margin"],
-                              envs=g["envs"], key=f"narrow/{f}/{case['name']}"))
+                              direction=d, envs=g["envs"], key=f"narrow/{f}/{case['name']}{tag}"))
+    if "turn" in suites:  # v24 only: in-place turn pockets (docs/design/GAST_NARROW_V24_TURN_DESIGN.md section 8.1)
+        g = s["turn"]
+        for group in g["groups"]:
+            for f, case, d, rate in itertools.product(group["families"], group["cases"], g["directions"],
+                                                      g.get("rates", [0.5])):
+                rtag = f"/w{rate}" if len(g.get("rates", [0.5])) > 1 else ""
+                cells.append(dict(suite="turn", family=f, case=case["name"], radius=case["radius"],
+                                  margin=case["margin"], direction=d, angle_deg=g.get("angle_deg", 180.0), rate=rate,
+                                  envs=g["envs"], key=f"turn/{f}/{case['name']}/{d}{rtag}"))
     if "dead_end" in suites:
         g = s["dead_end"]
         for f, lv in itertools.product(g["families"], g["levels"]):
@@ -128,7 +141,7 @@ def run_pool(jobs: list[dict], gpus: list[int], per_gpu: int, label: str) -> lis
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("config")
-    ap.add_argument("--only", default="", help="comma list of suites (gap,stairs,terrain,narrow,dead_end,e1)")
+    ap.add_argument("--only", default="", help="comma list of suites (gap,stairs,terrain,narrow,dead_end,turn,e1)")
     ap.add_argument("--models", default="")
     ap.add_argument("--conditions", default="")
     ap.add_argument("--out", default="")
@@ -158,7 +171,8 @@ def main():
         if not suites:
             continue
         cells = build_cells(cfg, suites)
-        plan = dict(condition=dict(cond, name=cname), seed=cfg["seed"], seconds=cfg["seconds"], cells=cells)
+        plan = dict(task=cfg.get("task", "v2"), condition=dict(cond, name=cname), seed=cfg["seed"],
+                    seconds=cfg["seconds"], cells=cells)
         (out / "plans").mkdir(exist_ok=True)
         (out / "plans" / f"{cname}.json").write_text(json.dumps(plan, indent=1))
         for m in models:

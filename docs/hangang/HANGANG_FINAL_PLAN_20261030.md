@@ -55,7 +55,7 @@
 | 램프 | 첫 작업은 과제 기본값(후진 비율 200 update, 속도 상한, 외력), 이어 학습은 0 | 0 |
 | 정규화 통계 동기화 | **step마다** (`GD_LAB_NORMALIZER_DEFER=0`, 필수) | update마다 1회 |
 | Top-5 기준 | `configs/gast_backgap/online_top5.json` | `configs/gast_narrow/online_top5_lineage16_b.json` (정지 ≥ 0.85, 침범 ≤ 0.05 포함). **B 200 update에 E2 기준점 + 2 SD로 다시 맞춤** |
-| E2 설정 | `configs/gast_narrow/e2/v23_check_gh200.yaml` 복사, 모델만 교체 (칸당 512 env) | 같음 + 회전 묶음(`e2/v24_turn.yaml`, 준비 중) |
+| E2 설정 | `configs/gast_narrow/e2/v23_check_gh200.yaml` 복사, 모델만 교체 (칸당 512 env) | `configs/gast_narrow/e2/v24_turn_hangang.yaml` (v2.4 환경 `task: v24`: 회전 묶음 + 통로 전·후진 + 갭·계단 유지; 모델 경로만 교체, 기준 602). 회전 지표는 설계서 §8.1 |
 
 **A에서 머리 들림을 미리 낮추지 않는 이유:** 6566 과제에는 `backward_nose_up`(후진만, 8° 초과 −5)만 있다. A에 전진 머리 들림 벌점을 더하면 3906 재현이 아니게 되고 비교 기준(6566)이 흐려진다. 머리 들림은 B의 `gap_nose_up` 5° + `gap_nose_peak`가 맡는다.
 

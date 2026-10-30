@@ -1,14 +1,16 @@
 """GAST-Narrow v2.4: v2.3 (Hangang it602) + in-place turns in confined pockets (design: GAST_NARROW_V24_TURN_DESIGN.md).
 
 Changes (network, anchor, other narrow tiles and the retention tiles as v2.3):
-- terrain 44 -> 58 columns: turn pockets aisle 2, vestibule 1+1, room 1+1 (free radius 1.00 m at level 0 -> 0.45 m
-  at level 14) and a tight room (0.50 -> 0.40 m, never turnable), plus platform_gap +4, pyramid_stairs /
-  pyramid_stairs_inv / random_rough +1 each to keep the retention half at 50 %.
+- terrain 44 -> 62 columns: turn pockets aisle 2, vestibule 1+1, room 1+1 (free radius 1.00 m at level 0 -> 0.45 m
+  at level 14) and 3 tight rooms (0.56 -> 0.40 m: the turn is impossible from level 2 on), plus platform_gap +5,
+  pyramid_stairs +1, pyramid_stairs_inv +2, random_rough +1 to keep the retention half at 50 %.
 - LiDAR: head Ouster + head Mid-360 + rear Mid-360 on the tail, trunk self-occlusion, same map [2, 30, 48]
   (lidar.NarrowLidarMapV24).
 - turn tiles (mdp_turn): command vx = vy = 0, wz = +/-(0.3..0.8) rad/s for a 45..180 deg target (right 70 %);
-  turnable = r_free >= R_SWEEP + m; success -> the v2 pass / hold / breach events; new rewards turn_stand +0.5,
-  turn_drift -2, turn_overspin -1; yaw tracking off where the turn is not possible; centering off; drift > 0.2 m ends.
+  turnable = r_free >= R_SWEEP + m; success -> the v2 pass / hold / breach events; new rewards turn_stand +1.0,
+  turn_drift -3, turn_overspin -1, turn_stall -1, turn_wrong_spin -1 x |wz| where the turn is not possible (v2.4b);
+  yaw tracking off where the turn is not possible; centering off; drift > 0.2 m ends; a breach on a turn tile does
+  NOT end the episode (v2.4b: the first run, 600 updates from 602, never stood once -- stop rate 0 %).
 - critic: the same 9 narrow inputs, turn state in slots 2 / 4 / 7 / 8 on turn tiles.
 - backward passages: 25 % of the passable corridor / door / bend episodes run tail first (602 hesitates there:
   narrow tiles were forward-only), rear Mid-360 on in those episodes.
@@ -44,10 +46,13 @@ TURN_R_MAX, TURN_R_MIN = 1.00, 0.45
 # Always too tight for the turn (r 0.50 -> 0.40 < R_SWEEP + m at every m): the "stop" case from level 0 on. In the
 # other pockets r falls below the threshold only from level 10 (3 %) to 13 (100 %), so without this family the policy
 # would meet "turn impossible" only late in the curriculum (like v2's dead ends, which are blocked at every level).
-TIGHT_FAMILY = ("narrow_turn_tight", "turn_room", 1, 1.0, 0.50, 0.40)
-RETENTION_EXTRA = {"platform_gap": 4.0, "pyramid_stairs": 1.0, "pyramid_stairs_inv": 1.0, "random_rough": 1.0}
-NUM_COLS = 58
-TURN_STAND_WEIGHT, TURN_DRIFT_WEIGHT, TURN_OVERSPIN_WEIGHT, TURN_STALL_WEIGHT = 0.5, -2.0, -1.0, -1.0
+# v2.4b: 3 columns, r 0.56 -> 0.40 (level 0 is turnable at m <= 0.06, so the boundary itself is in the data; from level
+# 2 on never): the first run (1 column, 0.50 -> 0.40) saw a "stop" case in 1.7 % of its envs and never learned to stop.
+TIGHT_FAMILY = ("narrow_turn_tight", "turn_room", 1, 3.0, 0.56, 0.40)
+RETENTION_EXTRA = {"platform_gap": 5.0, "pyramid_stairs": 1.0, "pyramid_stairs_inv": 2.0, "random_rough": 1.0}
+NUM_COLS = 62
+TURN_STAND_WEIGHT, TURN_DRIFT_WEIGHT, TURN_OVERSPIN_WEIGHT, TURN_STALL_WEIGHT = 1.0, -3.0, -1.0, -1.0
+TURN_WRONG_SPIN_WEIGHT = -1.0
 NOSE_LIMIT_DEG, NOSE_PEAK_WEIGHT = 5.0, -6.0
 
 
@@ -128,6 +133,9 @@ class GastNarrowV24TeacherCfg(GastNarrowV23TeacherCfg):
         self.rewards.turn_drift = RewardTermCfg(func=mdp_turn.turn_drift, weight=TURN_DRIFT_WEIGHT)
         self.rewards.turn_overspin = RewardTermCfg(func=mdp_turn.turn_overspin, weight=TURN_OVERSPIN_WEIGHT)
         self.rewards.turn_stall = RewardTermCfg(func=mdp_turn.TurnStall, weight=TURN_STALL_WEIGHT)
+        self.rewards.turn_wrong_spin = RewardTermCfg(func=mdp_turn.turn_wrong_spin, weight=TURN_WRONG_SPIN_WEIGHT)
+        assert self.terminations.narrow_breach.func is mdp_v2.narrow_breach_done
+        self.terminations.narrow_breach.func = mdp_turn.narrow_breach_done_no_turn  # turn tiles: no early exit
         self.terminations.turn_drift = TerminationTermCfg(func=mdp_turn.turn_drift_done)
         # Standing where the command still asks to move (turn impossible, blocked zone): the cadence bound off,
         # the lifted-feet count on (see mdp_turn.should_stand).

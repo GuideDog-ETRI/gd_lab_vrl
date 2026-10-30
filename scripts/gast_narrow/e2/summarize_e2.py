@@ -11,6 +11,12 @@ Definitions (each env = its first episode):
                     before any base contact; fall; track = mean |v_xy - cmd| (m/s) while moving
   narrow   passable rows: pass = exit passed without base contact; touch-free = wall touch < 0.1 s
            blocked rows: hold = 1.5 s still before the line, no breach; breach = front crossed the line
+           (v24: cells tagged /back drive the passage tail first)
+  turn     (v24) turnable cells: success = target angle reached with the centre drift <= 0.10 m throughout, no base
+           contact (the training pass event); dirty = reached with a larger drift (ends the episode); drift_fail =
+           drift > 0.20 m before reaching; stall = time-out without reaching; drift = mean / p95 of the max centre drift; time = mean seconds to
+           the target. Not-turnable cells: hold = < 15 deg turned and 1.5 s still (the hold event), no breach / fall;
+           breach = turned past 15 deg; turned = mean angle turned (deg)
   E1       gap clean/reached, stairs passed/reached (the E1 harness definitions)
 Episodes that ended within the first 0.05 s are dropped (stale contact at the start; counted in summary.json).
 Retention metrics (gap cross/clean, stairs pass, terrain pass; fall as 1 - fall) are compared with the baseline;
@@ -48,19 +54,39 @@ def nose_metrics(rows):
                 nose20=sum(u > 20.0 for u in ups) / len(ups), nose_t15=mean([r["nose_up_t15"] for r in rows]))
 
 
-DEG_KEYS, SEC_KEYS = ("nose", "nose_p90"), ("nose_t15",)
+DEG_KEYS, SEC_KEYS = ("nose", "nose_p90", "turned"), ("nose_t15", "time")
 
 
 def fmt(key, v):
     if v is None:
         return "-"
-    if key in ("track", "clearance"):
+    if key in ("track", "clearance", "drift", "drift_p95"):
         return f"{v:.3f}"
     if key in DEG_KEYS:
         return f"{v:.1f}°"
     if key in SEC_KEYS:
         return f"{v:.2f} s"
     return pct(v)
+
+
+def turn_metrics(cell, rows):
+    """Turn cell (v24): the cell's tile decides turnable (e2_trial: actual radius >= 0.46 + m)."""
+    n = len(rows)
+    fall = sum(r["base_contact"] for r in rows) / n
+    drifts = sorted(r["drift_max"] for r in rows)
+    out = dict(n=n, turnable=cell["turnable"], fall=fall, drift=mean(drifts),
+               drift_p95=drifts[min(n - 1, int(0.95 * n))],
+               drift_fail=sum(r["drift_done"] and not r["reached"] for r in rows) / n,  # left the 0.20 m circle
+               touch_free=sum(r["touch_time"] < 0.1 for r in rows) / n)
+    if cell["turnable"]:
+        ok = [r for r in rows if r["narrow_passed"] and not r["base_contact"]]
+        out.update(success=len(ok) / n, dirty=sum(r["reached"] and not r["narrow_passed"] for r in rows) / n,
+                   stall=sum(r["timeout"] and not r["reached"] for r in rows) / n,
+                   time=mean([r["reach_t"] for r in ok if r["reach_t"] >= 0]))
+    else:
+        out.update(hold=sum(r["narrow_held"] and not r["narrow_breached"] and not r["base_contact"] for r in rows) / n,
+                   breach=sum(r["narrow_breached"] for r in rows) / n, turned=mean([r["turned_deg"] for r in rows]))
+    return out
 
 
 def cell_metrics(cell, rows):
@@ -80,6 +106,8 @@ def cell_metrics(cell, rows):
         return dict(n=n, pass_=ok, fall=fall, track=track,
                     body=sum(r.get("sum_undesired_contacts", 0.0) != 0.0 for r in rows) / n,
                     pitch=mean([r["pitch_max_deg"] for r in rows]))
+    if s == "turn":
+        return turn_metrics(cell, rows)
     passable = [r for r in rows if not r["blocked"]]
     blocked = [r for r in rows if r["blocked"]]
     clear = sorted(r["min_clearance"] for r in passable)
@@ -137,12 +165,12 @@ def main():
     flags = defaultdict(list)
     summary = {"conditions": {}, "flags": flags}
 
-    def table(title, cond, suite, cols):
+    def table(title, cond, suite, cols, pick=None):
         per = res.get(cond, {})
         keys = []
         for m in models:
             for k, (c, _) in per.get(m, {}).items():
-                if c["suite"] == suite and k not in keys:
+                if c["suite"] == suite and k not in keys and (pick is None or pick(c)):
                     keys.append(k)
         if not keys:
             return
@@ -164,6 +192,8 @@ def main():
                     continue
                 cell = per[present[0]][k][0]
                 extra = f" (폭 {cell['actual_width']:.2f})" if "actual_width" in cell and suite in ("narrow",) else ""
+                if suite == "turn":
+                    extra = f" (r {cell['actual_radius']:.3f}, 여유 {cell['slack']:+.3f}{', 경계' if cell.get('ambiguous') else ''})"
                 lines.append(f"| {k}{extra} | {label} | " + " | ".join(
                     fmt(key, v) for v in vals) + " |")
         lines.append(f"| **평균** | | " + " | ".join("" for _ in present) + " |")
@@ -188,9 +218,19 @@ def main():
         if cond not in res:
             continue
         c = cfg["conditions"][cond]
-        lines.append(f"## 조건 {cond} (라이다 {c['lidar']}, 탑재물 {c.get('payload_kg')} kg, 밀기 {c.get('push')}, "
+        rear = f", 후방 Mid-360 {c['rear']}" if "rear" in c else ""
+        lines.append(f"## 조건 {cond} (라이다 {c['lidar']}{rear}, 탑재물 {c.get('payload_kg')} kg, 밀기 {c.get('push')}, "
                      f"계단 외란 {c.get('stair_disturbance')})")
         lines.append("")
+        table("제자리 회전: 회전 가능", cond, "turn", [("성공", "success", False), ("도달·이동 초과", "dirty", False),
+                                              ("이동 > 0.2 m 종료", "drift_fail", False), ("미달(stall)", "stall", False),
+                                              ("넘어짐", "fall", False), ("몸 중심 최대 이동 m", "drift", False),
+                                              ("이동 p95 m", "drift_p95", False), ("소요 시간", "time", False),
+                                              ("무접촉", "touch_free", False)], pick=lambda c: c["turnable"])
+        table("제자리 회전: 회전 불가 (멈춰야 함)", cond, "turn", [("서기", "hold", False), ("침범(15° 초과)", "breach", False),
+                                                         ("회전각 평균", "turned", False),
+                                                         ("이동 > 0.2 m 종료", "drift_fail", False), ("넘어짐", "fall", False),
+                                                         ("무접촉", "touch_free", False)], pick=lambda c: not c["turnable"])
         table("갭", cond, "gap", [("건넘", "cross", True), ("clean/시도", "clean", True), ("넘어짐", "fall", True),
                                   ("머리 들림 최대 평균", "nose", False), ("머리 들림 최대 p90", "nose_p90", False),
                                   ("20° 초과", "nose20", False), ("15° 초과 시간", "nose_t15", False)])

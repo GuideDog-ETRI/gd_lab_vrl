@@ -1,0 +1,105 @@
+# E2 for the Hangang lineage16 stage B (v2.4 recipe) on one GH200 node: same suites and conditions as
+# configs/gast_narrow/e2/v24_turn.yaml (onvlm2), Hangang paths. Baseline = v2.3 it602; add the stage B Top-5.
+#   python3 scripts/gast_narrow/e2/run_e2.py configs/gast_narrow/e2/v24_turn_hangang.yaml [--only turn]
+name: v24_turn_hangang
+task: v24
+out_root: logs/e2
+seed: 42
+seconds: 20.0
+
+hardware:
+  gpus: [0, 1, 2, 3]          # one GH200 node (natStr, --exclusive)
+  e2_slots_per_gpu: 2
+  e1_slots_per_gpu: 3
+  sif: /scratch/t515a05/gd_lab/gd_lab_isaaclab.sif
+  python: /scratch/t515a05/gd_lab/venv/bin/python
+
+models:
+  v23u602: checkpoints/gast_narrow/narrow_v23_gh200_20261029/v23_gh200_it602_top5.pt
+  # lineage16B_t1: logs/gast/narrow_v24/<lineage16_b run>/best_top5/<it>_top1.pt
+  # lineage16B_t2: ...
+
+suites:
+  turn:
+    enabled: true
+    directions: [right, left]
+    angle_deg: 180.0
+    rates: [0.5]
+    envs: 48
+    groups:
+      - families: [narrow_turn_aisle, narrow_turn_vestibule, narrow_turn_vestibule_neg, narrow_turn_room, narrow_turn_room_neg]
+        cases:
+          - {name: wide,      radius: 0.75,  margin: 0.10}
+          - {name: vestibule, radius: 0.885, margin: 0.15}
+          - {name: subway,    radius: 0.60,  margin: 0.05}
+          - {name: edge_turn, radius: 0.56,  margin: 0.05}
+          - {name: edge_stop, radius: 0.56,  margin: 0.15}
+          - {name: alcove,    radius: 0.475, margin: 0.10}
+      - families: [narrow_turn_tight]
+        cases:
+          - {name: tight,     radius: 0.45,  margin: 0.10}
+  narrow:
+    enabled: true
+    families: [narrow_corridor, narrow_door_pos, narrow_door_neg, narrow_bend_left, narrow_bend_right]
+    directions: [forward, backward]
+    cases:
+      - {name: pass_wide,   width: 0.80, margin: 0.10}
+      - {name: pass_tight,  width: 0.66, margin: 0.05}
+      - {name: block_margin, width: 0.66, margin: 0.15}
+      - {name: block_narrow, width: 0.52, margin: 0.10}
+    envs: 32
+  dead_end:
+    enabled: true
+    families: [narrow_dead_end]
+    levels: [7, 14]
+    margin: 0.10
+    envs: 32
+  gap:
+    enabled: true
+    directions: [forward, backward]
+    levels: [7, 11, 14]
+    speeds: [0.5, 0.9]
+    envs: 48
+  stairs:
+    enabled: true
+    families: [pyramid_stairs, pyramid_stairs_inv, pyramid_stairs_wide, pyramid_stairs_inv_wide, pyramid_stairs_nose,
+               pyramid_stairs_inv_nose]
+    directions: [up, down]
+    levels: [9, 14]
+    speed: 0.8
+    envs: 32
+  terrain:
+    enabled: true
+    families: [hf_pyramid_slope, hf_pyramid_slope_inv, random_rough, ring_fence]
+    levels: [14]
+    direction: outward
+    speed: 1.0
+    envs: 32
+
+conditions:
+  nominal:     {enabled: true, lidar: both,   rear: true,  payload_kg: 5.0, push: false, stair_disturbance: false,
+                suites: [turn, narrow, dead_end, gap, stairs, terrain]}
+  mid360_rear: {enabled: true, lidar: mid360, rear: true,  payload_kg: 5.0, push: false, stair_disturbance: false,
+                suites: [turn, narrow, dead_end]}
+  mid360_only: {enabled: true, lidar: mid360, rear: false, payload_kg: 5.0, push: false, stair_disturbance: false,
+                suites: [turn, narrow, dead_end]}
+  lidar_off:   {enabled: true, lidar: "off",  rear: false, payload_kg: 5.0, push: false, stair_disturbance: false,
+                suites: [gap, stairs, terrain]}
+  disturbed:   {enabled: true, lidar: both,   rear: true,  payload_kg: 5.0, push: true,  stair_disturbance: true,
+                suites: [gap, stairs]}
+  no_payload:  {enabled: true, lidar: both,   rear: true,  payload_kg: 0.0, push: false, stair_disturbance: false,
+                suites: [gap, stairs]}
+
+e1:
+  enabled: false
+  harness: /scratch/t515a05/gd_lab/update136_e1rayir
+  params_from: models136/d3906/params
+  arms: [v25or, G]
+  families: {gap: gap, stdown: stairs_inv, stup: pyramid_stairs}
+  seeds: [42, 43, 44, 45]
+  ir: [native]
+  margin_obs: 0.0
+
+report:
+  baseline: v23u602
+  max_drop_pt: 1.0
