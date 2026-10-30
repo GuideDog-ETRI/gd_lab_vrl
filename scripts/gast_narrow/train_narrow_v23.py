@@ -4,6 +4,8 @@
 1. Registers Gd-GastNarrowV23-Rbq10-Dreamwaq-v0 (v2.2 + 44-column terrain, safe speed cap, shin clearance, leg touch).
 2. --warm_start_rayir accepts the v2.2 371 checkpoint (task Gd-GastNarrowV22): every tensor is copied unchanged (same
    shapes; only the column counts change); new PPO optimizer, CENet optimizer and terrain levels (by family) restored.
+   It also accepts a backward-gap checkpoint (task Gd-GastRayIrV21Gap50BackV2, 6566 or the lineage stage A model):
+   fresh LiDAR encoder, actor/critic first layers widened with zero columns (policy = the source at start), as v1 did.
 3. Online Top-5 uses the v2 narrow score (gd_lab.gast_narrow.narrow_top5_v2).
 The 6566 anchor checkpoint comes from NARROW_ANCHOR_CKPT (launcher).
 """
@@ -48,6 +50,8 @@ from gd_lab.core import registry  # noqa: E402
 
 TASK_ID = "Gd-GastNarrowV23-Rbq10-Dreamwaq-v0"
 SOURCE_TASK_ID = "Gd-GastNarrowV22-Rbq10-Dreamwaq-v0"
+BACKGAP_TASK_ID = "Gd-GastRayIrV21Gap50BackV2-Rbq10-Dreamwaq-v0"
+WIDENED = ("actor.0.weight", "critic.0.weight")
 assert registry.register_task(task="GastNarrowV23", robot="Rbq10", method="Dreamwaq",
                               env_cfg="gd_lab.gast_narrow.tasks_v23:GastNarrowV23TeacherCfg",
                               agent_cfg="gd_lab.gast_narrow.tasks_v23:GastNarrowV23RunnerCfg") == TASK_ID
@@ -89,9 +93,11 @@ def _from_371(alg, checkpoint_path, policy_lr, terrain_lr, *, expected_sha256, e
     c = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     extra = (c.get("infos") or {}).get("gd_lab") or {}
     source = (extra.get("gast_warm_start") or {}).get("task")  # the task the 371 run trained
-    # 371 (v2.2) starts v2.3; a v2.3 checkpoint continues it (moving a run between node counts, 2026-10-28).
-    if source not in (SOURCE_TASK_ID, TASK_ID):
-        raise ValueError(f"source task {source!r} is neither {SOURCE_TASK_ID!r} nor {TASK_ID!r}")
+    # 371 (v2.2) starts v2.3; a v2.3 checkpoint continues it (moving a run between node counts, 2026-10-28);
+    # a backward-gap checkpoint starts the lineage stage B (16-node plan, 2026-10-30).
+    if source not in (SOURCE_TASK_ID, TASK_ID, BACKGAP_TASK_ID):
+        raise ValueError(f"source task {source!r} is not {SOURCE_TASK_ID!r}, {TASK_ID!r} or {BACKGAP_TASK_ID!r}")
+    from_backgap = source == BACKGAP_TASK_ID
     means = dict(extra.get("terrain_level_means_by_family") or {})
     if not means or extra.get("cenet_optimizer_state_dict") is None:
         raise ValueError("371 checkpoint lacks terrain levels or CENet optimizer")
@@ -99,11 +105,23 @@ def _from_371(alg, checkpoint_path, policy_lr, terrain_lr, *, expected_sha256, e
     source_only = sorted(set(src) - set(target))
     if source_only:
         raise ValueError(f"371 tensors with no v2.3 counterpart: {source_only}")
-    merged = {}
+    merged, fresh, widened = {}, [], []
     for name, value in target.items():
+        if from_backgap and name.startswith("lidar_encoder."):
+            merged[name] = value
+            fresh.append(name)
+            continue
         if name not in src:
             raise ValueError(f"371 checkpoint lacks {name}")
         s = src[name].to(dtype=value.dtype)
+        if from_backgap and name in WIDENED:
+            if s.shape[0] != value.shape[0] or s.shape[1] >= value.shape[1]:
+                raise ValueError(f"{name}: cannot widen {tuple(s.shape)} to {tuple(value.shape)}")
+            grown = torch.zeros_like(value)
+            grown[:, :s.shape[1]] = s
+            merged[name] = grown
+            widened.append(f"{name}: {tuple(s.shape)} -> {tuple(value.shape)} (new columns zero)")
+            continue
         if tuple(s.shape) != tuple(value.shape):
             raise ValueError(f"{name}: 371 {tuple(s.shape)} != v2.3 {tuple(value.shape)}")
         merged[name] = s
@@ -117,10 +135,11 @@ def _from_371(alg, checkpoint_path, policy_lr, terrain_lr, *, expected_sha256, e
         ppo_optimizer = "restored"
     for family in NARROW_FAMILIES:
         means.setdefault(family, 0.0)
+    kind = {TASK_ID: "narrow_v23_continue", SOURCE_TASK_ID: "narrow_v22_371", BACKGAP_TASK_ID: "backgap_v2"}[source]
     return dict(source=checkpoint_path, source_sha256=digest, source_iteration=int(c["iter"]), source_task=source,
-                source_kind="narrow_v23_continue" if source == TASK_ID else "narrow_v22_371", narrow_version="v2.3",
+                source_kind=kind, narrow_version="v2.3",
                 target_task=expected_task, ppo_optimizer=ppo_optimizer,
-                cenet_optimizer_restored=True, copied=len(merged), fresh=0,
+                cenet_optimizer_restored=True, copied=len(merged) - len(fresh), fresh=len(fresh), widened=widened,
                 anchor=os.environ.get("NARROW_ANCHOR_CKPT"), anchor_weight=os.environ.get("NARROW_ANCHOR_WEIGHT", "1.0"),
                 learning_rates=warm_start.group_learning_rates(alg.optimizer), terrain_level_means_by_family=means)
 

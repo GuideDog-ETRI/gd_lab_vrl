@@ -6,7 +6,8 @@ Score = 0.25 P + 0.15 H + 0.10 N + 0.05 L + 0.10 W + 0.15 G + 0.15 B + 0.05 T
   N  tight passable (slack w - (robot + 2 m) < 0.10 m): pass rate     pooled
   L  passable L-bends: pass rate                                      macro over bend strata
   W  touch-free rate, G clean gap crossing, B 1 - base contact, T tracking (as v1)
-A component without samples in the window counts 0. Gates are v1's.
+A component without samples in the window counts 0. Gates are v1's; with min_narrow_hold_rate / max_narrow_breach_rate
+in the criteria (lineage 16-node run) the blocked-passage hold and breach rates also gate the narrow pass.
 """
 from __future__ import annotations
 
@@ -154,9 +155,25 @@ def score_episodes(episodes):
             "curriculum_snapshot": {"mean_level_by_family": curriculum}, "score_is_online_proxy": True}
 
 
+def gates(candidate, reference, criteria=None):
+    """v1 gates; the optional hold / breach limits fold into the narrow pass (terrain_mean_level_pass, as v1 does
+    with the narrow mean level): the 128-node v2.3 run let models recovering from a hold collapse into Top-5."""
+    result = v1.gates(candidate, reference, criteria)
+    criteria = criteria or {}
+    m = candidate["criteria_metrics"]
+    hold, breach = m.get("narrow_hold_rate"), m.get("narrow_breach_rate")
+    if "min_narrow_hold_rate" in criteria:
+        result["narrow_hold_pass"] = hold is not None and hold >= criteria["min_narrow_hold_rate"]
+        result["terrain_mean_level_pass"] = result["terrain_mean_level_pass"] and result["narrow_hold_pass"]
+    if "max_narrow_breach_rate" in criteria:
+        result["narrow_breach_pass"] = breach is not None and breach <= criteria["max_narrow_breach_rate"]
+        result["terrain_mean_level_pass"] = result["terrain_mean_level_pass"] and result["narrow_breach_pass"]
+    return result
+
+
 def install():
     """Patch the module globals rank_and_save_top5 / DreamwaqRunner use (this process only)."""
     from gd_lab.rl import runner
     runner.install_episode_collector = install_episode_collector
     online_top5.score_episodes = score_episodes
-    online_top5.gates = v1.gates
+    online_top5.gates = gates

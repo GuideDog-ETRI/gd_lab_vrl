@@ -8,6 +8,9 @@
 #   train: NARROW_TOTAL_ENVS (4096) x 100 x NARROW_UPDATES (400).
 # - Online Top-5 every update (spacing 1) from 100, v2 score (configs/gast_narrow/online_top5_v2.json, live-reloaded).
 # - Stop with a save: touch $GD_LAB_STOP_FILE (default logs/launches/<run>/STOP).
+# - Lineage 16-node plan (docs/hangang/WORKORDER_LINEAGE16_20261030.md): NARROW_TRAIN_PY / NARROW_TASK /
+#   NARROW_EXPERIMENT select stage A (backward gap from 3906, scripts/gast_narrow/train_lineage_a.py); NARROW_SAVE_EVERY
+#   sets the periodic save (train: 100); GD_LAB_TOP5_CRITERIA_FILE the Top-5 criteria.
 # Paths: NARROW_SOURCE / NARROW_SOURCE_SHA256, GD_LAB_SIF, GD_LAB_PYTHON (defaults below, per host).
 set -euo pipefail
 script="$(realpath "${BASH_SOURCE[0]}")"
@@ -20,15 +23,16 @@ nproc=$(awk -F, '{print NF}' <<<"$gpus")
 case "$mode" in
   smoke) envs=192; horizon=16; updates=5; save=5 ;;
   pilot) envs=${NARROW_TOTAL_ENVS:-4096}; horizon=100; updates=${NARROW_UPDATES:-30}; save=$updates ;;
-  train) envs=${NARROW_TOTAL_ENVS:-4096}; horizon=100; updates=${NARROW_UPDATES:-400}; save=100 ;;
+  train) envs=${NARROW_TOTAL_ENVS:-4096}; horizon=100; updates=${NARROW_UPDATES:-400}; save=${NARROW_SAVE_EVERY:-100} ;;
   *) echo "bad mode: $mode" >&2; exit 2 ;;
 esac
 teacher="${NARROW_SOURCE:-$root/checkpoints/gast_narrow/narrowv22_371.pt}"
 sha=${NARROW_SOURCE_SHA256:-00ce70515294ea9033505c40c1e295205e9070856c12c4a0d950dfffe693e677}
-test -s "$teacher" || { echo "missing 371: $teacher" >&2; exit 2; }
+test -s "$teacher" || { echo "missing source checkpoint: $teacher" >&2; exit 2; }
 export NARROW_ANCHOR_CKPT="${NARROW_ANCHOR_CKPT:-$root/checkpoints/gast_narrow/backgapv2_6566.pt}"
 export NARROW_ANCHOR_WEIGHT=${NARROW_ANCHOR_WEIGHT:-1.0} NARROW_ANCHOR_EPOCHS=${NARROW_ANCHOR_EPOCHS:-1}
 export GD_LAB_NORMALIZER_DEFER=${GD_LAB_NORMALIZER_DEFER:-1}  # normalizer moments reduced once per update (rl/distributed.py)
+# (flushed by the anchor runner, gast_narrow/anchor.py: a task without it -- lineage stage A -- must set this to 0)
 export NARROW_ANCHOR_GAP_NOSE=${NARROW_ANCHOR_GAP_NOSE:-1}  # anchor skips the samples gap_nose_up flags (gap tile, nose-up > limit)
 test -s "$NARROW_ANCHOR_CKPT" || { echo "missing 6566 anchor: $NARROW_ANCHOR_CKPT" >&2; exit 2; }
 if [[ -z "${GD_LAB_SIF:-}" ]]; then
@@ -55,12 +59,15 @@ export GAST_MATH_SDPA=${GAST_MATH_SDPA:-1} GAST_NAN_DIAG=0
 # No expandable_segments: the 96 GB cards do not need it (it was added for the 32 GB 90.111 card).
 unset PYTORCH_CUDA_ALLOC_CONF
 # 6566 (and so 1748) finished its ramps (backward share, speed ceiling, disturbance force): do not restart them.
-export GD_LAB_BACKGAP_RAMP_STEPS=${GD_LAB_BACKGAP_RAMP_STEPS:-0}
-export GD_LAB_V21_SPEED_RAMP_STEPS=${GD_LAB_V21_SPEED_RAMP_STEPS:-0} GD_LAB_V2_FORCE_RAMP_STEPS=${GD_LAB_V2_FORCE_RAMP_STEPS:-0}
+# NARROW_KEEP_RAMPS=1 (lineage stage A, first job from 3906): leave them at the task defaults, as the 6566 run did.
+if [[ ${NARROW_KEEP_RAMPS:-0} != 1 ]]; then
+  export GD_LAB_BACKGAP_RAMP_STEPS=${GD_LAB_BACKGAP_RAMP_STEPS:-0}
+  export GD_LAB_V21_SPEED_RAMP_STEPS=${GD_LAB_V21_SPEED_RAMP_STEPS:-0} GD_LAB_V2_FORCE_RAMP_STEPS=${GD_LAB_V2_FORCE_RAMP_STEPS:-0}
+fi
 export GAST_RUN_ID="${GAST_RUN_ID:-$(date +%Y-%m-%d_%H-%M-%S)_narrow_v23_371_${envs}x${horizon}_${updates}_${mode}}"
 [[ "$GAST_RUN_ID" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo 'invalid run id' >&2; exit 2; }
 export GAST_VERIFY_SYNC_EVERY=100
-export GD_LAB_TOP5_CRITERIA_FILE="$root/configs/gast_narrow/online_top5_v2.json"
+export GD_LAB_TOP5_CRITERIA_FILE="${GD_LAB_TOP5_CRITERIA_FILE:-$root/configs/gast_narrow/online_top5_v2.json}"
 launch="$root/logs/launches/$GAST_RUN_ID"
 export GD_LAB_STOP_FILE="${GD_LAB_STOP_FILE:-$launch/STOP}"
 # Multi-node (one launcher per node, e.g. srun --ntasks-per-node=1): NARROW_NNODES > 1 with NARROW_RDZV_ENDPOINT
@@ -126,11 +133,11 @@ home_opt=()
 [[ -n ${NARROW_APPTAINER_HOME:-} ]] && home_opt=(--home "$NARROW_APPTAINER_HOME:$HOME")
 exec apptainer exec --nv --writable-tmpfs "${home_opt[@]}" --bind "$usd_tmp:/tmp/IsaacLab" "$GD_LAB_SIF" \
  "$GD_LAB_PYTHON" -m torch.distributed.run "${dist[@]}" ${NARROW_TORCHRUN_ARGS:-} \
- --nproc_per_node="$nproc" scripts/gast_narrow/train_narrow_v23.py --headless --distributed --total_envs "$envs" --seed 42 \
+ --nproc_per_node="$nproc" "${NARROW_TRAIN_PY:-scripts/gast_narrow/train_narrow_v23.py}" --headless --distributed --total_envs "$envs" --seed 42 \
  --kit_args="${NARROW_KIT_ARGS:---/log/outputStreamLevel=Error}" \
- --task Gd-GastNarrowV23-Rbq10-Dreamwaq-v0 --warm_start_rayir "$teacher" --warm_start_sha256 "$sha" \
+ --task "${NARROW_TASK:-Gd-GastNarrowV23-Rbq10-Dreamwaq-v0}" --warm_start_rayir "$teacher" --warm_start_sha256 "$sha" \
  --policy_lr 1e-4 --terrain_lr 3e-4 \
- --logger tensorboard --experiment_name gast/narrow_v23 --max_iterations "$updates" \
+ --logger tensorboard --experiment_name "${NARROW_EXPERIMENT:-gast/narrow_v23}" --max_iterations "$updates" \
  agent.num_steps_per_env="$horizon" agent.algorithm.num_mini_batches="${NARROW_MINIBATCHES:-4}" \
  agent.algorithm.num_learning_epochs="${NARROW_EPOCHS:-5}" agent.algorithm.schedule="${NARROW_SCHEDULE:-fixed}" \
  agent.save_interval="$save" agent.top5_min_spacing=1 "$@"
