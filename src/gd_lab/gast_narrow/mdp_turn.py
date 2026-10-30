@@ -256,6 +256,14 @@ def narrow_breach_done_no_turn(env):
     return mdp_v2.narrow_breach_done(env) & ~_turn_mask(env)
 
 
+def turn_block_obs(env):
+    """Policy input [N,1] (v2.4c): 1 on a turn tile where the turn is not possible, else 0. The critic had this
+    (narrow_privileged_v24 slot 7) while the actor had to read a 10 cm radius difference off the LiDAR map: with the
+    flag critic-only, two runs (600 and 226 updates from 602) never stood once (stop rate 0 %). On the robot the flag
+    comes from the navigation stack (free radius from the Mid-360 map vs R_SWEEP + m), like the margin input."""
+    return (_turn_mask(env) & ~turn_episode(env).turnable).float()[:, None]
+
+
 def turn_drift(env):
     """Per second on turn tiles: centre drift above DRIFT_FREE (m)."""
     return (turn_episode(env).drift - DRIFT_FREE).clamp_min(0.0) * _turn_mask(env).float()

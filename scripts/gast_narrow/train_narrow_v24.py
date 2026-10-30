@@ -116,7 +116,11 @@ def _from_602(alg, checkpoint_path, policy_lr, terrain_lr, *, expected_sha256, e
         if name not in src:
             raise ValueError(f"source checkpoint lacks {name}")
         s = src[name].to(dtype=value.dtype)
-        if from_backgap and name in WIDENED:
+        # Zero columns: from a backward-gap checkpoint the LiDAR latent + margin + turn-block flag (actor) and the
+        # narrow privileged inputs (critic); from 602 / a pre-v2.4c checkpoint the one turn-block column (actor only).
+        widen_here = name in WIDENED and (from_backgap or (name == "actor.0.weight"
+                                                           and value.shape[1] == s.shape[1] + 1))
+        if widen_here:
             if s.shape[0] != value.shape[0] or s.shape[1] >= value.shape[1]:
                 raise ValueError(f"{name}: cannot widen {tuple(s.shape)} to {tuple(value.shape)}")
             grown = torch.zeros_like(value)
@@ -132,7 +136,7 @@ def _from_602(alg, checkpoint_path, policy_lr, terrain_lr, *, expected_sha256, e
     alg.optimizer = warm_start.build_grouped_optimizer(alg.policy, policy_lr, terrain_lr, alg.optimizer)
     alg.learning_rate = float(policy_lr)
     ppo_optimizer = "new"
-    if source == TASK_ID and c.get("optimizer_state_dict"):
+    if source == TASK_ID and c.get("optimizer_state_dict") and not widened:  # a pre-v2.4c v2.4 checkpoint: new PPO moments
         alg.optimizer.load_state_dict(c["optimizer_state_dict"])
         ppo_optimizer = "restored"
     from gd_lab.gast_narrow.tasks_v24 import TIGHT_FAMILY, TURN_FAMILIES

@@ -137,3 +137,28 @@ class GastNarrowV2RunnerCfg(GastRayIrRunnerCfg):
         self.policy.class_name = "gd_lab.gast_narrow.model:GastNarrowV2ActorCritic"
         self.algorithm.symmetry_cfg.data_augmentation_func = "gd_lab.gast_narrow.model:mirror_narrow_v2"
         self.experiment_name = "gast/narrow_v2"
+
+
+# ---------------------------------------------------------------- v2.4c (turn-block flag input)
+TURN_BLOCK_GROUP = "narrow_turn_block"
+
+
+class GastNarrowV24ActorCritic(GastNarrowV2ActorCritic):
+    """v2 actor + 1 input: the turn-block flag (tasks_v24.NarrowTurnBlockGroup). The new column is zero at warm
+    start, so the policy equals the v2.3 source (602) exactly; the critic is unchanged (it already had the flag)."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        _widen_first_linear(self.actor, 1)
+
+    def _actor_input(self, obs, *, inference: bool):
+        return torch.cat((super()._actor_input(obs, inference=inference), obs[TURN_BLOCK_GROUP]), dim=-1)
+
+
+def mirror_narrow_v24(obs=None, actions=None, env=None):
+    base = obs.exclude(TURN_BLOCK_GROUP) if obs is not None else None
+    augmented, action_aug = mirror_narrow_v2(base, actions, env)
+    if obs is not None:
+        block = obs[TURN_BLOCK_GROUP]
+        augmented[TURN_BLOCK_GROUP] = torch.cat((block, block), 0)  # the flag has no side
+    return augmented, action_aug

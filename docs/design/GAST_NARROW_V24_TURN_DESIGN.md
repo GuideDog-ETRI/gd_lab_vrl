@@ -226,7 +226,8 @@ E2(`scripts/gast_narrow/e2/`, 고정 조건 평가: env마다 첫 에피소드 1
 |---|---|
 | `src/gd_lab/gast_narrow/geometry.py`, `terrain.py` | `turn_*` 모양, 장애물별 높이 |
 | `src/gd_lab/gast_narrow/lidar.py` | 센서 수 일반화(v1~v2.3 동작 같음), `NarrowLidarMapV24` (후방 Mid-360, 트렁크 가림) |
-| `src/gd_lab/gast_narrow/mdp_turn.py` | 회전 에피소드·명령·모니터·보상·종료·커리큘럼·critic 입력 |
+| `src/gd_lab/gast_narrow/mdp_turn.py` | 회전 에피소드·명령·모니터·보상·종료·커리큘럼·critic 입력, actor 회전 불가 플래그(`turn_block_obs`, v2.4c) |
+| `src/gd_lab/gast_narrow/model.py` | `GastNarrowV24ActorCritic` / `mirror_narrow_v24`: actor 입력 +1 (v2.4c, §12) |
 | `src/gd_lab/gast_narrow/tasks_v24.py` | 과제 `Gd-GastNarrowV24-Rbq10-Dreamwaq-v0` |
 | `src/gd_lab/gast_narrow/narrow_top5_v24.py` | Top-5 점수 (R 추가) |
 | `scripts/gast_narrow/train_narrow_v24.py`, `train_narrow_v24_3gpu.sh` | 학습 (onvlm2 GPU 0·1·2) |
@@ -249,3 +250,15 @@ a6000 1차 학습(`narrow_v24c_602_4096x100_600_20261030`, 4096 env × 600 updat
 | 학습량 | 600 update, turn 에피소드 iteration당 ~130개 | 5120 env(GPU당 30 → 약 37 GB) × 800 update (`train_narrow_v24_3gpu.sh` 기본값). 그 이상 env는 48 GB에 안 들어감 |
 
 검증: `turn_stop_rate`가 100 update 안에 0에서 떨어져 나오는지, `narrow_turn_tight` 레벨이 오르는지가 1차 관문. 그대로 0이면 ①의 보상이 아니라 지각(④) 문제로 보고 actor 입력에 "회전 가능" 힌트를 넣는 대신 critic 입력을 actor로 옮기는 안을 검토한다.
+
+## 12. 2차 학습 결과와 v2.4c 수정 (2026-10-31)
+
+a6000 2차 학습(`narrow_v24d_602_5120x100_800_20261031`, v2.4b, 5120 env × 800 update, 602 시작)은 1차 관문을 넘지 못해 it226에서 저장 정지(사용자 결정, model_226.pt 보존).
+
+| 문제 정의 | 결과 | 반영 방향 |
+|---|---|---|
+| ①(보상)만으로 정지가 나오는지 | `turn_stop_rate` it100~226 **0.0 %** 그대로, 침범 0.88, 회전 가능 성공 0.55. `narrow_turn_tight` 레벨 0.01에서 정체, tight 종료 62~70 %(돌다가 벽 접촉·이동 0.2 m). 에피소드 보상 합에서 `turn_stand` +0.003~0.011, `turn_wrong_spin` −0.001~−0.007: 두 항 모두 학습 신호로는 너무 작고, 돌아서 충돌·종료하는 쪽이 여전히 빠르다 | 보상 조정으로는 더 가지 않음 |
+| ④ 지각 — actor가 "회전 불가"를 알 수 없음 | critic은 slot 7로 정확히 알지만 actor는 LiDAR 지도에서 r 10 cm 차이(2셀)를 읽어야 함. 두 번의 학습(600 + 226 update)에서 한 번도 서지 않았으니 정책 사전(602는 ωz 명령에 항상 돈다)을 지각 학습이 못 이김 | **critic 입력을 actor로 옮김**: 관측 그룹 `narrow_turn_block` [N,1] = 회전 타일이면서 회전 불가일 때 1(`mdp_turn.turn_block_obs`). `GastNarrowV24ActorCritic`이 actor 첫 층에 0 열 1개를 더해 시작 정책은 602와 동일, 미러는 그대로 복사(`mirror_narrow_v24`). 로더(`train_narrow_v24.py`)는 602·v2.4b 체크포인트의 actor.0.weight를 0 열로 넓힘, E2는 `anchor.widen_to`로 같은 처리 |
+| 실전 입력 | — | 플래그는 margin 입력처럼 내비게이션 스택(gdm/감독기)이 Mid-360 지도의 자유 반경 r_free와 R_SWEEP + m을 비교해 준다. 정책은 "어디서 돌지"를 정하지 않고 "돌지 말라"는 신호에 서는 법만 배운다([[policy-design-principles-gdm]]와 일치). 배포 래퍼에 입력 1개 추가 필요(deploy_vrl, 별도 작업) |
+
+검증: a6000에서 `train_narrow_v24_3gpu.sh smoke`(로더·미러·PPO 경로) 뒤 `train`(602, 5120 × 800). 관문은 같다: it100 안에 `turn_stop_rate` > 0, `narrow_turn_tight` 레벨 상승. 힌트가 있으면 정지는 조건 반사 수준이라 it50 안에 나와야 정상이다.

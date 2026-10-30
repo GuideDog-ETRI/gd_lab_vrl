@@ -12,6 +12,9 @@ Changes (network, anchor, other narrow tiles and the retention tiles as v2.3):
   yaw tracking off where the turn is not possible; centering off; drift > 0.2 m ends; a breach on a turn tile does
   NOT end the episode (v2.4b: the first run, 600 updates from 602, never stood once -- stop rate 0 %).
 - critic: the same 9 narrow inputs, turn state in slots 2 / 4 / 7 / 8 on turn tiles.
+- actor (v2.4c): + 1 input, the turn-block flag (1 where the turn is not possible; narrow_turn_block group, zero
+  column at warm start). Two runs (600 and 226 updates) with the flag critic-only never stood once: the actor had to
+  read a 10 cm radius difference off the LiDAR map. On the robot the flag comes from the navigation stack.
 - backward passages: 25 % of the passable corridor / door / bend episodes run tail first (602 hesitates there:
   narrow tiles were forward-only), rear Mid-360 on in those episodes.
 - standing under a moving command (turn impossible, v2 blocked zone): feet_cadence_overrun off there (it paid for
@@ -24,7 +27,8 @@ Changes (network, anchor, other narrow tiles and the retention tiles as v2.3):
 import math
 
 import torch
-from isaaclab.managers import EventTermCfg, ManagerTermBase, ObservationTermCfg, RewardTermCfg, TerminationTermCfg
+from isaaclab.managers import (EventTermCfg, ManagerTermBase, ObservationGroupCfg, ObservationTermCfg, RewardTermCfg,
+                               TerminationTermCfg)
 from isaaclab.utils import configclass
 
 import gd_lab.mdp.rewards as gd_rew
@@ -101,6 +105,16 @@ class NarrowV24VelocityCommand(mdp_turn.NarrowV24VelocityCommand, NarrowV23Veloc
 
 
 @configclass
+class NarrowTurnBlockGroup(ObservationGroupCfg):
+    """v2.4c policy input [N,1]: 1 on a turn tile where the turn is not possible (see mdp_turn.turn_block_obs)."""
+    block = ObservationTermCfg(func=mdp_turn.turn_block_obs)
+
+    def __post_init__(self):
+        self.enable_corruption = False
+        self.concatenate_terms = True
+
+
+@configclass
 class GastNarrowV24TeacherCfg(GastNarrowV23TeacherCfg):
     def __post_init__(self):
         super().__post_init__()
@@ -119,6 +133,7 @@ class GastNarrowV24TeacherCfg(GastNarrowV23TeacherCfg):
 
         self.observations.narrow_lidar.lidar_map = ObservationTermCfg(func=NarrowLidarMapV24)
         self.observations.narrow_priv.state = ObservationTermCfg(func=mdp_turn.narrow_privileged_v24)
+        self.observations.narrow_turn_block = NarrowTurnBlockGroup()  # v2.4c: the actor sees "turn impossible"
         self.commands.base_velocity.class_type = NarrowV24VelocityCommand
         self.events.reset_turn = EventTermCfg(func=mdp_turn.reset_turn, mode="reset")  # after reset_narrow_v2
         self.events.reset_narrow_back = EventTermCfg(func=mdp_turn.reset_narrow_back, mode="reset")
@@ -154,6 +169,9 @@ class GastNarrowV24RunnerCfg(GastNarrowV23RunnerCfg):
     def __post_init__(self):
         super().__post_init__()
         self.experiment_name = "gast/narrow_v24"
+        # v2.4c: one more actor input (turn-block flag); the mirror copies it like the margin.
+        self.policy.class_name = "gd_lab.gast_narrow.model:GastNarrowV24ActorCritic"
+        self.algorithm.symmetry_cfg.data_augmentation_func = "gd_lab.gast_narrow.model:mirror_narrow_v24"
 
 
 TASK = "GastNarrowV24"

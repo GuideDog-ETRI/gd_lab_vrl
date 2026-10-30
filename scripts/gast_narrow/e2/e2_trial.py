@@ -385,7 +385,12 @@ agent_cfg.num_steps_per_env = 1  # evaluation never fills the PPO rollout buffer
 from gd_lab.rl.runner import DreamwaqRunner  # noqa: E402
 runner = DreamwaqRunner(venv, agent_cfg.to_dict(), log_dir=None, device=device)
 saved = torch.load(args.model, map_location=device, weights_only=False)
-runner.alg.policy.load_state_dict(saved["model_state_dict"], strict=True)
+state = saved["model_state_dict"]
+if V24:
+    # 602 and pre-v2.4c checkpoints lack the turn-block actor column: zero-pad (they then act exactly as trained).
+    from gd_lab.gast_narrow.anchor import widen_to
+    state = widen_to(state, runner.alg.policy.state_dict())
+runner.alg.policy.load_state_dict(state, strict=True)
 policy = runner.get_inference_policy(device=device)
 
 # ---------------------------------------------------------------- per-episode recording
