@@ -13,10 +13,14 @@ limit; tasks_v23 hands the mask over with set_gap_nose_mask each step). 6566 lif
 forward; gap_nose_up corrects those moments and the anchor must not undo them. A pitch-only rule (no tile check) also
 dropped stair / slope climbing (5 % of all samples in the 30-update test) and so weakened the stair anchor.
 v2.4c stand anchor (NARROW_STAND_ANCHOR_WEIGHT, default 1.0; 0 = off; needs the narrow_turn_block group): on the
-samples whose turn-block flag is 1 the policy's deterministic action is pulled toward its own action on the same
-observation with the velocity command (all history frames) and the flag zeroed:
-    stand loss = w_s * mean_{flag samples} || mu(o) - mu(o | command = 0, flag = 0) ||^2      (target detached)
-i.e. "flag on = behave as under a zero command", which 602 already does by standing. Reward shaping alone did not
+samples whose turn-block flag is 1 the policy's deterministic action is pulled toward the action of a FROZEN copy of
+the start policy (NARROW_STAND_ANCHOR_CKPT, else NARROW_SOURCE = 602, else the 6566 anchor) on the same observation
+with the velocity command (all history frames) and the flag zeroed:
+    stand loss = w_s * mean_{flag samples} || mu(o) - mu_frozen(o | command = 0, flag = 0) ||^2
+i.e. "flag on = behave as the start policy does under a zero command" (it stands). The first version used the live
+policy itself as the target: a moving, self-referential target whose gradient also reshaped the shared command
+columns -- the run diverged at update 13 (stand mse 0.56 -> 2e4, actions unbounded). A frozen target is a plain
+regression like the 6566 anchor. Reward shaping alone did not
 produce it: the stop-tile episodes are ~1 % of the samples and end within a second (wall contact / drift), and the
 policy prior turns on every wz command, so standing was never sampled (v2.4b run 0 % stop in 226 updates, v2.4c
 run 1 0 % in 104). The anchor gives the direct gradient the rollouts cannot.
@@ -94,8 +98,19 @@ class NarrowAnchorPPO(GastPPO):
         self._anchor_weight = float(os.environ.get("NARROW_ANCHOR_WEIGHT", "1.0"))
         self._anchor_epochs = int(os.environ.get("NARROW_ANCHOR_EPOCHS", "1"))
         self._stand_weight = float(os.environ.get("NARROW_STAND_ANCHOR_WEIGHT", "1.0"))
+        self._stand_anchor, stand_path = None, None
+        if self._stand_weight > 0:
+            stand_path = os.environ.get("NARROW_STAND_ANCHOR_CKPT") or os.environ.get("NARROW_SOURCE") or path
+            sstate = torch.load(stand_path, map_location=self.device, weights_only=False)["model_state_dict"]
+            stand_anchor = _detached_copy(self.policy)
+            stand_anchor.load_state_dict(widen_to(sstate, stand_anchor.state_dict()), strict=True)
+            stand_anchor.eval()
+            for p in stand_anchor.parameters():
+                p.requires_grad_(False)
+            self._stand_anchor = stand_anchor
         print(f"[NARROW_ANCHOR] 6566 anchor from {path}: weight={self._anchor_weight} epochs={self._anchor_epochs} "
-              f"gap_nose={self._gap_nose_enabled()} stand_weight={self._stand_weight}", flush=True)
+              f"gap_nose={self._gap_nose_enabled()} stand_weight={self._stand_weight} stand_target={stand_path}",
+              flush=True)
 
     def _stand_target_obs(self, obs):
         """The same observations with the velocity command (every history frame) and the turn-block flag zeroed."""
@@ -189,7 +204,7 @@ class NarrowAnchorPPO(GastPPO):
                 if stand_on:
                     smask = stand[idx]
                     with torch.no_grad():
-                        stand_target = self.policy.act_inference(self._stand_target_obs(obs))
+                        stand_target = self._stand_anchor.act_inference(self._stand_target_obs(obs))
                     stand_err = (mu - stand_target).square().sum(-1)
                     stand_loss = self._stand_weight * (stand_err * smask).sum() / smask.sum().clamp_min(1)
                     loss = loss + stand_loss
