@@ -16,7 +16,7 @@ from __future__ import annotations
 import math
 
 import torch
-from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import ManagerTermBase, SceneEntityCfg
 
 from gd_lab.gast_narrow import geometry, mdp_v2
 from gd_lab.gast_narrow.state import _wrap, narrow_state, rect_distance
@@ -250,6 +250,28 @@ def turn_overspin(env):
     command = env.command_manager.get_command("base_velocity")[:, 2].abs()
     wz = env.scene["robot"].data.root_ang_vel_b[:, 2].abs()
     return (wz - command - OVERSPIN_MARGIN).clamp_min(0.0) * _turn_mask(env).float()
+
+
+class TurnStall(ManagerTermBase):
+    """1 per second once a turnable turn-tile episode has not turned for STALL_S under a turn command (v2.2's stall
+    penalty is inert there: it watches the linear command). 602 stands on narrow tiles whenever unsure."""
+
+    STALL_S, STALL_CMD, STILL = 1.5, 0.2, 0.10
+
+    def __init__(self, cfg, env):
+        super().__init__(cfg, env)
+        self.still = torch.zeros(env.num_envs, device=env.device)
+
+    def reset(self, env_ids=None):
+        self.still[slice(None) if env_ids is None else env_ids] = 0.0
+
+    def __call__(self, env):
+        turn = turn_episode(env)
+        command = env.command_manager.get_command("base_velocity")[:, 2].abs()
+        wz = env.scene["robot"].data.root_ang_vel_b[:, 2].abs()
+        stuck = _turn_mask(env) & turn.turnable & ~turn.reached & (command > self.STALL_CMD) & (wz < self.STILL)
+        self.still = torch.where(stuck, self.still + env.step_dt, torch.zeros_like(self.still))
+        return (self.still > self.STALL_S).float()
 
 
 def turn_drift_done(env):

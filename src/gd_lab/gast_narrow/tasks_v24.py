@@ -45,7 +45,7 @@ TURN_R_MAX, TURN_R_MIN = 1.00, 0.45
 TIGHT_FAMILY = ("narrow_turn_tight", "turn_room", 1, 1.0, 0.50, 0.40)
 RETENTION_EXTRA = {"platform_gap": 4.0, "pyramid_stairs": 1.0, "pyramid_stairs_inv": 1.0, "random_rough": 1.0}
 NUM_COLS = 58
-TURN_STAND_WEIGHT, TURN_DRIFT_WEIGHT, TURN_OVERSPIN_WEIGHT = 0.5, -2.0, -1.0
+TURN_STAND_WEIGHT, TURN_DRIFT_WEIGHT, TURN_OVERSPIN_WEIGHT, TURN_STALL_WEIGHT = 0.5, -2.0, -1.0, -1.0
 NOSE_LIMIT_DEG, NOSE_PEAK_WEIGHT = 5.0, -6.0
 
 
@@ -80,10 +80,9 @@ class NarrowV24VelocityCommand(mdp_turn.NarrowV24VelocityCommand, NarrowV23Veloc
     def reset(self, env_ids=None):
         ids = torch.arange(self.num_envs, device=self.device) if env_ids is None else torch.as_tensor(
             env_ids, device=self.device, dtype=torch.long)
-        out = NarrowV23VelocityCommand.reset(self, env_ids)
-        if len(ids):
+        if len(ids):  # before super(): its resample already applies the turn command (timer, rate, pauses)
             self._reset_turn(ids)
-        return out
+        return NarrowV23VelocityCommand.reset(self, env_ids)
 
     def _apply_narrow(self):
         NarrowV23VelocityCommand._apply_narrow(self)
@@ -121,6 +120,7 @@ class GastNarrowV24TeacherCfg(GastNarrowV23TeacherCfg):
         self.rewards.turn_stand = RewardTermCfg(func=mdp_turn.turn_stand, weight=TURN_STAND_WEIGHT)
         self.rewards.turn_drift = RewardTermCfg(func=mdp_turn.turn_drift, weight=TURN_DRIFT_WEIGHT)
         self.rewards.turn_overspin = RewardTermCfg(func=mdp_turn.turn_overspin, weight=TURN_OVERSPIN_WEIGHT)
+        self.rewards.turn_stall = RewardTermCfg(func=mdp_turn.TurnStall, weight=TURN_STALL_WEIGHT)
         self.terminations.turn_drift = TerminationTermCfg(func=mdp_turn.turn_drift_done)
         # Standing where the command still asks to move (turn impossible, blocked zone): the cadence bound off,
         # the lifted-feet count on (see mdp_turn.should_stand).

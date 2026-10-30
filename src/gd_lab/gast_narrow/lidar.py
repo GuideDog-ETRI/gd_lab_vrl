@@ -295,12 +295,21 @@ class NarrowLidarMapV24(NarrowLidarMapV2):
     def __init__(self, cfg, env):
         super().__init__(cfg, env)
         self.sensor_on = torch.ones(env.num_envs, 3, dtype=torch.bool, device=env.device)
+        half = torch.tensor(TRUNK_HALF, device=env.device)
+        inside = (self.mount_p.abs() <= half).all(-1)
+        assert not bool(inside.any()), f"a LiDAR origin lies inside the trunk box (trunk_hits ignores it): {self.mount_p}"
 
     def _rays(self, n):
         return super()._rays(n) + [(self._livox_rays(n), LIVOX_MIN)]
 
     def _occluded(self, k, origin, dirs, dist):
-        return trunk_hits(origin, dirs, dist)
+        hits = trunk_hits(origin, dirs, dist)
+        if k < 2:
+            # Head sensors sit 1-2 cm above the (simplified) trunk box top: the full slab test drops every beam below
+            # about -6 deg, i.e. the 24 lowest Ouster beams that put the wall bottoms / bench fronts into the map in
+            # v1-v2.3. Only rays heading backward can really be blocked by the body behind the head.
+            hits = hits & (dirs[..., 0] < 0.0)
+        return hits
 
     def reset(self, env_ids=None):
         NarrowLidarMap.reset(self, env_ids)
