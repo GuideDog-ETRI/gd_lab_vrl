@@ -12,6 +12,14 @@ v2.3: NARROW_ANCHOR_GAP_NOSE=1 also drops the samples the gap_nose_up reward fla
 limit; tasks_v23 hands the mask over with set_gap_nose_mask each step). 6566 lifts its front 20-30 deg crossing gaps
 forward; gap_nose_up corrects those moments and the anchor must not undo them. A pitch-only rule (no tile check) also
 dropped stair / slope climbing (5 % of all samples in the 30-update test) and so weakened the stair anchor.
+v2.4c stand anchor (NARROW_STAND_ANCHOR_WEIGHT, default 1.0; 0 = off; needs the narrow_turn_block group): on the
+samples whose turn-block flag is 1 the policy's deterministic action is pulled toward its own action on the same
+observation with the velocity command (all history frames) and the flag zeroed:
+    stand loss = w_s * mean_{flag samples} || mu(o) - mu(o | command = 0, flag = 0) ||^2      (target detached)
+i.e. "flag on = behave as under a zero command", which 602 already does by standing. Reward shaping alone did not
+produce it: the stop-tile episodes are ~1 % of the samples and end within a second (wall contact / drift), and the
+policy prior turns on every wz command, so standing was never sampled (v2.4b run 0 % stop in 226 updates, v2.4c
+run 1 0 % in 104). The anchor gives the direct gradient the rollouts cannot.
 """
 from __future__ import annotations
 
@@ -22,7 +30,8 @@ import torch
 from torch import nn
 
 from gd_lab.gast.teacher import GastPPO
-from gd_lab.gast_narrow.model import PRIV_GROUP
+from gd_lab.gast_narrow.model import PRIV_GROUP, TURN_BLOCK_GROUP
+from gd_lab.methods.dreamwaq.spec import DREAMWAQ_SPEC
 from gd_lab.rl.distributed import flush_normalizer
 
 NARROW_FLAG = 5  # narrow_priv index of the "on a narrow tile" flag (narrow_privileged_v2)
@@ -84,8 +93,23 @@ class NarrowAnchorPPO(GastPPO):
         self._anchor = anchor
         self._anchor_weight = float(os.environ.get("NARROW_ANCHOR_WEIGHT", "1.0"))
         self._anchor_epochs = int(os.environ.get("NARROW_ANCHOR_EPOCHS", "1"))
+        self._stand_weight = float(os.environ.get("NARROW_STAND_ANCHOR_WEIGHT", "1.0"))
         print(f"[NARROW_ANCHOR] 6566 anchor from {path}: weight={self._anchor_weight} epochs={self._anchor_epochs} "
-              f"gap_nose={self._gap_nose_enabled()}", flush=True)
+              f"gap_nose={self._gap_nose_enabled()} stand_weight={self._stand_weight}", flush=True)
+
+    def _stand_target_obs(self, obs):
+        """The same observations with the velocity command (every history frame) and the turn-block flag zeroed."""
+        key = self.policy.obs_groups["policy"][0]
+        proprio = obs[key]
+        if proprio.shape[-1] != DREAMWAQ_SPEC.policy.total:
+            raise RuntimeError(f"stand anchor: policy group {key} has {proprio.shape[-1]} inputs, "
+                               f"spec {DREAMWAQ_SPEC.policy.total}")
+        out = obs.clone()
+        proprio = proprio.clone()
+        proprio[..., DREAMWAQ_SPEC.policy.slice("velocity_commands")] = 0.0
+        out[key] = proprio
+        out[TURN_BLOCK_GROUP] = torch.zeros_like(obs[TURN_BLOCK_GROUP])
+        return out
 
     @staticmethod
     def _gap_nose_enabled() -> bool:
@@ -144,9 +168,12 @@ class NarrowAnchorPPO(GastPPO):
             nose_up = self._gap_nose_buf.flatten(0, 1)  # [T, N] -> T-major, as storage.observations.flatten(0, 1)
             nose_frac = float((nose_up & retention).float().mean())
             retention = retention & ~nose_up
+        stand_on = self._stand_weight > 0 and TURN_BLOCK_GROUP in obs_all.keys()
+        stand = obs_all[TURN_BLOCK_GROUP][..., 0] > 0.5 if stand_on else None
         n = retention.shape[0]
         mini = n // self.num_mini_batches
         total, frac, steps = 0.0, float(retention.float().mean()), 0
+        stand_total, stand_frac = 0.0, float(stand.float().mean()) if stand_on else 0.0
         for _ in range(self._anchor_epochs):
             order = torch.randperm(self.num_mini_batches * mini, device=self.device)
             for i in range(self.num_mini_batches):
@@ -159,6 +186,14 @@ class NarrowAnchorPPO(GastPPO):
                 # Every rank runs backward + all-reduce, also with no retention sample (no collective mismatch).
                 count = mask.sum()
                 loss = self._anchor_weight * (err * mask).sum() / count.clamp_min(1)
+                if stand_on:
+                    smask = stand[idx]
+                    with torch.no_grad():
+                        stand_target = self.policy.act_inference(self._stand_target_obs(obs))
+                    stand_err = (mu - stand_target).square().sum(-1)
+                    stand_loss = self._stand_weight * (stand_err * smask).sum() / smask.sum().clamp_min(1)
+                    loss = loss + stand_loss
+                    stand_total += float(stand_loss.detach()) / self._stand_weight
                 self.optimizer.zero_grad(set_to_none=True)
                 loss.backward()
                 if self.is_multi_gpu:
@@ -168,4 +203,5 @@ class NarrowAnchorPPO(GastPPO):
                 total += float(loss.detach()) / max(self._anchor_weight, 1e-9)
                 steps += 1
         return {"anchor_mse": total / max(steps, 1), "anchor_retention_fraction": frac,
-                "anchor_nose_excluded_fraction": nose_frac}
+                "anchor_nose_excluded_fraction": nose_frac,
+                "stand_anchor_mse": stand_total / max(steps, 1), "stand_anchor_fraction": stand_frac}

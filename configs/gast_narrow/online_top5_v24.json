@@ -1,6 +1,6 @@
 {
   "top5_min_spacing": 1,
-  "top5_start_iteration": 100,
+  "top5_start_iteration": 50,
   "min_platform_gap_mean_level": 9.0,
   "min_terrain_mean_level": 3.0,
   "max_base_contact_rate": 0.09,
