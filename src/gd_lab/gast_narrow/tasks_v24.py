@@ -10,6 +10,8 @@ Changes (network, anchor, other narrow tiles and the retention tiles as v2.3):
   turnable = r_free >= R_SWEEP + m; success -> the v2 pass / hold / breach events; new rewards turn_stand +0.5,
   turn_drift -2, turn_overspin -1; yaw tracking off where the turn is not possible; centering off; drift > 0.2 m ends.
 - critic: the same 9 narrow inputs, turn state in slots 2 / 4 / 7 / 8 on turn tiles.
+- backward passages: 25 % of the passable corridor / door / bend episodes run tail first (602 hesitates there:
+  narrow tiles were forward-only), rear Mid-360 on in those episodes.
 - standing under a moving command (turn impossible, v2 blocked zone): feet_cadence_overrun off there (it paid for
   marching in place), stand_still_feet_contact on there.
 - gap nose-up (602 still lifts its front crossing gaps: E2 mean 10.4 deg, p90 13 deg; MuJoCo more): gap_nose_up limit
@@ -82,7 +84,11 @@ class NarrowV24VelocityCommand(mdp_turn.NarrowV24VelocityCommand, NarrowV23Veloc
             env_ids, device=self.device, dtype=torch.long)
         if len(ids):  # before super(): its resample already applies the turn command (timer, rate, pauses)
             self._reset_turn(ids)
-        return NarrowV23VelocityCommand.reset(self, env_ids)
+        out = NarrowV23VelocityCommand.reset(self, env_ids)
+        if len(ids):  # after super(): v2 draws the episode's forward speed and heading bias there
+            mdp_turn._back_command_fix(self, ids)
+            self._apply_narrow()
+        return out
 
     def _apply_narrow(self):
         NarrowV23VelocityCommand._apply_narrow(self)
@@ -110,6 +116,7 @@ class GastNarrowV24TeacherCfg(GastNarrowV23TeacherCfg):
         self.observations.narrow_priv.state = ObservationTermCfg(func=mdp_turn.narrow_privileged_v24)
         self.commands.base_velocity.class_type = NarrowV24VelocityCommand
         self.events.reset_turn = EventTermCfg(func=mdp_turn.reset_turn, mode="reset")  # after reset_narrow_v2
+        self.events.reset_narrow_back = EventTermCfg(func=mdp_turn.reset_narrow_back, mode="reset")
 
         assert self.rewards.narrow_monitor.func is mdp_v2.NarrowV2Monitor
         self.rewards.narrow_monitor.func = mdp_turn.NarrowV24Monitor

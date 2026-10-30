@@ -281,7 +281,8 @@ def trunk_hits(origin, dirs, dist, half=TRUNK_HALF):
 
 class NarrowLidarMapV24(NarrowLidarMapV2):
     """v2.4 (warm start from v2.3, same map [2, 30, 48]): three sensors -- head Ouster, head Mid-360, rear Mid-360 on
-    the tail (REAR_XYZ, 25 deg down-back, +/-3 deg pitch per episode) -- and rays that hit the robot's own trunk are
+    the tail (REAR_XYZ, 25 deg down-back, +/-3 deg pitch per episode; always on in backward passage episodes) -- and
+    rays that hit the robot's own trunk are
     dropped (v1-v2.3 let the head sensors see through the body).
     Per episode: head = Mid-360 only (Ouster off) on 70 % of the turn tiles / 30 % elsewhere, Ouster only 10 % off the
     turn tiles, late loss of a head sensor 10 % (as v2); rear Mid-360 on 100 % of the turn tiles, 70 % of the narrow
@@ -333,6 +334,9 @@ class NarrowLidarMapV24(NarrowLidarMapV2):
         rear_p = torch.where(turn, torch.full_like(u, self.REAR_TURN_P),
                              torch.where(narrow, torch.full_like(u, self.REAR_NARROW_P), torch.full_like(u, self.REAR_OTHER_P)))
         on[:, 2] = torch.rand(n, device=d) < rear_p
+        back = getattr(self._env, "_narrow_back", None)  # backward passage episodes (mdp_turn): rear always on
+        if back is not None:
+            on[back[ids], 2] = True
         off = ~narrow & (torch.rand(n, device=d) < self.OFF_P)
         on[off] = False
         self.sensor_on[ids] = on

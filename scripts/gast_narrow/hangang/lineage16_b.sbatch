@@ -6,6 +6,7 @@
 #SBATCH --gres=gpu:4
 #SBATCH --exclusive
 #SBATCH --time=23:50:00
+#SBATCH --signal=B:USR1@900
 #SBATCH --exclude=node1730,node1395,node1402
 #SBATCH --comment="field=robotics;appl=pytorch-ddp"
 #SBATCH --output=/scratch/t515a05/gd_lab/logs/%x_%j.out
@@ -14,6 +15,9 @@
 #   STAGE_A=<stage A best .pt> STAGE_A_SHA256=<sha> sbatch lineage16_b.sbatch
 # Continue a run (next 24 h job): NARROW_SOURCE=<model_N.pt of this run> NARROW_SOURCE_SHA256=<sha> (PPO restored).
 # Stop early with a save: touch $G/gd_lab_vrl/logs/launches/$GAST_RUN_ID/STOP
+# 24 h limit: Slurm sends USR1 15 min before the limit -> the run saves and stops; this script then resubmits itself
+# from the newest model_<n>.pt with the remaining updates (NO_RESUBMIT=1 turns that off). The same happens after a
+# crash that left a checkpoint. Check `squeue` for the follow-up job; the run id carries the job id.
 set -uo pipefail
 G=/scratch/t515a05/gd_lab
 module load apptainer
@@ -37,6 +41,7 @@ export NARROW_TORCHRUN_ARGS=${NARROW_TORCHRUN_ARGS:-"--log_dir $G/logs/ranklogs_
 echo "stage=B cpus_on_node=$SLURM_CPUS_ON_NODE nodes=$SLURM_NNODES head=$head per_gpu=$per total=$NARROW_TOTAL_ENVS source=$NARROW_SOURCE anchor=$STAGE_A start=$(date)"
 cd $G/gd_lab_vrl
 t0=$(date +%s)
+trap 'echo "USR1: time limit near, saving"; touch logs/launches/$GAST_RUN_ID/STOP' USR1
 srun --ntasks-per-node=1 --cpus-per-task=$SLURM_CPUS_ON_NODE --cpu-bind=none --kill-on-bad-exit=1 bash -c '
   h=/tmp/gdhome_$SLURM_JOB_ID; mkdir -p $h/.local/share $h/.cache
   cp -a $HOME/.local/share/ov $h/.local/share/ && cp -a $HOME/.nvidia-omniverse $h/ 2>/dev/null
@@ -44,3 +49,14 @@ srun --ntasks-per-node=1 --cpus-per-task=$SLURM_CPUS_ON_NODE --cpu-bind=none --k
   NARROW_APPTAINER_HOME=$h exec bash scripts/gast_narrow/train_narrow_v23.sh train env.commands.base_velocity.debug_vis=false'
 rc=$?
 echo "=== TRAIN_DONE stage=B nodes=$SLURM_NNODES per_gpu=$per total=$NARROW_TOTAL_ENVS rc=$rc wall=$(( $(date +%s) - t0 ))s"
+# Resubmit from the newest checkpoint when updates remain (time limit, STOP file, crash with a checkpoint).
+ck=$(ls -t logs/gast/lineage16_b/$GAST_RUN_ID/model_*.pt 2>/dev/null | head -1)
+if [[ -n $ck && ${NO_RESUBMIT:-0} != 1 ]]; then
+  done_n=$(basename "$ck" .pt | sed 's/model_//'); left=$(( NARROW_UPDATES - done_n ))
+  if (( left > 20 )); then
+    echo "resubmit: $ck done=$done_n left=$left"
+    (cd $G/jobs && STAGE_A=$STAGE_A STAGE_A_SHA256=$STAGE_A_SHA256 NARROW_SOURCE=$ck \
+       NARROW_SOURCE_SHA256=$(sha256sum "$ck" | cut -d" " -f1) NARROW_UPDATES=$left LINEAGE_RECIPE=${LINEAGE_RECIPE:-v24} \
+       PER_GPU=$per sbatch --parsable -N $SLURM_NNODES lineage16_b.sbatch)
+  fi
+fi

@@ -362,3 +362,58 @@ def stand_still_feet_contact_stand(env, sensor_cfg, command_name: str = "base_ve
     forces = env.scene.sensors[sensor_cfg.name].data.net_forces_w_history[:, :, sensor_cfg.body_ids, :]
     lifted = (~(forces.norm(dim=-1).max(dim=1).values > force_threshold)).float().sum(dim=1)
     return base + lifted * should_stand(env).float()
+
+
+# ---------------------------------------------------------------- backward passages (v2.4)
+# 602 hesitates driving backward through narrow passages: v1-v2.3 narrow tiles only ever commanded forward (the
+# backward-gap skill is on gap tiles). v2.4: BACK_P of the passable corridor / door / bend episodes run the passage tail
+# first -- spawn turned by pi, vx = -(the episode's forward speed), heading command aimed with the tail (bias + pi).
+# Blocked passages and dead ends stay forward (the v2 zone uses the robot front). The rear Mid-360 is on in these
+# episodes (lidar.NarrowLidarMapV24). Stall penalty, safe speed, overspeed, pace and pass bonus all use |command|.
+BACK_P = 0.25
+BACK_KINDS = (geometry.KINDS["corridor"], geometry.KINDS["door"], geometry.KINDS["bend"])
+
+
+def narrow_back(env) -> torch.Tensor:
+    back = getattr(env, "_narrow_back", None)
+    if back is None:
+        back = env._narrow_back = torch.zeros(env.num_envs, dtype=torch.bool, device=env.device)
+    return back
+
+
+def reset_narrow_back(env, env_ids):
+    """After reset_narrow_v2 / reset_turn: draw the backward passage episodes and turn their spawn yaw by pi."""
+    ids = torch.as_tensor(env_ids, device=env.device, dtype=torch.long)
+    if not len(ids):
+        return
+    state = narrow_state(env)
+    back = narrow_back(env)
+    kind = state.kind[ids]
+    eligible = torch.zeros_like(kind, dtype=torch.bool)
+    for k in BACK_KINDS:
+        eligible |= kind == k
+    eligible &= ~mdp_v2.narrow_episode(env).blocked[ids]
+    draw = eligible & (torch.rand(len(ids), device=env.device) < BACK_P)
+    back[ids] = draw
+    if not getattr(env, "_narrow_back_logged", False) and bool(draw.any()):
+        env._narrow_back_logged = True
+        print(f"[NARROW_BACK] backward passage episodes: {int(draw.sum())} of {int(eligible.sum())} eligible "
+              f"({len(ids)} resets)", flush=True)
+    ids = ids[draw]
+    if not len(ids):
+        return
+    robot = env.scene["robot"]
+    pose = torch.cat((robot.data.root_pos_w[ids], robot.data.root_quat_w[ids]), -1).clone()
+    w, z = pose[:, 3].clone(), pose[:, 6].clone()          # yaw-only quaternion (reset_narrow_v2): yaw + pi
+    pose[:, 3], pose[:, 6] = -z, w
+    robot.write_root_pose_to_sim(pose, env_ids=ids)
+    state.reset_counter += 1
+
+
+def _back_command_fix(command, ids):
+    """Command reset hook: backward episodes drive with -vx and aim the tail (heading bias + pi)."""
+    back = narrow_back(command._env)[ids]
+    rows = ids[back]
+    if len(rows):
+        command.narrow_vx[rows] = -command.narrow_vx[rows]
+        command.narrow_bias[rows] = command.narrow_bias[rows] + math.pi
