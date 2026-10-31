@@ -317,3 +317,19 @@ mid360_only(후방 센서 없음)에서는 회전 불가 서기가 약 15 %p 낮
 | dead_end L7 서기 회귀 (−22~56 %p) | 침범 0, 서기 실패. 하락 판정 지표에 없어 ⚠에 안 잡힘 | 하락 판정에 dead_end 서기 추가. 정지 anchor가 플래그 1 표본만 당기므로 막다른 길(플래그 0, 명령 0) 서기는 보호되지 않음 → 정지 anchor 표본을 "명령 0" 표본까지 넓히거나 dead_end 보상 확인 |
 | gap(≥ 0.90 clean) | 전 모델(602 포함) 미달, 건넘 97~98 %, 602 대비 하락 없음 | 유지 목표 충족(하락 없음); 0.90은 별도 과제 |
 | 후보 선택 | t1 653: 정지·후진·회전 균형 최고, dead_end 78. t3 301: dead_end 89로 덜 깎임, 정지 66 | 사용자 결정 대기; 다음 런 시작점은 653 권장 |
+
+## 16. v2.4e: 7차 학습 설정 (2026-10-31, 사용자 승인 ①~⑦)
+
+시작점 653(`narrow_v24h` Top-1). 정지 anchor 목표는 계속 602(`NARROW_STAND_ANCHOR_CKPT`를 602로 명시; 기본값이 `NARROW_SOURCE` = 653으로 넘어가면 653의 들린 정지 자세가 목표가 됨).
+
+| 번호 | 문제 정의 | 반영 |
+|---|---|---|
+| ① | 막다른 길 hold 판정이 순간 속도(필터 없음)라 흔들리는 정지를 못 셈 | `mdp_v2.NarrowV2Monitor`: 평면 속도를 `STILL_TAU` 0.3 s 저역 필터(`v_f`)로 판정. E2 dead_end 판정도 같이 바뀜(결정적 추론이라 큰 차이 없음) |
+| ② | 정지 중 앞 들림 18~27°(602 13.6°) | `stand_pitch` −2 /s × (nose-up − 10°)⁺ rad, `should_stand`(회전 불가 타일 + v2 막힌 구역) 구간 |
+| ③ | 정지 anchor가 플래그 1 표본만 보호 | `NarrowV24Monitor`가 매 스텝 `should_stand` 마스크를 anchor에 넘기고(`set_stand_mask`, gap nose 마스크와 같은 경로) `_anchor_update`의 stand 표본 = 플래그 1 ∪ 막힌 구역 |
+| ④ | dead_end 하락이 macro H에 묻힘 | `dead_end_hold_rate`(narrow_dead_end 층 macro) + 관문 `min_dead_end_hold_rate` 0.85 |
+| ⑤ | 회전 가능 stall 13~23 % | `turn_stand`는 이미 플래그 1에만 지급되고 있었음(수정 없음). 대신 `TurnStall` 1.5 → 1.0 s, 가중 −1 → −2 |
+| ⑥ | 경계 근처 셀(slack ±0.04~0.09)이 학습에 드묾 | `draw_turn_margin`: 40 %는 slack = ±U(0.04, 0.10)이 되도록 m을 뽑음(범위 밖이면 균일 추출 유지). edge_stop(−0.05)·subway(+0.065)·edge_turn(+0.044)이 모두 이 대역 |
+| ⑦ | 이동 초과가 회전 실패의 50~65 % | `turn_drift` −3 → −6 /s |
+
+관문: it100 안에 `dead_end_hold_rate` ≥ 0.85 유지, `turn_stop_rate` ≥ 0.6 유지, `turn_rotate_rate` 상승(653 기준 0.63). 발산 감시(stand_anchor_mse, value loss)는 v24h와 같다.

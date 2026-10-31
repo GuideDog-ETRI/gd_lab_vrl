@@ -19,6 +19,9 @@ Changes (network, anchor, other narrow tiles and the retention tiles as v2.3):
   narrow tiles were forward-only), rear Mid-360 on in those episodes.
 - standing under a moving command (turn impossible, v2 blocked zone): feet_cadence_overrun off there (it paid for
   marching in place), stand_still_feet_contact on there.
+- v2.4e (after the v24h E2): blocked-zone hold on filtered speed (mdp_v2.STILL_TAU), stand_pitch -2 where the robot
+  must stand, stand anchor also on blocked-zone samples, turn_drift -6, turn_stall -2 after 1.0 s, 40 % of turn
+  margin draws within 0.10 of the turnable boundary, online gate min_dead_end_hold_rate.
 - gap nose-up (602 still lifts its front crossing gaps: E2 mean 10.4 deg, p90 13 deg; MuJoCo more): gap_nose_up limit
   10 -> 5 deg (the anchor skips the flagged samples as before), and gap_nose_peak pays -NOSE_PEAK_WEIGHT per rad of the
   crossing's peak nose-up above 5 deg at the moment the crossing is credited (the per-second term alone is cheap for
@@ -55,7 +58,10 @@ TURN_R_MAX, TURN_R_MIN = 1.00, 0.45
 TIGHT_FAMILY = ("narrow_turn_tight", "turn_room", 1, 3.0, 0.56, 0.40)
 RETENTION_EXTRA = {"platform_gap": 5.0, "pyramid_stairs": 1.0, "pyramid_stairs_inv": 2.0, "random_rough": 1.0}
 NUM_COLS = 62
-TURN_STAND_WEIGHT, TURN_DRIFT_WEIGHT, TURN_OVERSPIN_WEIGHT, TURN_STALL_WEIGHT = 1.0, -3.0, -1.0, -1.0
+# v2.4e (from v24h E2): turn_drift -3 -> -6 (drift > 0.10 m was 50-65 % of turnable failures), turn_stall -1 -> -2
+# (stalls 13-23 %), stand_pitch -2 per rad above 10 deg where the robot must stand (dead-end nose-up rocking).
+TURN_STAND_WEIGHT, TURN_DRIFT_WEIGHT, TURN_OVERSPIN_WEIGHT, TURN_STALL_WEIGHT = 1.0, -6.0, -1.0, -2.0
+STAND_PITCH_WEIGHT = -2.0
 TURN_WRONG_SPIN_WEIGHT = -1.0
 NOSE_LIMIT_DEG, NOSE_PEAK_WEIGHT = 5.0, -6.0
 
@@ -149,6 +155,7 @@ class GastNarrowV24TeacherCfg(GastNarrowV23TeacherCfg):
         self.rewards.turn_overspin = RewardTermCfg(func=mdp_turn.turn_overspin, weight=TURN_OVERSPIN_WEIGHT)
         self.rewards.turn_stall = RewardTermCfg(func=mdp_turn.TurnStall, weight=TURN_STALL_WEIGHT)
         self.rewards.turn_wrong_spin = RewardTermCfg(func=mdp_turn.turn_wrong_spin, weight=TURN_WRONG_SPIN_WEIGHT)
+        self.rewards.stand_pitch = RewardTermCfg(func=mdp_turn.stand_pitch, weight=STAND_PITCH_WEIGHT)
         assert self.terminations.narrow_breach.func is mdp_v2.narrow_breach_done
         self.terminations.narrow_breach.func = mdp_turn.narrow_breach_done_no_turn  # turn tiles: no early exit
         self.terminations.turn_drift = TerminationTermCfg(func=mdp_turn.turn_drift_done)

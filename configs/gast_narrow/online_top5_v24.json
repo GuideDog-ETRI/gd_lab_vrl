@@ -9,5 +9,6 @@
   "max_gap_success_regression": 1.0,
   "max_base_contact_regression": 1.0,
   "min_narrow_hold_rate": 0.85,
-  "max_narrow_breach_rate": 0.05
+  "max_narrow_breach_rate": 0.05,
+  "min_dead_end_hold_rate": 0.85
 }

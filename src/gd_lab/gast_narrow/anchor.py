@@ -40,11 +40,17 @@ from gd_lab.rl.distributed import flush_normalizer
 
 NARROW_FLAG = 5  # narrow_priv index of the "on a narrow tile" flag (narrow_privileged_v2)
 _gap_nose_mask = None  # [num_envs] bool, this env step (set by tasks_v23.gap_nose_up)
+_stand_mask = None  # [num_envs] bool, this env step (set by mdp_turn.NarrowV24Monitor: should_stand), v2.4e
 
 
 def set_gap_nose_mask(mask: torch.Tensor) -> None:
     global _gap_nose_mask
     _gap_nose_mask = mask
+
+
+def set_stand_mask(mask: torch.Tensor) -> None:
+    global _stand_mask
+    _stand_mask = mask
 
 
 def widen_to(state: dict, target: dict) -> dict:
@@ -148,6 +154,13 @@ class NarrowAnchorPPO(GastPPO):
                 buf = self._gap_nose_buf = torch.zeros(self.storage.num_transitions_per_env, _gap_nose_mask.shape[0],
                                                        dtype=torch.bool, device=self.device)
             buf[self.storage.step] = _gap_nose_mask.to(self.device)
+        # The anchor is built lazily at the first update, so read the weight from the environment here.
+        if float(os.environ.get("NARROW_STAND_ANCHOR_WEIGHT", "1.0")) > 0 and _stand_mask is not None:
+            sbuf = getattr(self, "_stand_buf", None)
+            if sbuf is None:
+                sbuf = self._stand_buf = torch.zeros(self.storage.num_transitions_per_env, _stand_mask.shape[0],
+                                                     dtype=torch.bool, device=self.device)
+            sbuf[self.storage.step] = _stand_mask.to(self.device)
         return super().process_env_step(obs, rewards, dones, extras)
 
     @staticmethod
@@ -185,6 +198,10 @@ class NarrowAnchorPPO(GastPPO):
             retention = retention & ~nose_up
         stand_on = self._stand_weight > 0 and TURN_BLOCK_GROUP in obs_all.keys()
         stand = obs_all[TURN_BLOCK_GROUP][..., 0] > 0.5 if stand_on else None
+        # v2.4e: + the samples where the robot must stand under a moving command (v2 blocked zones before the line):
+        # the flag-only anchor left the dead-end stance unprotected (E2 v24h: dead_end L7 hold 100 -> 44-78 %).
+        if stand_on and getattr(self, "_stand_buf", None) is not None:
+            stand = stand | self._stand_buf.flatten(0, 1)
         n = retention.shape[0]
         mini = n // self.num_mini_batches
         total, frac, steps = 0.0, float(retention.float().mean()), 0

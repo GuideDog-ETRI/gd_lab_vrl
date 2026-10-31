@@ -160,6 +160,7 @@ def score_episodes(episodes):
         "narrow_tight_passage_rate": raw["N"], "narrow_bend_passage_rate": raw["L"],
         "narrow_breach_rate": pooled("breach", blocked_rows),
         "narrow_blocked_share": len(blocked_rows) / len(narrow_rows),
+        "dead_end_hold_rate": macro("hold", {k: v for k, v in narrow.items() if k[0] == "narrow_dead_end"}, blocked),
         "narrow_tight_samples": len(tight),
         "narrow_touch_free_rate": components["W"],
         "narrow_min_clearance_mean": macro("min_clearance", narrow),
@@ -188,6 +189,10 @@ def gates(candidate, reference, criteria=None):
     if "max_narrow_breach_rate" in criteria:
         result["narrow_breach_pass"] = breach is None or breach <= criteria["max_narrow_breach_rate"]
         result["terrain_mean_level_pass"] = result["terrain_mean_level_pass"] and result["narrow_breach_pass"]
+    dead_end = m.get("dead_end_hold_rate")  # v2.4e: the dead-end family alone (the macro H hid its drop to 44-78 %)
+    if "min_dead_end_hold_rate" in criteria:
+        result["dead_end_hold_pass"] = dead_end is None or dead_end >= criteria["min_dead_end_hold_rate"]
+        result["terrain_mean_level_pass"] = result["terrain_mean_level_pass"] and result["dead_end_hold_pass"]
     return result
 
 
@@ -200,3 +205,4 @@ def install():
     # The criteria file may set these (the reloader rejects keys missing from the defaults); off by default.
     online_top5.DEFAULT_TOP5_CRITERIA.setdefault("min_narrow_hold_rate", 0.0)
     online_top5.DEFAULT_TOP5_CRITERIA.setdefault("max_narrow_breach_rate", 1.0)
+    online_top5.DEFAULT_TOP5_CRITERIA.setdefault("min_dead_end_hold_rate", 0.0)

@@ -38,6 +38,10 @@ SPAWN_X, SPAWN_Y, SPAWN_YAW_DEG = (-3.0, -2.2), 0.40, 35.0
 FRONT = 0.45                # trunk front (0.40) + head clearance
 ZONE = 1.2
 HOLD_S, STILL_SPEED = 1.5, 0.10
+# v2.4e: the hold test reads a low-pass filtered planar speed (time constant STILL_TAU). The raw test could not be
+# met under the PPO action noise (see mdp_turn.TurnEpisode), and in E2 the v2.4 policies rocked nose-up in dead ends
+# for 20 s without ever being still 1.5 s on the raw speed (dead_end L7 hold 100 -> 44-78 %).
+STILL_TAU = 0.3
 TOUCH = 0.005
 
 
@@ -239,6 +243,7 @@ class NarrowV2Monitor(ManagerTermBase):
         self.passed, self.held, self.breached = zeros(torch.bool), zeros(torch.bool), zeros(torch.bool)
         self.success, self.success_time = zeros(torch.bool), zeros()
         self.hold_time, self.touch_time = zeros(), zeros()
+        self.v_f = torch.zeros(n, 2, device=d)  # filtered planar velocity (body frame) for the still test
         self.min_clearance = torch.full((n,), 9.0, device=d)
         self.pass_event, self.hold_event, self.breach_event = zeros(torch.bool), zeros(torch.bool), zeros(torch.bool)
 
@@ -249,6 +254,7 @@ class NarrowV2Monitor(ManagerTermBase):
         self.success_time[ids] = 0.0
         self.hold_time[ids] = 0.0
         self.touch_time[ids] = 0.0
+        self.v_f[ids] = 0.0
         self.min_clearance[ids] = 9.0
         state = getattr(self._env, "_narrow_state", None)
         if state is not None:
@@ -264,7 +270,9 @@ class NarrowV2Monitor(ManagerTermBase):
         passable = m & ~episode.blocked
         new_pass = passable & state.past_exit & ~self.passed
         self.passed |= new_pass
-        speed = env.scene["robot"].data.root_lin_vel_b[:, :2].norm(dim=-1)
+        alpha = min(1.0, dt / STILL_TAU)
+        self.v_f = self.v_f + alpha * (env.scene["robot"].data.root_lin_vel_b[:, :2] - self.v_f)
+        speed = self.v_f.norm(dim=-1)
         still = zone & ~breach & ~self.breached & (speed < STILL_SPEED)
         self.hold_time = torch.where(still, self.hold_time + dt, torch.zeros_like(self.hold_time))
         new_hold = still & (self.hold_time >= HOLD_S) & ~self.held
