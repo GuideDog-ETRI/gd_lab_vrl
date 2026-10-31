@@ -6,8 +6,9 @@ Score = 0.20 P + 0.15 H + 0.10 N + 0.05 L + 0.05 W + 0.15 G + 0.10 B + 0.05 T + 
      possible, no breach (narrow_top5_v24).
 P/H/N/L/W are v2's over the passage episodes only (cliff and turn rows excluded: a cliff row would count as a
 "passable" passage with passage = 0). Extra metrics: cliff_hold_rate / cliff_breach_rate / cliff_fall_rate (gates
-min_cliff_hold_rate, max_cliff_breach_rate), turn_clean_rate, turn_leg_force_p90, stand_nose_up_t10_mean (gate
-max_stand_nose_up_t10, seconds above 10 deg in episodes that stood), dead_end_hold_rate (v2.4e gate).
+min_cliff_hold_rate, max_cliff_breach_rate), turn_clean_rate, turn_leg_force_p90 / impulse_p90, stand_nose_up_t10_mean
+and stand_nose_up_long_rate (gate max_stand_nose_up_long_rate: share of stood episodes > 6 s above 10 deg; criteria
+values other than min_* must lie in [0, 1]), dead_end_hold_rate (v2.4e gate).
 The collector is v2's with the v2.5 fields (turn clean / leg force, nose-up record, cliff fall / edge margin).
 """
 from __future__ import annotations
@@ -170,7 +171,13 @@ def score_episodes(episodes):
         turn_leg_force_p90=forces[min(len(forces) - 1, int(0.9 * len(forces)))] if forces else None,
         turn_leg_impulse_p90=impulses[min(len(impulses) - 1, int(0.9 * len(impulses)))] if impulses else None,
         turn_leg_touch_rate=pooled(lambda row: float(row["turn_leg_impulse"] > 0.5), turnable),
-        stand_nose_up_t10_mean=pooled(lambda row: row["nose_up_t10"], stood))
+        stand_nose_up_t10_mean=pooled(lambda row: row["nose_up_t10"], stood),
+        # gate-able (0..1) form: share of stood episodes that spent > 6 s above 10 deg (the criteria reloader only
+        # accepts max_* values in [0, 1]; a seconds-valued key made it reject the whole file in run v25a)
+        stand_nose_up_long_rate=pooled(lambda row: float(row["nose_up_t10"] > 6.0), stood))
+    levels = result.get("curriculum_snapshot", {}).get("mean_level_by_family")
+    if levels is not None and cliff:
+        levels[CLIFF_FAMILY] = sum(row["level"] for row in cliff) / len(cliff)
     return result
 
 
@@ -179,7 +186,7 @@ def gates(candidate, reference, criteria=None):
     criteria = criteria or {}
     m = candidate["criteria_metrics"]
     checks = (("min_cliff_hold_rate", "cliff_hold_rate", True), ("max_cliff_breach_rate", "cliff_breach_rate", False),
-              ("max_stand_nose_up_t10", "stand_nose_up_t10_mean", False))
+              ("max_stand_nose_up_long_rate", "stand_nose_up_long_rate", False))
     for key, metric, is_min in checks:
         if key in criteria:
             value = m.get(metric)
@@ -197,4 +204,4 @@ def install():
     online_top5.gates = gates
     online_top5.DEFAULT_TOP5_CRITERIA.setdefault("min_cliff_hold_rate", 0.0)
     online_top5.DEFAULT_TOP5_CRITERIA.setdefault("max_cliff_breach_rate", 1.0)
-    online_top5.DEFAULT_TOP5_CRITERIA.setdefault("max_stand_nose_up_t10", 1.0e9)
+    online_top5.DEFAULT_TOP5_CRITERIA.setdefault("max_stand_nose_up_long_rate", 1.0)

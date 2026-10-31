@@ -132,16 +132,17 @@ class NarrowV25CliffCommandMixin:
 
 
 def _edge_margin(env, cliff, state):
-    """[N] deck half-size minus the largest |x| / |y| over the trunk points and the feet (tile frame)."""
+    """[N] deck half-size minus the largest |x| / |y| over the FEET (tile frame). v2.5a: the trunk points are out --
+    the trunk nose (x = +0.40) overhangs the front feet by ~0.1 m, so with them a stop with the feet 5 cm before the
+    edge counted as a breach (run v25a: breach 1.0, hold 0 for 50 updates). The danger is a foot over the edge; the
+    trunk going over without a foot is the fall termination's job."""
     robot = env.scene["robot"].data
     origin = env.scene.env_origins[:, :2]
     c, s = torch.cos(state.yaw), torch.sin(state.yaw)
     tx, ty = cliff.trunk_xy[:, 0], cliff.trunk_xy[:, 1]
-    trunk = torch.stack((robot.root_pos_w[:, 0:1] + c[:, None] * tx - s[:, None] * ty,
-                         robot.root_pos_w[:, 1:2] + s[:, None] * tx + c[:, None] * ty), -1)  # [N,6,2]
-    feet = robot.body_pos_w[:, cliff.foot_ids, :2]                                           # [N,4,2]
-    pts = torch.cat((trunk, feet), 1) - origin[:, None]
-    return cliff.half - pts.abs().amax(-1).amax(-1)
+    del c, s, tx, ty
+    feet = robot.body_pos_w[:, cliff.foot_ids, :2] - origin[:, None]                        # [N,4,2]
+    return cliff.half - feet.abs().amax(-1).amax(-1)
 
 
 def update_cliff(env, monitor):

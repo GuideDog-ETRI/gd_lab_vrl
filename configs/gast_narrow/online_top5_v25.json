@@ -13,5 +13,5 @@
   "min_dead_end_hold_rate": 0.85,
   "min_cliff_hold_rate": 0.85,
   "max_cliff_breach_rate": 0.05,
-  "max_stand_nose_up_t10": 6.0
+  "max_stand_nose_up_long_rate": 0.3
 }

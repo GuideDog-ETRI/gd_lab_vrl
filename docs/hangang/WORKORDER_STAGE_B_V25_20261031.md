@@ -47,7 +47,7 @@ STAGE_A=<A 최고 .pt> STAGE_A_SHA256=<sha> sbatch lineage16_b.sbatch
 
 - 재제출(24 h 제한·STOP·크래시 뒤)은 스크립트가 한다. 수동으로 할 때만: `STAGE_A/STAGE_A_SHA256 그대로, NARROW_SOURCE=<model_N.pt> NARROW_SOURCE_SHA256=<sha> NARROW_UPDATES=<남은 수> sbatch lineage16_b.sbatch`.
 - 정지 anchor 목표는 스크립트가 `NARROW_STAND_ANCHOR_CKPT=$STAGE_A`로 고정한다(재제출에서 NARROW_SOURCE가 자기 저장본으로 바뀌어도 목표는 A 모델). 이 줄이 로그 `[NARROW_ANCHOR] … stand_target=` 에 보여야 한다.
-- Top-5 기준: `configs/gast_narrow/online_top5_lineage16_b_v25.json` (막힌 통로 서기 ≥ 0.85, 침범 ≤ 0.05, 막다른 길 ≥ 0.85, 낭떠러지 서기 ≥ 0.85·침범 ≤ 0.05, 정지 중 10° 초과 시간 ≤ 6 s, 갭 레벨 ≥ 8.5). **it200에 E2 1회(노드 1대)로 기준을 재조정**한다(파일은 실행 중 다시 읽힘).
+- Top-5 기준: `configs/gast_narrow/online_top5_lineage16_b_v25.json` (막힌 통로 서기 ≥ 0.85, 침범 ≤ 0.05, 막다른 길 ≥ 0.85, 낭떠러지 서기 ≥ 0.85·침범 ≤ 0.05, 정지 에피소드 중 10° 초과가 6 s를 넘는 비율 ≤ 0.3, 갭 레벨 ≥ 8.5). **it200에 E2 1회(노드 1대)로 기준을 재조정**한다(파일은 실행 중 다시 읽힘).
 
 ## 5. 감시 규칙 — 어제(10-30 21:14 ~ 10-31 11:28) 같은 멈춤이 다시 없도록
 
@@ -63,7 +63,7 @@ STAGE_A=<A 최고 .pt> STAGE_A_SHA256=<sha> sbatch lineage16_b.sbatch
 | 응답 없는 명령 | 2분 넘게 결과가 없으면 그 명령을 중단하고 상황을 먼저 보고한다 |
 | 보고 주기 | 10분마다: 현재 시각, job ID·상태(`squeue`), 최근 Learning iteration, iteration 시간, Top-5 Top-1 점수, 주요 지표(아래) |
 
-**보고할 지표**(rank 0 로그 / top5_decisions.jsonl): `narrow_passage_rate`, `narrow_hold_rate`, `dead_end_hold_rate`, `turn_stop_rate`, `turn_success_rate`(R), `turn_clean_rate`, `turn_leg_impulse_p90`, `cliff_hold_rate`, `cliff_hold_by_direction`, `cliff_breach_rate`, `stand_nose_up_t10_mean`, `platform_gap_termination_rate`, `gap_clean_crossing_rate`, `stairs_termination_rate`, 커리큘럼 레벨(narrow_cliff, narrow_turn_*, narrow_dead_end), `stand_anchor_mse`, value loss.
+**보고할 지표**(rank 0 로그 / top5_decisions.jsonl): `narrow_passage_rate`, `narrow_hold_rate`, `dead_end_hold_rate`, `turn_stop_rate`, `turn_success_rate`(R), `turn_clean_rate`, `turn_leg_impulse_p90`, `cliff_hold_rate`, `cliff_hold_by_direction`, `cliff_breach_rate`, `stand_nose_up_t10_mean`, `stand_nose_up_long_rate`, `platform_gap_termination_rate`, `gap_clean_crossing_rate`, `stairs_termination_rate`, 커리큘럼 레벨(narrow_cliff, narrow_turn_*, narrow_dead_end), `stand_anchor_mse`, value loss.
 
 **중단·이상 판단** (보고만 하고 중단은 사용자·BSSEO 세션 결정):
 - 발산: `stand_anchor_mse` 3배 이상 급등 후 3.0 초과, value loss > 1.0, base_contact 종료 > 0.25, nonfinite.

@@ -30,7 +30,10 @@ from gd_lab.gast_narrow.terrain import NarrowPassageTerrainCfg
 CLIFF_FAMILY = ("narrow_cliff", "cliff", 1, 3.0, 2.2, 1.6)  # name, kind, sign, columns, L at level 0, L at level 14
 NUM_COLS = 65
 CLIFF_STAND_WEIGHT, NOSE_UP_WEIGHT = 1.0, -3.0
-TURN_DRIFT_WEIGHT, LEG_TOUCH_WEIGHT = -3.0, -0.5
+# v2.5a: leg touch back to -1.0 and the wall-proximity cap 2 -> 4 /s: with -0.5 / 2 the first 50 updates of v25a
+# traded clean turns for contact (turn_clean 0.60 -> 0.26, leg impulse p90 6 -> 130-350 N s).
+TURN_DRIFT_WEIGHT, LEG_TOUCH_WEIGHT = -3.0, -1.0
+WALL_PROXIMITY_CAP = 4.0
 
 
 class NarrowV25Monitor(mdp_turn.NarrowV24Monitor):
@@ -131,6 +134,7 @@ class GastNarrowV25TeacherCfg(GastNarrowV24TeacherCfg):
         self.rewards.narrow_centering.func = narrow_centering_no_turn_no_cliff
         assert self.rewards.narrow_wall_proximity.func is mdp_v2.narrow_wall_proximity_v2
         self.rewards.narrow_wall_proximity.func = mdp_turn.narrow_wall_proximity_capped
+        self.rewards.narrow_wall_proximity.params = {"cap": WALL_PROXIMITY_CAP}
         from gd_lab.mdp.platform_gap_terms import platform_gap_base_height
         assert self.rewards.base_height.func is platform_gap_base_height
         self.rewards.base_height.func = mdp_cliff.base_height_cliff
