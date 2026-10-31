@@ -41,13 +41,18 @@ export NARROW_TORCHRUN_ARGS=${NARROW_TORCHRUN_ARGS:-"--log_dir $G/logs/ranklogs_
 echo "stage=A cpus_on_node=$SLURM_CPUS_ON_NODE nodes=$SLURM_NNODES head=$head per_gpu=$per total=$NARROW_TOTAL_ENVS source=$NARROW_SOURCE start=$(date)"
 cd $G/gd_lab_vrl
 t0=$(date +%s)
+# USR1 15 min before the limit -> STOP file (save + exit). The srun must run in the BACKGROUND: bash runs a trap only
+# after the foreground command returns, so with a foreground srun the STOP file was never written (10-31, job
+# 1182335: the limit killed the job without a save; the Hangang session wrote STOP by hand).
 trap 'echo "USR1: time limit near, saving"; touch logs/launches/$GAST_RUN_ID/STOP' USR1
 srun --ntasks-per-node=1 --cpus-per-task=$SLURM_CPUS_ON_NODE --cpu-bind=none --kill-on-bad-exit=1 bash -c '
   h=/tmp/gdhome_$SLURM_JOB_ID; mkdir -p $h/.local/share $h/.cache
   cp -a $HOME/.local/share/ov $h/.local/share/ && cp -a $HOME/.nvidia-omniverse $h/ 2>/dev/null
   cp -a $HOME/.cache/ov $h/.cache/ 2>/dev/null
-  NARROW_APPTAINER_HOME=$h exec bash scripts/gast_narrow/train_narrow_v23.sh train env.commands.base_velocity.debug_vis=false'
-rc=$?
+  NARROW_APPTAINER_HOME=$h exec bash scripts/gast_narrow/train_narrow_v23.sh train env.commands.base_velocity.debug_vis=false hydra.output_subdir=null' &
+sp=$!
+wait $sp; rc=$?
+while kill -0 $sp 2>/dev/null; do wait $sp; rc=$?; done  # wait returns early when the trap runs; wait again
 echo "=== TRAIN_DONE stage=A nodes=$SLURM_NNODES per_gpu=$per total=$NARROW_TOTAL_ENVS rc=$rc wall=$(( $(date +%s) - t0 ))s"
 # Resubmit from the newest checkpoint when updates remain (time limit, STOP file, crash with a checkpoint).
 ck=$(ls -t logs/gast/lineage16_a/$GAST_RUN_ID/model_*.pt 2>/dev/null | head -1)
