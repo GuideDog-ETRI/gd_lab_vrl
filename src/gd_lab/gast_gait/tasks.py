@@ -2,6 +2,7 @@
 
 Design: docs/design/GAIT_V3_DESIGN.md. Start: 3906 (user decision 11-01). The 3906 and backgap code stay unchanged.
 Each term can be switched off for ablations with GAIT_R<n>=0 (R1, R4..R11); GAIT_R13=1 keeps backward_nose_up.
+R1 measures the pitch against the terrain rise under the trunk; GAIT_R1_GROUND=0 is the G0 (absolute pitch) version.
 """
 from __future__ import annotations
 
@@ -41,7 +42,8 @@ class GastGaitV3GapTeacherCfg(GastRayIrV21Gap50BackV2TeacherCfg):
         if _on(1):
             r.trunk_nose_up = RewardTermCfg(func=terms.TrunkNoseUp, weight=W_NOSE_UP,
                                             params={"asset_cfg": FEET_BODIES, "limit_deg": 3.0, "down_deg": 6.0,
-                                                    "gap_limit_deg": 12.0, "gap_down_deg": 10.0})
+                                                    "gap_limit_deg": 12.0, "gap_down_deg": 10.0,
+                                                    "ground_relative": os.environ.get("GAIT_R1_GROUND", "1") == "1"})
         if _on(4):
             r.feet_touchdown = RewardTermCfg(func=terms.feet_touchdown_v3, weight=W_TOUCHDOWN,
                                              params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,

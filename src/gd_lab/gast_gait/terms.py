@@ -20,7 +20,7 @@ import torch
 from isaaclab.assets import RigidObject
 from isaaclab.managers import ManagerTermBase, SceneEntityCfg
 from isaaclab.sensors import ContactSensor
-from isaaclab.utils.math import quat_apply_inverse
+from isaaclab.utils.math import quat_apply_inverse, yaw_quat
 
 from gd_lab.mdp.platform_gap_terms import boarding_family_mask
 from gd_lab.mdp.terrain_families import terrain_family_gate
@@ -63,6 +63,28 @@ def nose_up_angle(env) -> torch.Tensor:
     return torch.asin((-g[:, 0]).clamp(-1.0, 1.0))
 
 
+def ground_pitch(env, scanner: str = "height_scanner", reach: float = 0.5, inner: float = 0.1,
+                 half_width: float = 0.25) -> torch.Tensor:
+    """Terrain rise along the heading (rad, positive = ground higher ahead) under the trunk: median height-scanner hit
+    in front (``inner``..``reach`` m ahead, |y| < ``half_width``) minus the median behind, over their distance.
+    Medians so that a gap slot under one half does not read as a slope; 0 where a half has no finite hit."""
+    robot = env.scene["robot"]
+    hits = env.scene.sensors[scanner].data.ray_hits_w  # [N, R, 3]
+    rel = hits - robot.data.root_pos_w[:, None, :]
+    q = yaw_quat(robot.data.root_quat_w)[:, None, :].expand(-1, hits.shape[1], -1)
+    local = quat_apply_inverse(q.reshape(-1, 4), torch.nan_to_num(rel).reshape(-1, 3)).view_as(rel)
+    ok = torch.isfinite(hits[..., 2]) & (local[..., 1].abs() < half_width)
+    front = ok & (local[..., 0] > inner) & (local[..., 0] < reach)
+    back = ok & (local[..., 0] < -inner) & (local[..., 0] > -reach)
+    z = hits[..., 2]
+    zf = torch.where(front, z, torch.full_like(z, float("nan"))).nanmedian(dim=1).values
+    zb = torch.where(back, z, torch.full_like(z, float("nan"))).nanmedian(dim=1).values
+    xf = torch.where(front, local[..., 0], torch.full_like(z, float("nan"))).nanmedian(dim=1).values
+    xb = torch.where(back, local[..., 0], torch.full_like(z, float("nan"))).nanmedian(dim=1).values
+    pitch = torch.atan2(zf - zb, (xf - xb).clamp_min(0.05))
+    return torch.nan_to_num(pitch, nan=0.0)
+
+
 class _GapSlots:
     """Lazy GapTileGeometry; None when the terrain has no gap tile metadata (then nothing is relaxed)."""
 
@@ -89,15 +111,20 @@ class TrunkNoseUp(ManagerTermBase):
     On gap tiles, while a foot is within 0.5 m of a slot, the limits are ``gap_limit_deg`` up and ``gap_down_deg``
     down: 3906 pitches about +12 deg through the approach and -10 deg as the front lands on the far deck (replay
     11-01, 44 % of the charged gap steps were nose-down); charging that would discourage the crossing itself.
-    Replaces the v2 ``backward_nose_up`` (gap tile + backward command only) and the quadratic pitch term's job."""
+    Replaces the v2 ``backward_nose_up`` (gap tile + backward command only) and the quadratic pitch term's job.
+    ``ground_relative``: the pitch is measured against the terrain rise under the trunk (``ground_pitch``), so a
+    trunk parallel to a stair flight or slope is not charged. G0 (absolute pitch) charged a stair climb at 3 deg and
+    lost stair ascent 94.8 -> 70.1 % (E2 11-01)."""
 
     def __init__(self, cfg, env):
         super().__init__(cfg, env)
         self.slots = _GapSlots(env)
 
     def __call__(self, env, asset_cfg: SceneEntityCfg, limit_deg: float = 3.0, down_deg: float = 6.0,
-                 gap_limit_deg: float = 12.0, gap_down_deg: float = 10.0):
+                 gap_limit_deg: float = 12.0, gap_down_deg: float = 10.0, ground_relative: bool = False):
         nose = nose_up_angle(env)
+        if ground_relative:
+            nose = nose - ground_pitch(env)
         feet = env.scene[asset_cfg.name].data.body_pos_w[:, asset_cfg.body_ids]
         relaxed = self.slots.foot_over_slot(env, feet)
         up_limit = torch.where(relaxed, torch.full_like(nose, math.radians(gap_limit_deg)),
