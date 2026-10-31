@@ -95,6 +95,9 @@ def container(cfg, gpu: int | None, extra_env: dict | None = None, binds: list[s
     env.pop("PYTORCH_CUDA_ALLOC_CONF", None)
     if gpu is not None:
         env["CUDA_VISIBLE_DEVICES"] = env["APPTAINERENV_CUDA_VISIBLE_DEVICES"] = str(gpu)
+    # `env:` in the E2 config: task switches read at import (e.g. NARROW_TURN=0 NARROW_CLIFF_COLUMNS=0 for the v25p
+    # passage recipe); apptainer passes the host environment through.
+    env.update({str(k): str(v) for k, v in (cfg.get("env") or {}).items()})
     env.update(extra_env or {})
     cmd = ["apptainer", "exec"] + (["--nv"] if gpu is not None else []) + ["--writable-tmpfs"]
     for b in binds or []:

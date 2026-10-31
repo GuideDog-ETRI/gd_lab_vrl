@@ -1,0 +1,151 @@
+# E2 for Hangang stage B (v25p: v2.3 passages + backward passages, rear Mid-360; no turn / cliff tiles).
+# Task v25 with NARROW_TURN=0 NARROW_CLIFF_COLUMNS=0 (44 columns, `env:` below). Baseline 602 (passages), 6566 (gap).
+# Fill in stageA (logs/e2/stage_a_<job>/merged/STAGE_A.txt) and the stage B Top-5, remove the comment keys.
+# Judgement (WORKORDER_STAGE_B_V25_20261031.md): passages / blocked stop / dead end >= 602, backward >= forward - 5 pt,
+# gap / stairs >= stage A - 1 pt.
+name: stage_b_v25p
+out_root: logs/e2
+seed: 42
+seconds: 20.0
+hardware:
+  gpus:
+  - 0
+  - 1
+  - 2
+  - 3
+  e2_slots_per_gpu: 1
+  e1_slots_per_gpu: 3
+  sif: /scratch/t515a05/gd_lab/gd_lab_isaaclab.sif
+  python: /scratch/t515a05/gd_lab/venv/bin/python
+models:
+  b6566: checkpoints/gast_narrow/backgapv2_6566.pt
+  v23u602: checkpoints/gast_narrow/narrow_v23_gh200_20261029/v23_gh200_it602_top5.pt
+  stageA: <STAGE_A path from logs/e2/stage_a_<job>/merged/STAGE_A.txt>
+  '# b1': logs/gast/lineage16_b/<run>/best_top5/<it>_top1.pt (fill in)
+suites:
+  gap:
+    enabled: true
+    directions:
+    - forward
+    - backward
+    levels:
+    - 7
+    - 11
+    - 14
+    speeds:
+    - 0.5
+    - 0.9
+    envs: 512
+  stairs:
+    enabled: true
+    families:
+    - pyramid_stairs
+    - pyramid_stairs_inv
+    - pyramid_stairs_wide
+    - pyramid_stairs_inv_wide
+    - pyramid_stairs_nose
+    - pyramid_stairs_inv_nose
+    directions:
+    - up
+    - down
+    levels:
+    - 9
+    - 14
+    speed: 0.8
+    envs: 512
+  terrain:
+    enabled: false
+    families:
+    - hf_pyramid_slope
+    - hf_pyramid_slope_inv
+    - random_rough
+    - ring_fence
+    levels:
+    - 14
+    direction: outward
+    speed: 1.0
+    envs: 512
+  narrow:
+    enabled: true
+    families:
+    - narrow_corridor
+    - narrow_door_pos
+    - narrow_door_neg
+    - narrow_bend_left
+    - narrow_bend_right
+    cases:
+    - name: pass_wide
+      width: 0.8
+      margin: 0.1
+    - name: pass_tight
+      width: 0.66
+      margin: 0.05
+    - name: block_margin
+      width: 0.66
+      margin: 0.15
+    - name: block_narrow
+      width: 0.52
+      margin: 0.1
+    envs: 512
+    directions:
+    - forward
+    - backward
+  dead_end:
+    enabled: true
+    families:
+    - narrow_dead_end
+    levels:
+    - 7
+    - 14
+    margin: 0.1
+    envs: 512
+conditions:
+  nominal:
+    enabled: true
+    lidar: both
+    rear: true
+    payload_kg: 5.0
+    push: false
+    stair_disturbance: false
+    suites:
+    - narrow
+    - dead_end
+    - gap
+    - stairs
+  mid360_rear:
+    enabled: true
+    lidar: mid360
+    rear: true
+    payload_kg: 5.0
+    push: false
+    stair_disturbance: false
+    suites:
+    - narrow
+    - dead_end
+  mid360_only:
+    enabled: true
+    lidar: mid360
+    rear: false
+    payload_kg: 5.0
+    push: false
+    stair_disturbance: false
+    suites:
+    - narrow
+    - dead_end
+  lidar_off:
+    enabled: true
+    lidar: 'off'
+    rear: false
+    payload_kg: 5.0
+    push: false
+    stair_disturbance: false
+    suites:
+    - gap
+    - stairs
+report:
+  baseline: v23u602
+  max_drop_pt: 1.0
+task: v25
+env:
+  NARROW_TURN: '0'
+  NARROW_CLIFF_COLUMNS: '0'

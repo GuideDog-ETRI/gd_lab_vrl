@@ -22,6 +22,17 @@
 
 ---
 
+## 0. 무인 진행 순서 (Claude가 끊겨도 학습·평가가 이어지도록)
+
+| 시각 | 무엇이 | 어떻게 | 사람/Claude |
+|---|---|---|---|
+| 오늘 밤 (A 실행 중) | 코드 받기 | `timeout -k 10 120 git -C $G/gd_lab_vrl fetch origin gh200` (**merge 하지 않음**: A가 이 작업본에서 돌고 있음) | 한강 Claude 1회 |
+| 〃 | A E2 예약 | `git -C $G/gd_lab_vrl show origin/gh200:scripts/gast_narrow/hangang/stage_a_e2.sbatch > $G/jobs/stage_a_e2.sbatch` → `cd $G/jobs && timeout -k 10 60 sbatch --dependency=afterany:<A job> stage_a_e2.sbatch` | 한강 Claude 1회 |
+| A 종료 직후 (~23:00) | A E2 (3노드, ~2 h) | 작업본을 origin/gh200로 fast-forward → 후보(모든 best_top5 + 마지막 저장본) + 6566을 gap·stairs·nominal로 평가 → `select_stage_a.py`가 `logs/e2/stage_a_<job>/merged/STAGE_A.txt`, `stage_a_selection.md` 작성 | 자동 |
+| 내일 08~09시 | 확인 | STAGE_A 후보 표와 B 레시피(v25p)·제출 명령을 사용자에게 보고 → "B 시작" | **사용자 (폰)** |
+| 직후 | 재제출 시험 겸 smoke | §4의 시험 명령: 1노드, 30분 제한, USR1 15분 전 → STOP 저장 → 자동 재제출 → 자식 job warm start 확인 → 자식 `scancel` | 한강 Claude |
+| 직후 | B 본 런 | `STAGE_A=… STAGE_A_SHA256=… sbatch lineage16_b.sbatch` (레시피 기본 v25p), 24 h마다 자동 재제출 | 한강 Claude 1회, 이후 자동 |
+
 ## (원안, v2.5 레시피 기준)
 
 ## 1. 목적과 판정
@@ -61,7 +72,13 @@ cd /scratch/t515a05/gd_lab/jobs
 STAGE_A=<A 최고 .pt> STAGE_A_SHA256=<sha> NARROW_UPDATES=5 PER_GPU=256 NO_RESUBMIT=1 \
   sbatch -N 1 --time=00:40:00 lineage16_b.sbatch
 
-# 본 런 (16노드, 1,200 update, LINEAGE_RECIPE 기본 v25)
+# 재제출 시험 겸 smoke (1노드, 30분 제한, 15분 전 USR1): STOP 저장 → resubmit 줄 → 자식 job 시작 확인 후 scancel
+STAGE_A=<A 최고 .pt> STAGE_A_SHA256=<sha> NARROW_UPDATES=200 PER_GPU=256 \
+  sbatch -N 1 --time=00:30:00 --signal=B:USR1@900 lineage16_b.sbatch
+#   확인: 부모 로그의 'USR1: time limit near, saving', [SAVED_STOP], 'resubmit: …/model_N.pt'; 자식 로그의 warm start
+#   source_kind narrow_v25_continue, ppo_optimizer restored, ranklogs_<자식 job>. 확인 후: timeout -k 10 60 scancel <자식 job>
+
+# 본 런 (16노드, 1,200 update, LINEAGE_RECIPE 기본 v25p)
 STAGE_A=<A 최고 .pt> STAGE_A_SHA256=<sha> sbatch lineage16_b.sbatch
 ```
 
@@ -97,7 +114,7 @@ STAGE_A=<A 최고 .pt> STAGE_A_SHA256=<sha> sbatch lineage16_b.sbatch
 
 ## 7. E2
 
-학습 종료 후(또는 it300·600·900 중간 점검): `configs/gast_narrow/e2/v25_turn.yaml`을 복사해 models를 {STAGE_A, v23u602, Top-5}로 바꾸고 `e2_multi.sbatch` 방식으로 노드 5대 분할. `run_e2.py`는 부분 묶음(`--only`) 실행을 `__only-…` 디렉터리로 분리하므로 어제 같은 retention 누락은 없다. 결과: `summary.md` 전문과 §1 판정표를 사용자에게 보고. 모델·요약은 번들 또는 tar로 5090 PC에 전달(커밋에 Claude 관련 줄 금지).
+학습 종료 후(또는 it300·600·900 중간 점검): `configs/gast_narrow/e2/stage_b_v25p_hangang.yaml`(task v25 + `env: NARROW_TURN=0 NARROW_CLIFF_COLUMNS=0`)을 복사해 models의 stageA와 B Top-5를 채우고 `e2_multi.sbatch` 방식으로 노드 5대 분할. `run_e2.py`는 부분 묶음(`--only`) 실행을 `__only-…` 디렉터리로 분리하므로 어제 같은 retention 누락은 없다. 결과: `summary.md` 전문과 §1 판정표를 사용자에게 보고. 모델·요약은 번들 또는 tar로 5090 PC에 전달(커밋에 Claude 관련 줄 금지).
 
 ## 8. 바뀐 코드 (이 작업서와 함께)
 
