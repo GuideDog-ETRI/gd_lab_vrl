@@ -63,12 +63,15 @@ wait $sp; rc=$?
 while kill -0 $sp 2>/dev/null; do wait $sp; rc=$?; done  # wait returns early when the trap runs; wait again
 echo "=== TRAIN_DONE stage=B nodes=$SLURM_NNODES per_gpu=$per total=$NARROW_TOTAL_ENVS rc=$rc wall=$(( $(date +%s) - t0 ))s"
 # Resubmit from the newest checkpoint when updates remain (time limit, STOP file, crash with a checkpoint).
-ck=$(ls -t logs/gast/lineage16_b/$GAST_RUN_ID/model_*.pt 2>/dev/null | head -1)
+# Resubmit hygiene (10-31, job 1187624 failed in 2 min): the checkpoint path must be ABSOLUTE (sha256sum runs in
+# $G/jobs), and sbatch passes this job's environment on, so the per-job variables (rank-log dir, ramp flag, source,
+# run id, update count, rendezvous) are unset for the child.
+ck=$(ls -t $G/gd_lab_vrl/logs/gast/lineage16_b/$GAST_RUN_ID/model_*.pt 2>/dev/null | head -1)
 if [[ -n $ck && ${NO_RESUBMIT:-0} != 1 ]]; then
   done_n=$(basename "$ck" .pt | sed 's/model_//'); left=$(( NARROW_UPDATES - done_n ))
   if (( left > 20 )); then
     echo "resubmit: $ck done=$done_n left=$left"
-    (cd $G/jobs && STAGE_A=$STAGE_A STAGE_A_SHA256=$STAGE_A_SHA256 NARROW_SOURCE=$ck \
+    (cd $G/jobs && env -u NARROW_TORCHRUN_ARGS -u NARROW_KEEP_RAMPS -u NARROW_SOURCE -u NARROW_SOURCE_SHA256 -u GAST_RUN_ID -u NARROW_UPDATES -u NARROW_TOTAL_ENVS -u NARROW_RDZV_ENDPOINT -u NARROW_NNODES STAGE_A=$STAGE_A STAGE_A_SHA256=$STAGE_A_SHA256 NARROW_SOURCE=$ck \
        NARROW_SOURCE_SHA256=$(sha256sum "$ck" | cut -d" " -f1) NARROW_UPDATES=$left LINEAGE_RECIPE=${LINEAGE_RECIPE:-v25} \
        PER_GPU=$per sbatch --parsable -N $SLURM_NNODES lineage16_b.sbatch)
   fi
