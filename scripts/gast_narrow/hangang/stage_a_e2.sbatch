@@ -9,7 +9,7 @@
 #SBATCH --comment="field=robotics;appl=pytorch"
 #SBATCH --output=/scratch/t515a05/gd_lab/logs/%x_%j.out
 # Stage A E2 + STAGE_A selection, unattended (docs/hangang/WORKORDER_STAGE_B_V25_20261031.md section 0):
-#   sbatch --dependency=afterany:<last stage A job> stage_a_e2.sbatch
+#   submit with: sbatch --dependency=afterany:<last stage A job> stage_a_e2.sbatch
 # 1. Brings the repository to origin/gh200 (fetched beforehand; fast-forward only) now that stage A is done.
 # 2. Candidates: every best_top5/*.pt of the stage A runs + the newest model_*.pt of the newest run; 6566 = baseline.
 #    They are split over the job's nodes (one E2 config per node, gap + stairs, nominal, 512 envs per cell).
@@ -56,12 +56,26 @@ for i, chunk in enumerate(chunks):
     (out / "cfg" / f"part{i}.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True))
 print("configs:", [len(c) for c in chunks])
 EOF
+pids=()
 for i in $(seq 0 $((SLURM_NNODES - 1))); do
   srun -N1 -n1 --exclusive --cpus-per-task=$SLURM_CPUS_ON_NODE --cpu-bind=none --output=$G/logs/stageA_e2_part${i}_$SLURM_JOB_ID.out \
        $PY scripts/gast_narrow/e2/run_e2.py $OUT/cfg/part$i.yaml &
+  pids+=($!)
   sleep 2
 done
-wait
+# Do not just `wait`: on 10-29 a leftover container process kept an srun step alive after run_e2 printed its summary,
+# and the job sat until the time limit. Poll for every part's summary.md, then end the steps that are still open.
+n_parts=$SLURM_NNODES; deadline=$(( $(date +%s) + 3 * 3600 + 1800 ))
+while :; do
+  done_n=$(ls $OUT/parts/*/summary.md 2>/dev/null | wc -l)
+  alive=0; for p in "${pids[@]}"; do kill -0 $p 2>/dev/null && alive=$((alive + 1)); done
+  (( alive == 0 )) && break
+  if (( done_n >= n_parts )); then echo "all $n_parts summaries present, ending $alive open step(s)"; sleep 60
+    for p in "${pids[@]}"; do kill $p 2>/dev/null; done; sleep 10; break; fi
+  (( $(date +%s) > deadline )) && { echo "E2 parts not done by the deadline ($done_n/$n_parts summaries); selecting from what exists"
+    for p in "${pids[@]}"; do kill $p 2>/dev/null; done; sleep 10; break; }
+  sleep 60
+done
 # One output: config with every model, trial directories side by side (b6566 is evaluated on each node; keep one).
 mkdir -p $OUT/merged/trials
 $PY - "$OUT" <<'EOF'
