@@ -29,12 +29,18 @@ head=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -1)
 export NARROW_GPUS=0,1,2,3 NARROW_NCCL_WORKAROUND=0 NARROW_NNODES=$SLURM_NNODES NARROW_RDZV_ENDPOINT=$head:$((20000 + SLURM_JOB_ID % 20000))
 export NARROW_TOTAL_ENVS=$((per * 4 * SLURM_NNODES)) NARROW_UPDATES=${NARROW_UPDATES:-1200} NARROW_SAVE_EVERY=50
 export NARROW_EXPERIMENT=gast/lineage16_b GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b.json
-# LINEAGE_RECIPE=v24 (default): the v2.4 task (v2.3 + in-place turns, rear Mid-360, stronger gap nose-up); v23: the v2.3 task.
-if [[ ${LINEAGE_RECIPE:-v24} == v24 ]]; then
-  export NARROW_TRAIN_PY=scripts/gast_narrow/train_narrow_v24.py NARROW_TASK=Gd-GastNarrowV24-Rbq10-Dreamwaq-v0
-fi
+# LINEAGE_RECIPE=v25 (default, 10-31): the v2.5 task (v2.4 + cliff stop + turn pass redefined, GAST_NARROW_V25_DESIGN.md);
+# v24: the v2.4 task; v23: the v2.3 task. The Top-5 criteria file follows the recipe.
+case ${LINEAGE_RECIPE:-v25} in
+  v25) export NARROW_TRAIN_PY=scripts/gast_narrow/train_narrow_v25.py NARROW_TASK=Gd-GastNarrowV25-Rbq10-Dreamwaq-v0 \
+              GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b_v25.json ;;
+  v24) export NARROW_TRAIN_PY=scripts/gast_narrow/train_narrow_v24.py NARROW_TASK=Gd-GastNarrowV24-Rbq10-Dreamwaq-v0 ;;
+esac
 export NARROW_SOURCE=${NARROW_SOURCE:-$STAGE_A} NARROW_SOURCE_SHA256=${NARROW_SOURCE_SHA256:-$STAGE_A_SHA256}
 export NARROW_ANCHOR_CKPT=$STAGE_A
+# The stand anchor's frozen target must stay the stage A model also on resubmits (NARROW_SOURCE then points at this
+# run's own checkpoint; a live-policy target diverged on onvlm2, v2.4 design 13.1).
+export NARROW_STAND_ANCHOR_CKPT=$STAGE_A
 export GAST_RUN_ID=lineage16_b_${SLURM_NNODES}n_${per}x4_${NARROW_UPDATES}_$(date +%Y%m%d)_${SLURM_JOB_ID}
 export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
 export NARROW_TORCHRUN_ARGS=${NARROW_TORCHRUN_ARGS:-"--log_dir $G/logs/ranklogs_${SLURM_JOB_ID} --redirects 3"}
@@ -56,7 +62,7 @@ if [[ -n $ck && ${NO_RESUBMIT:-0} != 1 ]]; then
   if (( left > 20 )); then
     echo "resubmit: $ck done=$done_n left=$left"
     (cd $G/jobs && STAGE_A=$STAGE_A STAGE_A_SHA256=$STAGE_A_SHA256 NARROW_SOURCE=$ck \
-       NARROW_SOURCE_SHA256=$(sha256sum "$ck" | cut -d" " -f1) NARROW_UPDATES=$left LINEAGE_RECIPE=${LINEAGE_RECIPE:-v24} \
+       NARROW_SOURCE_SHA256=$(sha256sum "$ck" | cut -d" " -f1) NARROW_UPDATES=$left LINEAGE_RECIPE=${LINEAGE_RECIPE:-v25} \
        PER_GPU=$per sbatch --parsable -N $SLURM_NNODES lineage16_b.sbatch)
   fi
 fi
