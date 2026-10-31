@@ -60,10 +60,14 @@ DEG_KEYS, SEC_KEYS = ("nose", "nose_p90", "turned"), ("nose_t15", "time")
 def fmt(key, v):
     if v is None:
         return "-"
-    if key in ("track", "clearance", "drift", "drift_p95"):
+    if key in ("track", "clearance", "drift", "drift_p95", "e_min"):
         return f"{v:.3f}"
     if key in DEG_KEYS:
         return f"{v:.1f}°"
+    if key == "leg_force_p90":
+        return f"{v:.0f} N"
+    if key == "leg_impulse":
+        return f"{v:.1f}"
     if key in SEC_KEYS:
         return f"{v:.2f} s"
     return pct(v)
@@ -74,13 +78,20 @@ def turn_metrics(cell, rows):
     n = len(rows)
     fall = sum(r["base_contact"] for r in rows) / n
     drifts = sorted(r["drift_max"] for r in rows)
+    forces = sorted(r["leg_force_max"] for r in rows if "leg_force_max" in r)
     out = dict(n=n, turnable=cell["turnable"], fall=fall, drift=mean(drifts),
                drift_p95=drifts[min(n - 1, int(0.95 * n))],
-               drift_fail=sum(r["drift_done"] and not r["reached"] for r in rows) / n,  # left the 0.20 m circle
-               touch_free=sum(r["touch_time"] < 0.1 for r in rows) / n)
+               drift_fail=sum(r["drift_done"] and not r["reached"] for r in rows) / n,  # left the drift circle
+               touch_free=sum(r["touch_time"] < 0.1 for r in rows) / n,
+               leg_force_p90=forces[min(len(forces) - 1, int(0.9 * len(forces)))] if forces else None,
+               leg_impulse=mean([r["leg_impulse"] for r in rows if "leg_impulse" in r]) if any("leg_impulse" in r for r in rows) else None)
     if cell["turnable"]:
         ok = [r for r in rows if r["narrow_passed"] and not r["base_contact"]]
-        out.update(success=len(ok) / n, dirty=sum(r["reached"] and not r["narrow_passed"] for r in rows) / n,
+        # v2.5 pass = reached, drift <= 0.30, leg peak < 150 N; clean = pass + drift <= 0.10 + no touch (v2.4 files:
+        # the pass itself was the clean turn, "dirty" = reached with drift > 0.10).
+        clean = [r for r in ok if r.get("turn_clean", r["drift_max"] <= 0.10 and r["touch_time"] < 0.1)]
+        out.update(success=len(ok) / n, clean=len(clean) / n,
+                   dirty=sum(r["reached"] and not r["narrow_passed"] for r in rows) / n,
                    stall=sum(r["timeout"] and not r["reached"] for r in rows) / n,
                    time=mean([r["reach_t"] for r in ok if r["reach_t"] >= 0]))
     else:
@@ -108,6 +119,13 @@ def cell_metrics(cell, rows):
                     pitch=mean([r["pitch_max_deg"] for r in rows]))
     if s == "turn":
         return turn_metrics(cell, rows)
+    if s == "cliff":  # v25: hold inside the zone, a point over the edge (breach), a fall off the deck
+        fell = sum(r.get("cliff_fell", False) or r["base_contact"] for r in rows) / n
+        return dict(n=n, hold=sum(r["narrow_held"] and not r["narrow_breached"] and not r.get("cliff_fell", False)
+                                  and not r["base_contact"] for r in rows) / n,
+                    breach=sum(r["narrow_breached"] for r in rows) / n, fall=fell,
+                    e_min=mean([r["e_min"] for r in rows if "e_min" in r]) if rows else None,
+                    **nose_metrics(rows))
     passable = [r for r in rows if not r["blocked"]]
     blocked = [r for r in rows if r["blocked"]]
     clear = sorted(r["min_clearance"] for r in passable)
@@ -124,6 +142,7 @@ def load_trials(out: Path):
     res = defaultdict(dict)  # res[condition][model] = {cell key: (cell, metrics)}
     for f in sorted(out.glob("trials/*__*/result.json")):
         model, cond = f.parent.name.split("__", 1)
+        cond = cond.split("__only-")[0]  # partial-suite trial directories (run_e2 --only) merge into the condition
         r = json.loads(f.read_text())
         by = defaultdict(list)
         for row in r["rows"]:
@@ -131,7 +150,7 @@ def load_trials(out: Path):
             if row["duration"] <= INVALID_START_S:
                 continue
             by[row["cell"]].append(row)
-        res[cond][model] = {c["key"]: (c, cell_metrics(c, by[c["index"]])) for c in r["cells"]}
+        res[cond].setdefault(model, {}).update({c["key"]: (c, cell_metrics(c, by[c["index"]])) for c in r["cells"]})
     return res
 
 
@@ -222,8 +241,10 @@ def main():
         lines.append(f"## 조건 {cond} (라이다 {c['lidar']}{rear}, 탑재물 {c.get('payload_kg')} kg, 밀기 {c.get('push')}, "
                      f"계단 외란 {c.get('stair_disturbance')})")
         lines.append("")
-        table("제자리 회전: 회전 가능", cond, "turn", [("성공", "success", False), ("도달·이동 초과", "dirty", False),
-                                              ("이동 > 0.2 m 종료", "drift_fail", False), ("미달(stall)", "stall", False),
+        table("제자리 회전: 회전 가능", cond, "turn", [("성공", "success", False), ("깨끗한 회전(≤ 0.10 m, 무접촉)", "clean", False),
+                                              ("도달·판정 밖", "dirty", False), ("다리 최대력 p90", "leg_force_p90", False),
+                                              ("다리 충격량 평균 N·s", "leg_impulse", False),
+                                              ("이동 한계 종료", "drift_fail", False), ("미달(stall)", "stall", False),
                                               ("넘어짐", "fall", False), ("몸 중심 최대 이동 m", "drift", False),
                                               ("이동 p95 m", "drift_p95", False), ("소요 시간", "time", False),
                                               ("무접촉", "touch_free", False)], pick=lambda c: c["turnable"])
@@ -241,6 +262,9 @@ def main():
                                          ("벽 거리 중앙값 m", "clearance", False), ("서기", "hold", False),
                                          ("침범", "breach", False)])
         table("막힌 통로", cond, "dead_end", [("서기", "hold", False), ("침범", "breach", False)])
+        table("낭떠러지 (멈춰야 함)", cond, "cliff", [("서기", "hold", False), ("끝선 침범", "breach", False), ("추락", "fall", False),
+                                              ("끝선 최소 여유 m", "e_min", False), ("머리 들림 최대 평균", "nose", False),
+                                              ("15° 초과 시간", "nose_t15", False)])
     e1 = e1_summary(out)
     if e1:
         lines += ["## E1 (LiDAR 지도 0, m 접어 넣음)", "", "| 지형 | arm | " + " | ".join(models) + " |",

@@ -20,6 +20,12 @@ def narrow_passage_terrain(difficulty: float, cfg: "NarrowPassageTerrainCfg"):
     geo = tile_geometry(difficulty, cfg)
     cx, cy = cfg.size[0] / 2.0, cfg.size[1] / 2.0
     meshes = [make_plane(cfg.size, 0.0, center_zero=False)]
+    if geo["kind"] == "cliff":  # v2.5: raised deck, the env origin on its top (the generator keeps origin z)
+        half, h = geo["width"], geo["deck_h"]
+        transform = np.eye(4)
+        transform[:3, 3] = (cx, cy, h / 2)
+        meshes.append(trimesh.creation.box((2 * half, 2 * half, h), transform))
+        return meshes, np.array((cx, cy, h))
     heights = geo.get("heights") or [geometry.WALL_H] * len(geo["rects"])  # v2.4 turn pockets: low bench fronts
     for (x0, x1, y0, y1), h in zip(geo["rects"], heights):
         transform = np.eye(4)

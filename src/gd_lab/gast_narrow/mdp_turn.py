@@ -18,7 +18,7 @@ import math
 import torch
 from isaaclab.managers import ManagerTermBase, SceneEntityCfg
 
-from gd_lab.gast_narrow import anchor, geometry, mdp_v2
+from gd_lab.gast_narrow import anchor, geometry, mdp_cliff, mdp_v2
 from gd_lab.gast_narrow.state import _wrap, narrow_state, rect_distance
 
 TURN = geometry.KINDS["turn"]
@@ -29,7 +29,16 @@ RIGHT_P = 0.7               # right turn (wz < 0); deployment sends right only (
 ANGLE_DEG = (45.0, 180.0)
 DONE_TOL_DEG = 5.0
 PAUSE_P, PAUSE_S = 0.2, (1.0, 2.0)
-DRIFT_FREE, DRIFT_OK, DRIFT_FAIL = 0.05, 0.10, 0.20
+DRIFT_FREE, DRIFT_OK, DRIFT_FAIL = 0.05, 0.10, 0.30
+DRIFT_NORM = 0.20           # critic slot 8 scale (kept at the v2.4 value the 602 / 653 critic was trained on)
+# v2.5: a turn passes when the target angle is reached without falling, trunk contact (termination) or a hard leg
+# contact; drift <= DRIFT_OK and no wall touch make it a *clean* turn (reported, not required). v2.4 required
+# drift <= 0.10 for the pass and ended the episode on a larger drift, which made stalling the cheaper policy
+# (E2 v24h: success 5-22 %, stalls 13-23 %, the base gait drifts 0.15-0.19 m in a 180 deg turn).
+# Leg contact is judged by impulse (sum of |force| x dt over thigh / calf bodies, N s), not peak force: PhysX wall hits
+# spike to 1-7 kN for a step even when the touch lasts < 0.1 s (local pilot 10-31), so a peak cap means "no contact".
+PASS_DRIFT, LEG_IMPULSE_MAX = 0.30, 30.0
+LEG_BODIES = ".*_thigh|.*_calf"
 BREACH_DEG, STILL_WZ = 15.0, 0.15
 STILL_TAU = mdp_v2.STILL_TAU  # s, low-pass on wz / planar speed for the still test (see TurnEpisode)
 # v2.4e: a share of the turn-tile margin draws lands within NEAR_SLACK of the turnable boundary (either side). E2 of
@@ -37,6 +46,9 @@ STILL_TAU = mdp_v2.STILL_TAU  # s, low-pass on wz / planar speed for the still t
 # cells with |slack| <= 0.09 (subway, edge_turn, edge_stop); the uniform margin draw rarely produced them.
 NEAR_P, NEAR_SLACK = 0.4, 0.10
 STAND_PITCH_DEG = 10.0      # v2.4e: nose-up above this while the robot must stand costs (E2: dead-end rocking 18-27 deg)
+# v2.5 narrow_nose_up thresholds: standing (should_stand, slow) 10 deg; walking / turning 20 deg (602 itself peaks at
+# 23-28 deg for 1-2 s in forward passages, so a lower walking threshold would tax the normal gait).
+NOSE_STAND_DEG, NOSE_WALK_DEG, NOSE_SLOW = 10.0, 20.0, 0.3
 SPAWN_JITTER, SPAWN_YAW_NOISE_DEG = 0.03, 15.0
 # Spawn footprint (trunk + legs in stance, half sizes) for choosing an axis-aligned start yaw that fits the pocket.
 FOOTPRINT = [(x, y) for x in (-0.45, 0.0, 0.45) for y in (-0.25, 0.25)]
@@ -68,6 +80,12 @@ class TurnEpisode:
         self.wz_f = torch.zeros(n, device=d)
         self.v_f = torch.zeros(n, 2, device=d)
         self.diag = torch.zeros(n, 5, device=d)  # steps: candidate, wz ok, speed ok, drift ok, all three
+        # v2.5: peak leg contact force (thigh / calf, N) and the clean-turn tag
+        sensor = env.scene["contact_forces"]
+        self.leg_ids = torch.tensor(sensor.find_bodies(LEG_BODIES)[0], device=d, dtype=torch.long)
+        self.peak_force = torch.zeros(n, device=d)
+        self.leg_impulse = torch.zeros(n, device=d)
+        self.clean = torch.zeros(n, dtype=torch.bool, device=d)
 
 
 def turn_episode(env) -> TurnEpisode:
@@ -164,6 +182,9 @@ def reset_turn(env, env_ids):
     turn.diag[ids] = 0.0
     turn.wz_f[ids] = 0.0
     turn.v_f[ids] = 0.0
+    turn.peak_force[ids] = 0.0
+    turn.leg_impulse[ids] = 0.0
+    turn.clean[ids] = False
 
 
 class NarrowV24VelocityCommand:
@@ -224,7 +245,11 @@ def update_turn(env, monitor):
     progress = turn.turned * turn.direction
     reached = mask & turn.turnable & ~turn.reached & (progress >= turn.target - math.radians(DONE_TOL_DEG))
     turn.reached |= reached
-    new_pass = reached & (turn.drift_max <= DRIFT_OK) & ~monitor.passed
+    leg = env.scene["contact_forces"].data.net_forces_w[:, turn.leg_ids].norm(dim=-1)  # [N, legs] this step
+    turn.peak_force = torch.where(mask, torch.maximum(turn.peak_force, leg.amax(-1)), turn.peak_force)
+    turn.leg_impulse = torch.where(mask, turn.leg_impulse + leg.sum(-1) * dt, turn.leg_impulse)
+    new_pass = reached & (turn.drift_max <= PASS_DRIFT) & (turn.leg_impulse < LEG_IMPULSE_MAX) & ~monitor.passed
+    turn.clean |= new_pass & (turn.drift_max <= DRIFT_OK) & (monitor.touch_time < 0.1)
     monitor.passed |= new_pass
     monitor.pass_event |= new_pass
     robot = env.scene["robot"].data
@@ -332,9 +357,8 @@ class TurnStall(ManagerTermBase):
 
 
 def turn_drift_done(env):
-    turn = turn_episode(env)
-    drifted_turn = turn.reached & (turn.drift_max > DRIFT_OK) & ~mdp_v2._monitor(env).passed
-    return _turn_mask(env) & ((turn.drift > DRIFT_FAIL) | drifted_turn)
+    """Centre drift beyond DRIFT_FAIL ends the episode (v2.5: the v2.4 'reached with drift > 0.10' failure is gone)."""
+    return _turn_mask(env) & (turn_episode(env).drift > DRIFT_FAIL)
 
 
 def track_ang_vel_z_turn_gated(env, command_name: str, std_base: float = 0.3, alpha: float = 0.3,
@@ -345,6 +369,13 @@ def track_ang_vel_z_turn_gated(env, command_name: str, std_base: float = 0.3, al
                                           vel_frac_high, asset_cfg)
     blocked = _turn_mask(env) & ~turn_episode(env).turnable
     return reward * (~blocked).float()
+
+
+def narrow_wall_proximity_capped(env, cap: float = 2.0):
+    """v2's margin-intrusion sum, capped on turn tiles (v2.5): with ~22 points it reaches several /s in the
+    near-boundary pockets and was the last counter-pressure against completing the turn."""
+    base = mdp_v2.narrow_wall_proximity_v2(env)
+    return torch.where(_turn_mask(env), base.clamp_max(cap), base)
 
 
 def narrow_centering_no_turn(env, sigma: float = 0.10):
@@ -366,7 +397,7 @@ def narrow_privileged_v24(env):
     remaining = ((turn.target - progress).clamp_min(0.0) * turn.direction / math.pi).clamp(-1.0, 1.0)
     remaining = torch.where(turn.turnable & ~turn.reached, remaining, torch.zeros_like(remaining))
     fraction = (progress / turn.target.clamp_min(1e-3)).clamp(0.0, 1.0)
-    turn_cols = torch.stack((remaining, fraction, (~turn.turnable).float(), (turn.drift / DRIFT_FAIL).clamp(0.0, 1.0)), -1)
+    turn_cols = torch.stack((remaining, fraction, (~turn.turnable).float(), (turn.drift / DRIFT_NORM).clamp(0.0, 1.0)), -1)
     out = priv.clone()
     out[:, [2, 4, 7, 8]] = torch.where(mask[:, None], turn_cols, priv[:, [2, 4, 7, 8]])
     return out
@@ -400,10 +431,24 @@ def stand_pitch(env, limit_deg: float = STAND_PITCH_DEG):
 
 def should_stand(env):
     """Where the command keeps asking to move but the policy must stand: turn tiles where the turn is not possible,
-    and v2 blocked zones before the line (not yet breached)."""
+    v2 blocked zones before the line (not yet breached) and, v2.5, the cliff zone."""
     _, _, _, zone, breach = mdp_v2.zone_state(env)
     turn = turn_episode(env)
-    return (_turn_mask(env) & ~turn.turnable) | (zone & ~breach)
+    return (_turn_mask(env) & ~turn.turnable) | (zone & ~breach) | mdp_cliff.cliff_zone(env)
+
+
+def narrow_nose_up(env, stand_deg: float = NOSE_STAND_DEG, walk_deg: float = NOSE_WALK_DEG, slow: float = NOSE_SLOW):
+    """Per second on narrow-space tiles: nose-up pitch (rad) above a threshold -- stand_deg where the robot must stand
+    and is slow (planar speed < slow), walk_deg elsewhere. v2.5 (user: the lifted front must be corrected too): v24
+    stood in dead ends with the front 18-27 deg up and rocked; 602 holds 13.6 deg there and peaks 23-28 deg for 1-2 s
+    walking passages, hence the two thresholds. Gap tiles keep gap_nose_up (5 deg)."""
+    robot = env.scene["robot"].data
+    g = robot.projected_gravity_b
+    nose = torch.asin((-g[:, 0]).clamp(-1.0, 1.0))
+    speed = robot.root_lin_vel_b[:, :2].norm(dim=-1)
+    standing = should_stand(env) & (speed < slow)
+    limit = torch.where(standing, torch.full_like(nose, math.radians(stand_deg)), torch.full_like(nose, math.radians(walk_deg)))
+    return (nose - limit).clamp_min(0.0) * narrow_state(env).narrow.float()
 
 
 def feet_cadence_overrun_stand_gated(env, command_name, sensor_cfg, target_air_time: float = 0.4,

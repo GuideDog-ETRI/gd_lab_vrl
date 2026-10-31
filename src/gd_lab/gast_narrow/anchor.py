@@ -200,7 +200,12 @@ class NarrowAnchorPPO(GastPPO):
         stand = obs_all[TURN_BLOCK_GROUP][..., 0] > 0.5 if stand_on else None
         # v2.4e: + the samples where the robot must stand under a moving command (v2 blocked zones before the line):
         # the flag-only anchor left the dead-end stance unprotected (E2 v24h: dead_end L7 hold 100 -> 44-78 %).
-        if stand_on and getattr(self, "_stand_buf", None) is not None:
+        # v2.4f: OFF by default (NARROW_STAND_ANCHOR_ZONE=1 turns it on). In run v24i (from 653) it halved the
+        # online narrow passage rate within 50 updates (0.95 -> 0.23-0.37) and did not raise the dead-end hold
+        # (0.20-0.42): blocked and passable tight corridors differ only by the margin input, so a supervised "stand"
+        # pull on the blocked zone spread to the passable ones while PPO kept pushing forward (the robot dithered).
+        if stand_on and os.environ.get("NARROW_STAND_ANCHOR_ZONE", "0") == "1" \
+                and getattr(self, "_stand_buf", None) is not None:
             stand = stand | self._stand_buf.flatten(0, 1)
         n = retention.shape[0]
         mini = n // self.num_mini_batches

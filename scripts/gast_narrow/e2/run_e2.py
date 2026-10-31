@@ -72,6 +72,12 @@ def build_cells(cfg: dict, suites: list[str]) -> list[dict]:
                 cells.append(dict(suite="turn", family=f, case=case["name"], radius=case["radius"],
                                   margin=case["margin"], direction=d, angle_deg=g.get("angle_deg", 180.0), rate=rate,
                                   envs=g["envs"], key=f"turn/{f}/{case['name']}/{d}{rtag}"))
+    if "cliff" in suites:  # v25 only: uncrossable drop, stop before the edge (GAST_NARROW_V25_DESIGN.md section 7)
+        g = s["cliff"]
+        for f, lv, d in itertools.product(g["families"], g["levels"], g.get("directions", ["front", "back", "left", "right"])):
+            speed = g["speed_fb"] if d in ("front", "back") else g["speed_lr"]
+            cells.append(dict(suite="cliff", family=f, case=f"L{lv}/{d}", level=lv, direction=d, speed=speed,
+                              envs=g["envs"], key=f"cliff/{f}/L{lv}/{d}"))
     if "dead_end" in suites:
         g = s["dead_end"]
         for f, lv in itertools.product(g["families"], g["levels"]):
@@ -141,7 +147,7 @@ def run_pool(jobs: list[dict], gpus: list[int], per_gpu: int, label: str) -> lis
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("config")
-    ap.add_argument("--only", default="", help="comma list of suites (gap,stairs,terrain,narrow,dead_end,turn,e1)")
+    ap.add_argument("--only", default="", help="comma list of suites (gap,stairs,terrain,narrow,dead_end,turn,cliff,e1)")
     ap.add_argument("--models", default="")
     ap.add_argument("--conditions", default="")
     ap.add_argument("--out", default="")
@@ -175,11 +181,15 @@ def main():
                     seconds=cfg["seconds"], cells=cells)
         (out / "plans").mkdir(exist_ok=True)
         (out / "plans" / f"{cname}.json").write_text(json.dumps(plan, indent=1))
+        # A trial directory is keyed by the suites it ran: re-running with another --only must not be skipped as
+        # "done" (10-31: the nominal retention suites were silently skipped after a turn,narrow run).
+        full = list(cond["suites"]) == suites
+        tag = "" if full else "__only-" + "+".join(suites)
         for m in models:
-            trials.append((m, cname, sum(c["envs"] for c in cells)))
+            trials.append((m, cname, sum(c["envs"] for c in cells), tag))
     print(f"[E2] out={out} models={list(models)} conditions={list(conds)} suites={suites_on} e1={e1_on}")
-    for m, c, n in trials:
-        print(f"  trial {m} x {c}: {n} envs")
+    for m, c, n, tag in trials:
+        print(f"  trial {m} x {c}{tag}: {n} envs")
     if a.dry_run:
         return
     if not a.summary_only:
@@ -193,16 +203,16 @@ def main():
                 subprocess.run(cmd + [str(HERE / "convert_models.py"), "--to", "v2", str(src), str(dst)], env=env,
                                check=True)
         # E2 trials
-        def make_trial(model, cname):
+        def make_trial(model, cname, tag=""):
             def make(gpu, slot):
                 tmp = out / "usd_tmp" / f"g{gpu}s{slot}"
                 tmp.mkdir(parents=True, exist_ok=True)
                 cmd, env = container(cfg, gpu, binds=[f"{tmp}:/tmp/IsaacLab"])
                 return (cmd + [str(HERE / "e2_trial.py"), "--headless", "--plan", str(out / "plans" / f"{cname}.json"),
-                               "--model", str(mdir / f"{model}_v2.pt"), "--out", str(out / "trials" / f"{model}__{cname}")],
+                               "--model", str(mdir / f"{model}_v2.pt"), "--out", str(out / "trials" / f"{model}__{cname}{tag}")],
                         env, str(ROOT))
-            return dict(name=f"{model}__{cname}", out=out / "trials" / f"{model}__{cname}", make=make)
-        jobs = [make_trial(m, c) for m, c, _ in trials]
+            return dict(name=f"{model}__{cname}{tag}", out=out / "trials" / f"{model}__{cname}{tag}", make=make)
+        jobs = [make_trial(m, c, tag) for m, c, _, tag in trials]
         if jobs:
             run_pool(jobs, gpus, int(cfg["hardware"]["e2_slots_per_gpu"]), "E2")
         if e1_on:

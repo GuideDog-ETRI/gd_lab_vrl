@@ -55,26 +55,33 @@ cond = plan["condition"]
 cells = plan["cells"]
 SEED = int(plan["seed"])
 SECONDS = float(plan["seconds"])
-TASK_KIND = plan.get("task", "v2")  # v2: the GAST-Narrow v2 env (44 columns); v24: v2.4 (58 columns, turn tiles)
+TASK_KIND = plan.get("task", "v2")  # v2: GAST-Narrow v2 (44 columns); v24: v2.4 (62, turn tiles); v25: v2.5 (65, + cliff)
 TASKS = {"v2": ("GastNarrowV2", "gd_lab.gast_narrow.tasks_v2:GastNarrowV2TeacherCfg",
                 "gd_lab.gast_narrow.model:GastNarrowV2RunnerCfg"),
          "v24": ("GastNarrowV24", "gd_lab.gast_narrow.tasks_v24:GastNarrowV24TeacherCfg",
-                 "gd_lab.gast_narrow.tasks_v24:GastNarrowV24RunnerCfg")}
+                 "gd_lab.gast_narrow.tasks_v24:GastNarrowV24RunnerCfg"),
+         "v25": ("GastNarrowV25", "gd_lab.gast_narrow.tasks_v25:GastNarrowV25TeacherCfg",
+                 "gd_lab.gast_narrow.tasks_v25:GastNarrowV25RunnerCfg")}
 task_name, env_entry, agent_entry = TASKS[TASK_KIND]
 TASK = registry.register_task(task=task_name, robot="Rbq10", method="Dreamwaq", env_cfg=env_entry, agent_cfg=agent_entry)
 from gd_lab.gast_narrow import geometry, mdp_v2  # noqa: E402
 from gd_lab.gast_narrow.state import narrow_state  # noqa: E402
 from gd_lab.mdp.terrain_families import family_column_masks  # noqa: E402
 
-V24 = TASK_KIND == "v24"
+V24 = TASK_KIND in ("v24", "v25")  # turn / backward machinery (v2.4 and later)
+V25 = TASK_KIND == "v25"
 if V24:
     from gd_lab.gast_narrow import mdp_turn  # noqa: E402
+if V25:
+    from gd_lab.gast_narrow import mdp_cliff  # noqa: E402
 STAIR_OUT_R, STAIR_IN_R = float(plan.get("stair_outer_r", 3.6)), float(plan.get("stair_inner_r", 1.0))
 GAP_LEAVE_R = float(plan.get("gap_leave_r", 3.8))  # Chebyshev radius at which a gap env leaves its 8 m tile
 LIDAR_ON = {"both": (True, True), "ouster": (True, False), "mid360": (False, True), "off": (False, False)}
 LIDAR_ON[False] = LIDAR_ON["off"]  # YAML 1.1 reads a bare `off` as false
 UP_OUTWARD = ("_inv",)  # *_inv tiles: the pit is in the centre, walking outward climbs; the others descend outward
 MODE_TURN = 3
+MODE_CLIFF = 4
+CLIFF_DIRS = {"front": 0, "back": 1, "left": 2, "right": 3}
 
 
 def stair_motion_outward(family, direction):
@@ -171,6 +178,12 @@ def e2_spawn(env, env_ids):
         episode.slack[pinned] = torch.where(state.narrow[pinned], width - threshold, torch.zeros_like(m))
     if V24:
         e2_spawn_v24(env, ids)
+    if V25:
+        cids = ids[spec.mode[ids] == MODE_CLIFF]
+        if len(cids):  # after reset_cliff: the cell's direction and speed replace its draw
+            cliff = mdp_cliff.cliff_episode(env)
+            cliff.direction[cids] = spec.cliff_dir[cids]
+            cliff.speed[cids] = spec.speed[cids]
 
 
 def e2_spawn_v24(env, ids):
@@ -230,6 +243,7 @@ spec.back = torch.zeros(n, dtype=torch.bool, device=device)        # v24 narrow 
 spec.turn_dir = torch.ones(n, device=device)                        # v24 turn cells: +1 left, -1 right
 spec.turn_angle = torch.zeros(n, device=device)                     # rad
 spec.turn_rate = torch.zeros(n, device=device)                      # rad/s
+spec.cliff_dir = torch.zeros(n, dtype=torch.long, device=device)   # v25 cliff cells: 0 front 1 back 2 left 3 right
 lidar_term = raw.observation_manager._group_obs_class_term_cfgs["narrow_lidar"][0].func
 N_SENSORS = lidar_term.sensor_on.shape[1]  # 2 (Ouster, Mid-360) on v2; 3 (+ rear Mid-360) on v24
 
@@ -304,6 +318,10 @@ for index, cell in enumerate(cells):
         spec.turn_rate[ids] = float(cell["rate"])
     elif cell["suite"] in ("narrow", "dead_end"):
         spec.back[ids] = cell.get("direction", "forward") == "backward"
+    elif cell["suite"] == "cliff":
+        spec.mode[ids] = MODE_CLIFF
+        spec.cliff_dir[ids] = CLIFF_DIRS[cell["direction"]]
+        spec.speed[ids] = float(cell["speed"])
     if "margin" in cell:
         spec.margin[ids] = float(cell["margin"])
     if "lidar" in cell:
@@ -311,6 +329,7 @@ for index, cell in enumerate(cells):
     cell_info.append(info)
 assert start == n
 assert V24 or not bool(((spec.mode == MODE_TURN) | spec.back).any()), "turn / backward cells need task: v24"
+assert V25 or not bool((spec.mode == MODE_CLIFF).any()), "cliff cells need task: v25"
 
 terrain.terrain_levels[:] = levels
 terrain.terrain_types[:] = types_
@@ -450,6 +469,12 @@ def record_and_reset(self, env_ids):
                 ("drift_max", turn.drift_max), ("reached", turn.reached), ("reach_t", reach_t),
                 ("target_deg", torch.rad2deg(turn.target)), ("direction", turn.direction), ("drift_done", drift_done),
                 ("backward", mdp_turn.narrow_back(self)))})
+        if V25:  # v2.5: clean-turn tag, leg contact peak (N), cliff tracker
+            cliff = mdp_cliff.cliff_episode(self)
+            extra.update({k: L(v) for k, v in (("turn_clean", turn.clean), ("leg_force_max", turn.peak_force),
+                                               ("leg_impulse", turn.leg_impulse),
+                                               ("cliff_fell", cliff.fell), ("e_min", cliff.e_min),
+                                               ("cliff_dir", cliff.direction))})
         cells_ = L(cell_of)
         for j, env_id in enumerate(ids.tolist()):
             row = {"env": env_id, "cell": cells_[j], "base_contact": bool(base[j]), "timeout": bool(timeout[j]),
@@ -497,7 +522,7 @@ for step in range(max_steps):
     c = cmd.vel_command_b
     v = robot.data.root_lin_vel_b
     w = robot.data.root_ang_vel_b[:, 2]
-    moving = live & (c[:, :2].norm(dim=-1) > 0.1) & (spec.mode > 0) & (spec.mode != MODE_TURN) & ~passed_r
+    moving = live & (c[:, :2].norm(dim=-1) > 0.1) & (spec.mode > 0) & (spec.mode != MODE_TURN) & (spec.mode != MODE_CLIFF) & ~passed_r
     if V24:  # turn cells: tracking error of the turn command until the target angle is reached
         turn = mdp_turn.turn_episode(raw)
         moving |= live & (spec.mode == MODE_TURN) & (c[:, 2].abs() > 0.1) & ~turn.reached

@@ -9,6 +9,9 @@ Kinds (width w from the curriculum difficulty, W_MAX at level 0 -> W_MIN at the 
              shifted laterally by ``sign`` * DOOR_SHIFT (gate -> gate offset as at ticket gates / train doors).
 - bend     : corridor along +x into a 90 deg corner at x = 1.0, leaving along ``sign`` * y.
 - dead_end : (v2) the corridor closed by a cross wall at x = dead_end_x(difficulty); never passable.
+- cliff    : (v2.5) a square deck of half-size ``width`` (2.2 -> 1.6 m) raised CLIFF_H above the tile floor, a drop
+             on all four sides with no far side within reach (deck edge -> neighbour tile >= 1.8 m). No walls; the
+             robot spawns on the deck and must stop before the edge (mdp_cliff). Kind "cliff", block_s 0.
 - turn_*   : (v2.4) an in-place turn pocket around the tile centre; ``width`` is the free radius r (centre -> the
              nearest obstacle). aisle: two bench fronts (0.45 m high) at |y| = r, open ends; vestibule: back wall at
              y = -r, side walls at |x| = r + 0.15, a pole at distance r on the open side (``sign`` = its side);
@@ -25,7 +28,8 @@ W_MAX, W_MIN = 1.20, 0.60
 WALL_T, WALL_H = 0.10, 1.00
 DOOR_SHIFT = 0.25
 SPAWN_X = -2.2
-KINDS = {"corridor": 1, "door": 2, "bend": 3, "dead_end": 4, "turn": 5}
+KINDS = {"corridor": 1, "door": 2, "bend": 3, "dead_end": 4, "turn": 5, "cliff": 6}
+CLIFF_H = 1.0               # v2.5: deck height of the cliff tile (subway platform edge ~1.1 m)
 TURN_SHAPES = ("turn_aisle", "turn_vestibule", "turn_room")
 BENCH_H, POLE_W, ROOM_ASPECT, VESTIBULE_SIDE = 0.45, 0.04, 1.3, 0.15
 PATH_START = -3.5
@@ -73,6 +77,9 @@ def build(kind: str, width: float, sign: int, end_x: float = 0.0) -> dict:
     """{'rects': [(x0, x1, y0, y1)], 'path': [(x, y)], 'exit': (axis, direction, value)}."""
     if kind in TURN_SHAPES:
         return build_turn(kind, width, sign)
+    if kind == "cliff":
+        return {"kind": "cliff", "width": float(width), "sign": int(sign), "rects": [], "heights": [],
+                "path": [(-0.5, 0.0), (0.5, 0.0)], "exit": (0, 1.0, FAR), "block_s": 0.0, "deck_h": CLIFF_H}
     w, t = float(width), WALL_T
     h = w / 2
     if kind == "corridor":
