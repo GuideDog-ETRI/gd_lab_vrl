@@ -155,8 +155,10 @@ def score_episodes(episodes):
     components = dict(result["components"])
     components["C"] = 0.0 if c is None else c
     result["components"] = components
-    result["score"] = sum(WEIGHTS[k] * components[k] for k in WEIGHTS)
-    result["score_definition"] = WEIGHTS
+    # Without cliff tiles (NARROW_CLIFF_COLUMNS=0) C has no samples: score over the other weights, rescaled to 1.
+    weights = WEIGHTS if cliff else {k: v / (1.0 - WEIGHTS["C"]) for k, v in WEIGHTS.items() if k != "C"}
+    result["score"] = sum(weights[k] * components[k] for k in weights)
+    result["score_definition"] = weights
     turn = [row for row in episodes if row["family"].startswith(v24.TURN_PREFIX)]
     turnable = [row for row in turn if row.get("turnable")]
     forces = sorted(row["turn_leg_force"] for row in turnable)

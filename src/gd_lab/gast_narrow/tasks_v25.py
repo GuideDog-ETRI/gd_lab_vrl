@@ -16,6 +16,8 @@ Changes over v2.4 (tasks_v24):
 """
 from __future__ import annotations
 
+import os
+
 import torch
 from isaaclab.managers import EventTermCfg, ObservationTermCfg, RewardTermCfg, TerminationTermCfg
 from isaaclab.utils import configclass
@@ -28,7 +30,11 @@ from gd_lab.gast_narrow.tasks_v24 import GastNarrowV24RunnerCfg, GastNarrowV24Te
 from gd_lab.gast_narrow.terrain import NarrowPassageTerrainCfg
 
 CLIFF_FAMILY = ("narrow_cliff", "cliff", 1, 3.0, 2.2, 1.6)  # name, kind, sign, columns, L at level 0, L at level 14
-NUM_COLS = 65
+# NARROW_CLIFF_COLUMNS=0 (10-31, user: "basic functions first"): the v2.5 recipe without the cliff tiles (62 columns,
+# as v2.4). Run v25b never stood once at a cliff in 110 updates (exploration problem, like the turn stop before the
+# flag) while passage / dead-end skills fell; the cliff stop moves to v2.6.
+CLIFF_COLUMNS = float(os.environ.get("NARROW_CLIFF_COLUMNS", CLIFF_FAMILY[3]))
+NUM_COLS = 62 + int(CLIFF_COLUMNS)
 CLIFF_STAND_WEIGHT, NOSE_UP_WEIGHT = 1.0, -3.0
 # v2.5a: leg touch back to -1.0 and the wall-proximity cap 2 -> 4 /s: with -0.5 / 2 the first 50 updates of v25a
 # traded clean turns for contact (turn_clean 0.60 -> 0.26, leg impulse p90 6 -> 130-350 N s).
@@ -109,9 +115,10 @@ class GastNarrowV25TeacherCfg(GastNarrowV24TeacherCfg):
         super().__post_init__()
         gen = self.scene.terrain.terrain_generator
         size = next(iter(gen.sub_terrains.values())).size
-        name, kind, sign, columns, l_max, l_min = CLIFF_FAMILY
-        gen.sub_terrains[name] = NarrowPassageTerrainCfg(proportion=columns, size=size, kind=kind, sign=sign,
-                                                         w_max=l_max, w_min=l_min)
+        name, kind, sign, _, l_max, l_min = CLIFF_FAMILY
+        if CLIFF_COLUMNS > 0:
+            gen.sub_terrains[name] = NarrowPassageTerrainCfg(proportion=CLIFF_COLUMNS, size=size, kind=kind, sign=sign,
+                                                             w_max=l_max, w_min=l_min)
         gen.num_cols = int(sum(sub.proportion for sub in gen.sub_terrains.values()))
         assert gen.num_cols == NUM_COLS, gen.num_cols
 
