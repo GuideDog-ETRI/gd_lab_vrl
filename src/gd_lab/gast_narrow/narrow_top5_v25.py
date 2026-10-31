@@ -155,8 +155,12 @@ def score_episodes(episodes):
     components = dict(result["components"])
     components["C"] = 0.0 if c is None else c
     result["components"] = components
-    # Without cliff tiles (NARROW_CLIFF_COLUMNS=0) C has no samples: score over the other weights, rescaled to 1.
-    weights = WEIGHTS if cliff else {k: v / (1.0 - WEIGHTS["C"]) for k, v in WEIGHTS.items() if k != "C"}
+    # Without cliff tiles (NARROW_CLIFF_COLUMNS=0) C has no samples, without turn tiles (NARROW_TURN=0) R has none:
+    # score over the remaining weights, rescaled to 1.
+    has_turn = any(row["family"].startswith(v24.TURN_PREFIX) for row in episodes)
+    drop = ({"C"} if not cliff else set()) | ({"R"} if not has_turn else set())
+    kept = sum(v for k, v in WEIGHTS.items() if k not in drop)
+    weights = {k: v / kept for k, v in WEIGHTS.items() if k not in drop}
     result["score"] = sum(weights[k] * components[k] for k in weights)
     result["score_definition"] = weights
     turn = [row for row in episodes if row["family"].startswith(v24.TURN_PREFIX)]

@@ -29,10 +29,15 @@ head=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -1)
 export NARROW_GPUS=0,1,2,3 NARROW_NCCL_WORKAROUND=0 NARROW_NNODES=$SLURM_NNODES NARROW_RDZV_ENDPOINT=$head:$((20000 + SLURM_JOB_ID % 20000))
 export NARROW_TOTAL_ENVS=$((per * 4 * SLURM_NNODES)) NARROW_UPDATES=${NARROW_UPDATES:-1200} NARROW_SAVE_EVERY=50
 export NARROW_EXPERIMENT=gast/lineage16_b GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b.json
-# LINEAGE_RECIPE=v23 (default, user decision 10-31: "one skill at a time"): the v2.3 narrow-passage recipe that made
+# LINEAGE_RECIPE=v23 (user decision 10-31: "one skill at a time"): the v2.3 narrow-passage recipe that made
 # 602 on 128 nodes -- passages / doors / L-bends, stop when blocked, dead ends. In-place turns (v2.4/v2.5) and the cliff
 # stop (v2.6) are separate later stages on top of the stage B model. v24 / v25: the turn recipes (not for this stage).
-case ${LINEAGE_RECIPE:-v23} in
+# v25p (10-31, user: backward passages belong to the passage stage): the v2.3 passage terrain (44 columns) + v2.4
+# backward passages 25 % (rear Mid-360 on), trunk self-occlusion, gap nose-up 5 deg; no turn / cliff tiles. DEFAULT.
+case ${LINEAGE_RECIPE:-v25p} in
+  v25p) export NARROW_TRAIN_PY=scripts/gast_narrow/train_narrow_v25.py NARROW_TASK=Gd-GastNarrowV25-Rbq10-Dreamwaq-v0 \
+               NARROW_TURN=0 NARROW_CLIFF_COLUMNS=0 \
+               GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b_v25p.json ;;
   v25) export NARROW_TRAIN_PY=scripts/gast_narrow/train_narrow_v25.py NARROW_TASK=Gd-GastNarrowV25-Rbq10-Dreamwaq-v0 \
               GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b_v25.json ;;
   v24) export NARROW_TRAIN_PY=scripts/gast_narrow/train_narrow_v24.py NARROW_TASK=Gd-GastNarrowV24-Rbq10-Dreamwaq-v0 ;;
@@ -73,7 +78,7 @@ if [[ -n $ck && ${NO_RESUBMIT:-0} != 1 ]]; then
   if (( left > 20 )); then
     echo "resubmit: $ck done=$done_n left=$left"
     (cd $G/jobs && env -u NARROW_TORCHRUN_ARGS -u NARROW_KEEP_RAMPS -u NARROW_SOURCE -u NARROW_SOURCE_SHA256 -u GAST_RUN_ID -u NARROW_UPDATES -u NARROW_TOTAL_ENVS -u NARROW_RDZV_ENDPOINT -u NARROW_NNODES STAGE_A=$STAGE_A STAGE_A_SHA256=$STAGE_A_SHA256 NARROW_SOURCE=$ck \
-       NARROW_SOURCE_SHA256=$(sha256sum "$ck" | cut -d" " -f1) NARROW_UPDATES=$left LINEAGE_RECIPE=${LINEAGE_RECIPE:-v23} \
+       NARROW_SOURCE_SHA256=$(sha256sum "$ck" | cut -d" " -f1) NARROW_UPDATES=$left LINEAGE_RECIPE=${LINEAGE_RECIPE:-v25p} \
        PER_GPU=$per sbatch --parsable -N $SLURM_NNODES lineage16_b.sbatch)
   fi
 fi

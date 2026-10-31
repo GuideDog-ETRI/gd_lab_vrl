@@ -145,8 +145,10 @@ def _from_602(alg, checkpoint_path, policy_lr, terrain_lr, *, expected_sha256, e
         alg.optimizer.load_state_dict(c["optimizer_state_dict"])
         ppo_optimizer = "restored"
     from gd_lab.gast_narrow.tasks_v24 import TIGHT_FAMILY, TURN_FAMILIES
-    from gd_lab.gast_narrow.tasks_v25 import CLIFF_FAMILY
-    for family in (*NARROW_FAMILIES, *TURN_FAMILIES, TIGHT_FAMILY[0], CLIFF_FAMILY[0]):
+    from gd_lab.gast_narrow.tasks_v25 import CLIFF_COLUMNS, CLIFF_FAMILY, TURN_ON
+    present = (*NARROW_FAMILIES, *((*TURN_FAMILIES, TIGHT_FAMILY[0]) if TURN_ON else ()),
+               *((CLIFF_FAMILY[0],) if CLIFF_COLUMNS > 0 else ()))
+    for family in present:
         means.setdefault(family, 0.0)  # the cliff family starts at level 0 (restore skips families missing here)
     kind = {TASK_ID: "narrow_v25_continue", V24_TASK_ID: "narrow_v24", SOURCE_TASK_ID: "narrow_v23",
             BACKGAP_TASK_ID: "backgap_v2"}[source]

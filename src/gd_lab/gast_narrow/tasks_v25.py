@@ -34,7 +34,12 @@ CLIFF_FAMILY = ("narrow_cliff", "cliff", 1, 3.0, 2.2, 1.6)  # name, kind, sign, 
 # as v2.4). Run v25b never stood once at a cliff in 110 updates (exploration problem, like the turn stop before the
 # flag) while passage / dead-end skills fell; the cliff stop moves to v2.6.
 CLIFF_COLUMNS = float(os.environ.get("NARROW_CLIFF_COLUMNS", CLIFF_FAMILY[3]))
-NUM_COLS = 62 + int(CLIFF_COLUMNS)
+# NARROW_TURN=0 (10-31, user: "one skill per stage", backward passages belong with the passages): drop the in-place
+# turn pockets and the retention columns v2.4 added to balance them -> the v2.3 terrain (44 columns) with v2.4's
+# backward passages (25 %, rear Mid-360 on), trunk self-occlusion and gap nose-up limit. The turn-block actor input
+# stays (always 0) so later turn stages load this model unchanged.
+TURN_ON = os.environ.get("NARROW_TURN", "1") == "1"
+NUM_COLS = (62 if TURN_ON else 44) + int(CLIFF_COLUMNS)
 CLIFF_STAND_WEIGHT, NOSE_UP_WEIGHT = 1.0, -3.0
 # v2.5a: leg touch back to -1.0 and the wall-proximity cap 2 -> 4 /s: with -0.5 / 2 the first 50 updates of v25a
 # traded clean turns for contact (turn_clean 0.60 -> 0.26, leg impulse p90 6 -> 130-350 N s).
@@ -115,6 +120,12 @@ class GastNarrowV25TeacherCfg(GastNarrowV24TeacherCfg):
         super().__post_init__()
         gen = self.scene.terrain.terrain_generator
         size = next(iter(gen.sub_terrains.values())).size
+        if not TURN_ON:
+            from gd_lab.gast_narrow.tasks_v24 import RETENTION_EXTRA, TIGHT_FAMILY, TURN_FAMILIES
+            for family in (*TURN_FAMILIES, TIGHT_FAMILY[0]):
+                del gen.sub_terrains[family]
+            for family, columns in RETENTION_EXTRA.items():
+                gen.sub_terrains[family].proportion -= columns
         name, kind, sign, _, l_max, l_min = CLIFF_FAMILY
         if CLIFF_COLUMNS > 0:
             gen.sub_terrains[name] = NarrowPassageTerrainCfg(proportion=CLIFF_COLUMNS, size=size, kind=kind, sign=sign,
