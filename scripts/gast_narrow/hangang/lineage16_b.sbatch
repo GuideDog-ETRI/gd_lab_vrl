@@ -47,6 +47,8 @@ export NARROW_TORCHRUN_ARGS=${NARROW_TORCHRUN_ARGS:-"--log_dir $G/logs/ranklogs_
 echo "stage=B cpus_on_node=$SLURM_CPUS_ON_NODE nodes=$SLURM_NNODES head=$head per_gpu=$per total=$NARROW_TOTAL_ENVS source=$NARROW_SOURCE anchor=$STAGE_A start=$(date)"
 cd $G/gd_lab_vrl
 t0=$(date +%s)
+# hydra.output_subdir=null: 64 ranks writing outputs/<date>/<time>/.hydra/ in the same second on /scratch (Lustre)
+# killed rank 4 of job 1182064 with OSError EIO (10-30); the Hydra config dump is not needed.
 # USR1 15 min before the limit -> STOP file (save + exit). The srun must run in the BACKGROUND: bash runs a trap only
 # after the foreground command returns, so with a foreground srun the STOP file was never written (10-31, job
 # 1182335: the limit killed the job without a save; the Hangang session wrote STOP by hand).
