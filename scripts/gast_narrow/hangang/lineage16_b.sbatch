@@ -36,7 +36,7 @@ export NARROW_EXPERIMENT=gast/lineage16_b GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vr
 # backward passages 25 % (rear Mid-360 on), trunk self-occlusion, gap nose-up 5 deg; no turn / cliff tiles. DEFAULT.
 case ${LINEAGE_RECIPE:-v25p} in
   v25p) export NARROW_TRAIN_PY=scripts/gast_narrow/train_narrow_v25.py NARROW_TASK=Gd-GastNarrowV25-Rbq10-Dreamwaq-v0 \
-               NARROW_TURN=0 NARROW_CLIFF_COLUMNS=0 \
+               NARROW_TURN=0 NARROW_CLIFF_COLUMNS=0 NARROW_NOSE_WALK_DEG=${NARROW_NOSE_WALK_DEG:-90} \
                GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b_v25p.json ;;
   v25) export NARROW_TRAIN_PY=scripts/gast_narrow/train_narrow_v25.py NARROW_TASK=Gd-GastNarrowV25-Rbq10-Dreamwaq-v0 \
               GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b_v25.json ;;

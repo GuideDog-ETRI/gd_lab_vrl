@@ -48,7 +48,10 @@ NEAR_P, NEAR_SLACK = 0.4, 0.10
 STAND_PITCH_DEG = 10.0      # v2.4e: nose-up above this while the robot must stand costs (E2: dead-end rocking 18-27 deg)
 # v2.5 narrow_nose_up thresholds: standing (should_stand, slow) 10 deg; walking / turning 20 deg (602 itself peaks at
 # 23-28 deg for 1-2 s in forward passages, so a lower walking threshold would tax the normal gait).
-NOSE_STAND_DEG, NOSE_WALK_DEG, NOSE_SLOW = 10.0, 20.0, 0.3
+# NARROW_NOSE_WALK_DEG (10-31): v25c (no cliff) lost passage success 0.92 -> 0.82 within 80 updates from 653 while v24h
+# (no nose-up term) kept 0.83-0.99; the walking threshold is the only v2.5 term active in passable passages. 90 = off.
+NOSE_STAND_DEG, NOSE_SLOW = 10.0, 0.3
+NOSE_WALK_DEG = float(__import__("os").environ.get("NARROW_NOSE_WALK_DEG", "20.0"))
 SPAWN_JITTER, SPAWN_YAW_NOISE_DEG = 0.03, 15.0
 # Spawn footprint (trunk + legs in stance, half sizes) for choosing an axis-aligned start yaw that fits the pocket.
 FOOTPRINT = [(x, y) for x in (-0.45, 0.0, 0.45) for y in (-0.25, 0.25)]
