@@ -50,6 +50,8 @@ STAND_PITCH_DEG = 10.0      # v2.4e: nose-up above this while the robot must sta
 # 23-28 deg for 1-2 s in forward passages, so a lower walking threshold would tax the normal gait).
 # NARROW_NOSE_WALK_DEG (10-31): v25c (no cliff) lost passage success 0.92 -> 0.82 within 80 updates from 653 while v24h
 # (no nose-up term) kept 0.83-0.99; the walking threshold is the only v2.5 term active in passable passages. 90 = off.
+# Update (v25c it150-200): the dip was transient -- passage 0.91, blocked hold 0.98, dead end 0.98 with the term on --
+# so the default stays 20 deg (stage B too); the switch is kept for ablations.
 NOSE_STAND_DEG, NOSE_SLOW = 10.0, 0.3
 NOSE_WALK_DEG = float(__import__("os").environ.get("NARROW_NOSE_WALK_DEG", "20.0"))
 SPAWN_JITTER, SPAWN_YAW_NOISE_DEG = 0.03, 15.0
