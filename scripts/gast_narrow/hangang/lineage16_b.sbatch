@@ -27,7 +27,7 @@ export APPTAINERENV_LD_PRELOAD=/lib/aarch64-linux-gnu/libgomp.so.1:/usr/local/li
 per=${PER_GPU:-2048}
 head=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -1)
 export NARROW_GPUS=0,1,2,3 NARROW_NCCL_WORKAROUND=0 NARROW_NNODES=$SLURM_NNODES NARROW_RDZV_ENDPOINT=$head:$((20000 + SLURM_JOB_ID % 20000))
-export NARROW_TOTAL_ENVS=$((per * 4 * SLURM_NNODES)) NARROW_UPDATES=${NARROW_UPDATES:-1200} NARROW_SAVE_EVERY=50
+export NARROW_TOTAL_ENVS=$((per * 4 * SLURM_NNODES)) NARROW_UPDATES=${NARROW_UPDATES:-2000} NARROW_SAVE_EVERY=50
 export NARROW_EXPERIMENT=gast/lineage16_b GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b.json
 # LINEAGE_RECIPE=v23 (user decision 10-31: "one skill at a time"): the v2.3 narrow-passage recipe that made
 # 602 on 128 nodes -- passages / doors / L-bends, stop when blocked, dead ends. In-place turns (v2.4/v2.5) and the cliff

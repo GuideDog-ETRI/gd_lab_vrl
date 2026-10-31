@@ -31,13 +31,15 @@
 | A 종료 직후 (~23:00) | A E2 (3노드, ~2 h) | 작업본을 origin/gh200로 fast-forward → 후보(모든 best_top5 + 마지막 저장본) + 6566을 gap·stairs·nominal로 평가 → `select_stage_a.py`가 `logs/e2/stage_a_<job>/merged/STAGE_A.txt`, `stage_a_selection.md` 작성 | 자동 |
 | 내일 08~09시 | 확인 | STAGE_A 후보 표와 B 레시피(v25p)·제출 명령을 사용자에게 보고 → "B 시작" | **사용자 (폰)** |
 | 직후 | 재제출 시험 겸 smoke | §4의 시험 명령: 1노드, 30분 제한, USR1 15분 전 → STOP 저장 → 자동 재제출 → 자식 job warm start 확인 → 자식 `scancel` | 한강 Claude |
-| 직후 | B 본 런 | `STAGE_A=… STAGE_A_SHA256=… sbatch lineage16_b.sbatch` (레시피 기본 v25p), 24 h마다 자동 재제출 | 한강 Claude 1회, 이후 자동 |
+| 직후 | B 본 런 | `STAGE_A=… STAGE_A_SHA256=… sbatch lineage16_b.sbatch` (레시피 기본 v25p, **상한 2,000 update**, 약 34 h = job 2개), 24 h마다 자동 재제출 | 한강 Claude 1회, 이후 자동 |
+| B 400·800·1,200·1,600 | 중간 E2 (1노드) | 통로 통과·막힌 서기·막다른 길·후진 통로가 **두 번 연속 2 %p 안으로 평탄하면** `touch logs/launches/$GAST_RUN_ID/STOP`(저장 후 종료, 재제출 안 함: 남은 update가 있어도 STOP 뒤 재제출을 막으려면 STOP과 함께 `NO_RESUBMIT` 대신 다음 job을 scancel) | 사용자 결정, 한강 Claude 실행 |
+
 
 ## (원안, v2.5 레시피 기준)
 
 ## 1. 목적과 판정
 
-A단계(3906 → 후진 갭) 최고 모델에서 v2.5 레시피로 1,200 update. 결과는 v2.3(602)·v24h(653)과 같은 입력·출력 구조의 정책 하나.
+A단계(3906 → 후진 갭) 최고 모델에서 v2.5 레시피로 1,200 update(10-31 사용자 결정으로 B는 상한 2,000, 평탄하면 조기 종료). 결과는 v2.3(602)·v24h(653)과 같은 입력·출력 구조의 정책 하나.
 
 | 기능 | 판정 (E2 기본 조건, `configs/gast_narrow/e2/v25_turn.yaml`) |
 |---|---|
@@ -123,3 +125,11 @@ STAGE_A=<A 최고 .pt> STAGE_A_SHA256=<sha> sbatch lineage16_b.sbatch
 | `scripts/gast_narrow/hangang/lineage16_b.sbatch` | `LINEAGE_RECIPE` 기본 v25(트레이너·과제·Top-5 기준 파일), `NARROW_STAND_ANCHOR_CKPT=$STAGE_A` 고정 |
 | `configs/gast_narrow/online_top5_lineage16_b_v25.json` | B단계 v2.5 Top-5 기준 |
 | v2.5 코드 일체 | `GAST_NARROW_V25_DESIGN.md` §10·§11 |
+
+## 9. Claude 사용 최소화 (사용자 지시 10-31: 한강 Claude가 CPU를 가능한 쓰지 않도록)
+
+로그인 노드는 프로세스당 CPU 7,200 s 제한이 있고 Claude가 그 시간을 쓴다. 학습·재제출·E2·STAGE_A 선정은 모두 Slurm job이 하므로 Claude는 **대기**가 기본이다.
+- 백그라운드 감시(Monitor, `until … sleep` 루프, `tail -f`, 주기 `squeue`)를 띄우지 않는다. 10분 보고 없음(사용자 14:40 지시).
+- 요청을 받았을 때만 명령을 실행한다. 출력은 짧게(`tail -n 20`, `grep … | tail -5`), 큰 로그 전체를 읽지 않는다.
+- 정해진 확인 시점만: 내일 08시(STAGE_A 선정표 — BSSEO 세션이 메시지로 깨운다), B 제출·재제출 시험, B 중간 E2 시점(BSSEO가 알림).
+- 하루에 한 번 사용자가 `/exit` → `claude --continue` → `/remote-control`로 다시 띄운다.
