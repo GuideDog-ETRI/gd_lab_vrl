@@ -1,0 +1,155 @@
+# Stage A' mid / final E2 on Hangang (docs/hangang/WORKORDER_STAGE_APRIME_20261101.md). aprime16.sbatch copies this
+# file to configs/gast_narrow/e2/aprime_mid_<job>_u<N>.yaml with __APRIME__ = the model_N.pt at update 300 / 600 /
+# 1000 / 1500 and submits e2_multi.sbatch for it. Same suites as the a6000 G3 / G-null E2 (gap fwd/back L7/11/14 x
+# v0.5/0.9, stairs 6 families up/down L9/14, terrain L14), nominal only (lidar_off matched nominal in every G run).
+# Stop rule: stairs / backward gap / slope_inv more than 2 pt worse than r3906 or the previous mid E2 -> report.
+name: aprime_mid
+out_root: logs/e2
+seed: 42
+seconds: 20.0
+hardware:
+  gpus:
+  - 0
+  - 1
+  - 2
+  - 3
+  e2_slots_per_gpu: 1
+  e1_slots_per_gpu: 3
+  sif: /scratch/t515a05/gd_lab/gd_lab_isaaclab.sif
+  python: /scratch/t515a05/gd_lab/venv/bin/python
+models:
+  aprime: __APRIME__
+  r3906: checkpoints/teachers/gast/rayir_top5_20261016/3906_gap50_from_dwb38000/best_top5/3906_top1.pt
+  b6566: checkpoints/gast_narrow/backgapv2_6566.pt
+suites:
+  gap:
+    enabled: true
+    directions:
+    - forward
+    - backward
+    levels:
+    - 7
+    - 11
+    - 14
+    speeds:
+    - 0.5
+    - 0.9
+    envs: 48
+  stairs:
+    enabled: true
+    families:
+    - pyramid_stairs
+    - pyramid_stairs_inv
+    - pyramid_stairs_wide
+    - pyramid_stairs_inv_wide
+    - pyramid_stairs_nose
+    - pyramid_stairs_inv_nose
+    directions:
+    - up
+    - down
+    levels:
+    - 9
+    - 14
+    speed: 0.8
+    envs: 32
+  terrain:
+    enabled: true
+    families:
+    - hf_pyramid_slope
+    - hf_pyramid_slope_inv
+    - random_rough
+    - ring_fence
+    levels:
+    - 14
+    direction: outward
+    speed: 1.0
+    envs: 32
+  narrow:
+    enabled: false
+    families:
+    - narrow_corridor
+    - narrow_door_pos
+    - narrow_door_neg
+    - narrow_bend_left
+    - narrow_bend_right
+    cases:
+    - name: pass_wide
+      width: 0.8
+      margin: 0.1
+    - name: pass_tight
+      width: 0.66
+      margin: 0.05
+    - name: block_margin
+      width: 0.66
+      margin: 0.15
+    - name: block_narrow
+      width: 0.52
+      margin: 0.1
+    envs: 32
+  dead_end:
+    enabled: false
+    families:
+    - narrow_dead_end
+    levels:
+    - 7
+    - 14
+    margin: 0.1
+    envs: 32
+conditions:
+  nominal:
+    enabled: true
+    lidar: both
+    payload_kg: 5.0
+    push: false
+    stair_disturbance: false
+    suites:
+    - gap
+    - stairs
+    - terrain
+  lidar_off:
+    enabled: false
+    lidar: 'off'
+    payload_kg: 5.0
+    push: false
+    stair_disturbance: false
+    suites:
+    - gap
+    - stairs
+    - terrain
+  ouster_only:
+    enabled: false
+    lidar: ouster
+    payload_kg: 5.0
+    push: false
+    stair_disturbance: false
+    suites: []
+  mid360_only:
+    enabled: false
+    lidar: mid360
+    payload_kg: 5.0
+    push: false
+    stair_disturbance: false
+    suites: []
+  disturbed:
+    enabled: false
+    lidar: both
+    payload_kg: 5.0
+    push: true
+    stair_disturbance: true
+    suites:
+    - gap
+    - stairs
+  no_payload:
+    enabled: false
+    lidar: both
+    payload_kg: 0.0
+    push: false
+    stair_disturbance: false
+    suites:
+    - gap
+    - stairs
+e1:
+  enabled: false
+report:
+  baseline: b6566
+  max_drop_pt: 1.0
