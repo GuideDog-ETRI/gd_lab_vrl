@@ -21,7 +21,7 @@ export GD_LAB_NORMALIZER_DEFER=0 NARROW_KEEP_RAMPS=${NARROW_KEEP_RAMPS:-1} NARRO
 [[ ${NARROW_KEEP_RAMPS} == 1 ]] || export GAIT_RAMP_STEPS=${GAIT_RAMP_STEPS:-0}
 export GAIT_RAMP_STEPS=${GAIT_RAMP_STEPS:-20000}
 export GD_LAB_TOP5_CRITERIA_FILE="${GD_LAB_TOP5_CRITERIA_FILE:-$root/configs/gast_gait/online_top5_g2.json}"
-tag=""; for n in 1 4 5 6 7 8 9 10 15 16 17 18 19; do v="GAIT_R$n"; [[ ${!v:-1} == 0 ]] && tag="${tag}_noR$n"; done
+tag=""; for n in 1 4 5 6 7 8 9 10 15 16 17 18 19 20; do v="GAIT_R$n"; [[ ${!v:-1} == 0 ]] && tag="${tag}_noR$n"; done
 [[ ${GAIT_RAMP_STEPS} == 0 ]] && tag="${tag}_noramp"
 export GAST_RUN_ID="${GAST_RUN_ID:-$(date +%Y-%m-%d_%H-%M-%S)_gait_v3_3906${tag}_${mode}}"
 exec bash "$root/scripts/gast_narrow/train_narrow_v23.sh" "$@"

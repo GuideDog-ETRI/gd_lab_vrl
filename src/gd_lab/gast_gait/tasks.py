@@ -3,6 +3,7 @@
 Design: docs/design/GAIT_V3_DESIGN.md. Start: 3906 (user decision 11-01). The 3906 and backgap code stay unchanged.
 Each term can be switched off for ablations with GAIT_R<n>=0 (R1, R4..R10, R15..R18); GAIT_R11=1 re-enables
 lead_foot_stall; GAIT_R13=1 keeps backward_nose_up. G3: R1, R4, R5, R7, R9, R10 are off on stair and slope tiles.
+R20 (G5): backward gap speeds drawn toward slow speeds (commands.py).
 R1 allows any pitch between level and the terrain rise under the trunk (GAIT_R1_BAND=0: the G1 version, pitch minus
 rise; GAIT_R1_GROUND=0: the G0 version, absolute pitch).
 """
@@ -15,6 +16,7 @@ from isaaclab.utils import configclass
 
 from gd_lab.gast_backgap.tasks import GastRayIrV21Gap50BackV2TeacherCfg
 from gd_lab.gast_gait import terms
+from gd_lab.gast_gait.commands import SlowBackGapVelocityCommand
 
 FEET = SceneEntityCfg("contact_forces", body_names=".*_foot")
 FEET_BODIES = SceneEntityCfg("robot", body_names=".*_foot")
@@ -108,6 +110,8 @@ class GastGaitV3GapTeacherCfg(GastRayIrV21Gap50BackV2TeacherCfg):
         if _on(18):
             r.gap_foothold_margin.params["margin"] = GAP_FOOTHOLD_MARGIN
             r.gap_foothold_margin.weight = W_GAP_FOOTHOLD
+        if _on(20):  # G5: backward gap speeds toward 0.2-0.5 m/s (G4 stood still at -0.3 m/s in front of the gaps)
+            self.commands.base_velocity.class_type = SlowBackGapVelocityCommand
         if os.environ.get("GAIT_R13", "0") != "1":
             r.backward_nose_up = None  # absorbed by R1
         if RAMP_STEPS > 0:
