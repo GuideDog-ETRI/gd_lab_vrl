@@ -14,6 +14,8 @@ Motion direction = sign of the commanded vx (|vx| < 0.1: sign of the body vx; bo
 """
 from __future__ import annotations
 
+import os
+
 import math
 
 import torch
@@ -28,7 +30,9 @@ from gd_lab.mdp.terrain_families import terrain_family_gate
 STAIR_FAMILIES = ("pyramid_stairs", "pyramid_stairs_inv", "pyramid_stairs_wide", "pyramid_stairs_inv_wide",
                   "pyramid_stairs_nose", "pyramid_stairs_inv_nose")
 SLOPE_FAMILIES = ("hf_pyramid_slope", "hf_pyramid_slope_inv")
-SHAPED_FAMILIES = STAIR_FAMILIES + SLOPE_FAMILIES  # where the 3906 / 6566 behaviour is kept as is (G3)
+# where the 3906 / 6566 behaviour is kept as is. G3 also listed the slopes: E2 slope_inv falls 12.5 % vs G1 3.1 % and
+# G-null 3.1 % (11-01), so G4 shapes the gait on slopes again (GAIT_SHAPE_SLOPES=0 restores G3).
+SHAPED_FAMILIES = STAIR_FAMILIES + (() if os.environ.get("GAIT_SHAPE_SLOPES", "1") == "1" else SLOPE_FAMILIES)
 FOOT_RADIUS = 0.02
 CONTACT_N = 1.0
 
@@ -58,6 +62,21 @@ def motion_direction(env, command_name: str = "base_velocity") -> torch.Tensor:
 
 def stairs_mask(env) -> torch.Tensor:
     return terrain_family_gate(env, STAIR_FAMILIES) == 0
+
+
+def back_gap_mask(env) -> torch.Tensor:
+    """Gap tiles while moving backward. G4: the swing / touchdown speed terms are off here (focus replay 11-01: 6566
+    braces the leading hind foot 0.95 s and flies the trailing pair at 3.8 m/s peak, 2.1 m/s touchdown, 0 falls;
+    G1-G3 met the speed limits and fell 6-9 %: the falls follow the brace time, not the foot speed)."""
+    return boarding_family_mask(env) & (motion_direction(env) < 0)
+
+
+def _gate(env, cost: torch.Tensor, off_shaped: bool, off_back_gap: bool = False) -> torch.Tensor:
+    if off_shaped:
+        cost = cost * (~shaped_mask(env)).float()
+    if off_back_gap:
+        cost = cost * (~back_gap_mask(env)).float()
+    return cost
 
 
 def shaped_mask(env) -> torch.Tensor:
@@ -158,7 +177,8 @@ class TrunkNoseUp(ManagerTermBase):
 
 # R4 ------------------------------------------------------------------------------------------------------------
 def feet_touchdown_v3(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg, free_speed: float = 0.3,
-                      stair_free_speed: float = 0.6, off_shaped: bool = False):
+                      stair_free_speed: float = 0.6, off_shaped: bool = False,
+                      off_back_gap: bool = False):
     """Event (/dt): foot speed above ``free_speed`` at first contact, summed over the feet that just landed.
     ``stair_free_speed`` on stair tiles (stepping down lands faster). No gap relaxation: a gap landing is the
     loud one (p90 2 m/s on 3906 / 6566 / 1944)."""
@@ -169,7 +189,7 @@ def feet_touchdown_v3(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg
                        torch.full_like(speed[:, 0], free_speed))
     excess = (speed - free[:, None]).clamp_min(0.0) * first
     cost = excess.sum(dim=1) / env.step_dt
-    return cost * (~shaped_mask(env)).float() if off_shaped else cost
+    return _gate(env, cost, off_shaped, off_back_gap)
 
 
 # R5 ------------------------------------------------------------------------------------------------------------
@@ -241,19 +261,21 @@ def foot_clearance_ground(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntit
 
 # R7 ------------------------------------------------------------------------------------------------------------
 def swing_time_floor(env, sensor_cfg: SceneEntityCfg, floor_s: float = 0.14, command_name: str = "base_velocity",
-                     off_shaped: bool = False):
+                     off_shaped: bool = False,
+                     off_back_gap: bool = False):
     """Event (/dt): at touchdown, how far the swing that just ended fell short of ``floor_s``. Moving only."""
     sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     first = sensor.compute_first_contact(env.step_dt)[:, sensor_cfg.body_ids]
     last_air = sensor.data.last_air_time[:, sensor_cfg.body_ids]
     short = (floor_s - last_air).clamp_min(0.0) * first * (last_air > 0.0)
     cost = short.sum(dim=1) * _moving(env, command_name).float() / env.step_dt
-    return cost * (~shaped_mask(env)).float() if off_shaped else cost
+    return _gate(env, cost, off_shaped, off_back_gap)
 
 
 # R9 ------------------------------------------------------------------------------------------------------------
 def stance_overextension(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg, hip_cfg: SceneEntityCfg,
-                         limit: float = 0.18, gap_limit: float = 0.22, gap_scale: float = 1.5, off_shaped: bool = False):
+                         limit: float = 0.18, gap_limit: float = 0.22, gap_scale: float = 1.5, off_shaped: bool = False,
+                         off_back_gap: bool = False):
     """Per second: a stance foot left behind its hip (body frame, along the motion direction) by more than
     ``limit`` m, summed over feet. The "body goes, feet stay planted" state before the rushed catch-up swing.
     Gap tiles: ``gap_limit`` and ``gap_scale`` (a crossing needs a longer stride, but 30 cm is still charged)."""
@@ -269,18 +291,19 @@ def stance_overextension(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntity
     scale = torch.where(gap, torch.full_like(d, gap_scale), torch.ones_like(d))
     excess = (trailing - lim[:, None]).clamp_min(0.0) * _in_contact(env, sensor_cfg)
     cost = excess.sum(dim=1) * scale * (d != 0).float()
-    return cost * (~shaped_mask(env)).float() if off_shaped else cost
+    return _gate(env, cost, off_shaped, off_back_gap)
 
 
 # R10 -----------------------------------------------------------------------------------------------------------
 def swing_speed_cap(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg, cap: float = 3.0,
-                    gap_cap: float = 3.5, off_shaped: bool = False):
+                    gap_cap: float = 3.5, off_shaped: bool = False,
+                    off_back_gap: bool = False):
     """Per second: swing-foot speed above ``cap`` m/s (``gap_cap`` on gap tiles), summed over airborne feet."""
     speed = env.scene[asset_cfg.name].data.body_lin_vel_w[:, asset_cfg.body_ids].norm(dim=-1)
     c = torch.where(boarding_family_mask(env), torch.full_like(speed[:, 0], gap_cap), torch.full_like(speed[:, 0], cap))
     excess = (speed - c[:, None]).clamp_min(0.0) * ~_in_contact(env, sensor_cfg)
     cost = excess.sum(dim=1)
-    return cost * (~shaped_mask(env)).float() if off_shaped else cost
+    return _gate(env, cost, off_shaped, off_back_gap)
 
 
 # R11 -----------------------------------------------------------------------------------------------------------
@@ -363,3 +386,23 @@ class GapSupport(ManagerTermBase):
         n = _in_contact(env, sensor_cfg).sum(dim=1).float()
         deficit = (float(min_feet) - n).clamp_min(0.0)
         return deficit * near.float() * _moving(env, command_name).float()
+
+
+# ramp (G4) -------------------------------------------------------------------------------------------------------
+def gait_weight_ramp(env, env_ids, term_names: list[str], ramp_steps: int = 20000, kappa_min: float = 0.2,
+                     floors: dict[str, float] | None = None) -> dict:
+    """Curriculum term: scale the gait quality weights by ``kappa`` = ``kappa_min`` -> 1 linearly over the first
+    ``ramp_steps`` env steps (200 PPO updates x 100 steps by default), per term ``floors`` override ``kappa_min``.
+    G1 / G3 switched every term on at full weight from update 0: falls stayed at 0.25-0.30 until update 100 and the
+    gap level fell below the 3906 start for 200-250 updates, while the same run without them recovered by update 50
+    (G-null, 11-01). Declared weights are the kappa = 1 targets, captured once and set absolutely every call
+    (resume-safe like ``penalty_weight_terrain_schedule``); a continuation passes ramp_steps = 0 (kappa = 1)."""
+    frac = 1.0 if ramp_steps <= 0 else min(1.0, float(env.common_step_counter) / float(ramp_steps))
+    key = "_gait_ramp_base_weights"
+    if not hasattr(env, key):
+        setattr(env, key, {n: float(env.reward_manager.get_term_cfg(n).weight) for n in term_names})
+    floors = floors or {}
+    for name, w0 in getattr(env, key).items():
+        lo = float(floors.get(name, kappa_min))
+        env.reward_manager.get_term_cfg(name).weight = w0 * (lo + (1.0 - lo) * frac)
+    return {"kappa": kappa_min + (1.0 - kappa_min) * frac}

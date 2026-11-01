@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 
-from isaaclab.managers import RewardTermCfg, SceneEntityCfg
+from isaaclab.managers import CurriculumTermCfg, RewardTermCfg, SceneEntityCfg
 from isaaclab.utils import configclass
 
 from gd_lab.gast_backgap.tasks import GastRayIrV21Gap50BackV2TeacherCfg
@@ -30,7 +30,7 @@ W_SLIP = -0.3              # R8
 W_OVEREXT = -6.0           # R9 /s per m beyond 18 cm (22 cm on gaps, x1.5): 30 cm behind -> -0.72 /s on a gap
 W_SWING_SPEED = -1.0       # R10 /s per m/s over 3.0 (3.5 on gaps; 3906 gap swings peak 3.5-4.5 m/s)
 W_LEAD_STALL = -2.0        # R11 (off by default since G3: the brace is support, R17 prices its absence instead)
-W_GAP_SUPPORT = -0.5       # R17 /s per foot short of 3 in contact near a slot (a trot over the slot: about -0.5 /s)
+W_GAP_SUPPORT = -1.0       # R17 /s per foot short of 3 in contact near a slot (G4: -0.5 -> -1.0, the brace carries the backward slot)
 GAP_FOOTHOLD_MARGIN = 0.06  # 6566: 0.04; backward hind feet landed on the slot edge (G1 / G2 focus replays 11-01)
 W_GAP_FOOTHOLD = -0.4      # 6566: -0.25
 W_LIFT_CAP = -8.0          # R15 /s per m of swing sole above 9 cm (level ground only); 10 cm -> -0.08 /s per foot
@@ -45,6 +45,15 @@ def _on(n: int) -> bool:
 
 
 SHAPED_OFF = {"off_shaped": True}  # G3: gait quality terms are off on stair and slope tiles
+# G4 (R19): the swing / touchdown speed terms are off on gap tiles while moving backward (GAIT_R19=0 restores G3)
+BACK_GAP_OFF = {"off_back_gap": True} if _on(19) else {}
+# G4 ramp: the gait quality weights rise kappa 0.2 -> 1 over GAIT_RAMP_STEPS env steps (200 updates x 100); 0 = off.
+# Terms that replace a 6566 term start at that term's weight instead (feet_slipping -0.1 / -0.3, foothold -0.25 / -0.4).
+RAMP_STEPS = int(os.environ.get("GAIT_RAMP_STEPS", 200 * 100))
+RAMP_TERMS = {1: "trunk_nose_up", 4: "feet_touchdown", 5: "feet_impact_force", 6: "foot_clearance", 7: "swing_time_floor",
+              8: "feet_slipping", 9: "stance_overextension", 10: "swing_speed_cap", 15: "foot_lift_cap",
+              16: "backward_overspeed", 17: "gap_support", 18: "gap_foothold_margin"}
+RAMP_FLOORS = {"feet_slipping": 0.34, "gap_foothold_margin": 0.625}
 
 
 @configclass
@@ -62,7 +71,7 @@ class GastGaitV3GapTeacherCfg(GastRayIrV21Gap50BackV2TeacherCfg):
         if _on(4):
             r.feet_touchdown = RewardTermCfg(func=terms.feet_touchdown_v3, weight=W_TOUCHDOWN,
                                              params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
-                                                     "free_speed": 0.3, "stair_free_speed": 0.6, **SHAPED_OFF})
+                                                     "free_speed": 0.3, "stair_free_speed": 0.6, **SHAPED_OFF, **BACK_GAP_OFF})
         if _on(5):
             r.feet_impact_force = RewardTermCfg(func=terms.FeetImpactForce, weight=W_IMPACT,
                                                 params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
@@ -72,18 +81,18 @@ class GastGaitV3GapTeacherCfg(GastRayIrV21Gap50BackV2TeacherCfg):
                                              params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES, "target": 0.07})
         if _on(7):
             r.swing_time_floor = RewardTermCfg(func=terms.swing_time_floor, weight=W_SWING_FLOOR,
-                                               params={"sensor_cfg": FEET, "floor_s": 0.14, **SHAPED_OFF})
+                                               params={"sensor_cfg": FEET, "floor_s": 0.14, **SHAPED_OFF, **BACK_GAP_OFF})
         if _on(8):
             r.feet_slipping.weight = W_SLIP
         if _on(9):
             r.stance_overextension = RewardTermCfg(func=terms.stance_overextension, weight=W_OVEREXT,
                                                    params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
                                                            "hip_cfg": HIP_BODIES, "limit": 0.18,
-                                                           "gap_limit": 0.22, "gap_scale": 1.5, **SHAPED_OFF})
+                                                           "gap_limit": 0.22, "gap_scale": 1.5, **SHAPED_OFF, **BACK_GAP_OFF})
         if _on(10):
             r.swing_speed_cap = RewardTermCfg(func=terms.swing_speed_cap, weight=W_SWING_SPEED,
                                               params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES, "cap": 3.0,
-                                                      "gap_cap": 3.5, **SHAPED_OFF})
+                                                      "gap_cap": 3.5, **SHAPED_OFF, **BACK_GAP_OFF})
         if _on(11):
             r.lead_foot_stall = RewardTermCfg(func=terms.lead_foot_stall, weight=W_LEAD_STALL,
                                               params={"sensor_cfg": FEET, "stall_s": 0.8, "cap_s": 1.0,
@@ -101,6 +110,13 @@ class GastGaitV3GapTeacherCfg(GastRayIrV21Gap50BackV2TeacherCfg):
             r.gap_foothold_margin.weight = W_GAP_FOOTHOLD
         if os.environ.get("GAIT_R13", "0") != "1":
             r.backward_nose_up = None  # absorbed by R1
+        if RAMP_STEPS > 0:
+            names = [n for k, n in RAMP_TERMS.items() if _on(k)]
+            sched = self.curriculum.penalty_terrain_schedule  # the 6566 kappa schedule also sets feet_touchdown
+            sched.params["term_names"] = [n for n in sched.params["term_names"] if n not in names]
+            self.curriculum.gait_weight_ramp = CurriculumTermCfg(
+                func=terms.gait_weight_ramp, params={"term_names": names, "ramp_steps": RAMP_STEPS, "kappa_min": 0.2,
+                                                     "floors": RAMP_FLOORS})
 
 
 TASK = "GastGaitV3Gap"
