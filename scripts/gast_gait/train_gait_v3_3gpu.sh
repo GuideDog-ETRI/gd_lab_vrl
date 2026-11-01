@@ -17,6 +17,6 @@ export NARROW_GPUS=${NARROW_GPUS:-0,1,2} NARROW_UPDATES=${NARROW_UPDATES:-200} N
 # No anchor runner in this task (as lineage stage A): per-step normalizer all_reduce, 6566 ramps from task defaults.
 export GD_LAB_NORMALIZER_DEFER=0 NARROW_KEEP_RAMPS=${NARROW_KEEP_RAMPS:-1} NARROW_ANCHOR_GAP_NOSE=0
 export GD_LAB_TOP5_CRITERIA_FILE="${GD_LAB_TOP5_CRITERIA_FILE:-$root/configs/gast_gait/online_top5_g2.json}"
-tag=""; for n in 1 4 5 6 7 8 9 10 11 15 16; do v="GAIT_R$n"; [[ ${!v:-1} == 0 ]] && tag="${tag}_noR$n"; done
+tag=""; for n in 1 4 5 6 7 8 9 10 15 16 17 18; do v="GAIT_R$n"; [[ ${!v:-1} == 0 ]] && tag="${tag}_noR$n"; done
 export GAST_RUN_ID="${GAST_RUN_ID:-$(date +%Y-%m-%d_%H-%M-%S)_gait_v3_3906${tag}_${mode}}"
 exec bash "$root/scripts/gast_narrow/train_narrow_v23.sh" "$@"

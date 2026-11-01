@@ -25,7 +25,10 @@ from isaaclab.utils.math import quat_apply_inverse, yaw_quat
 from gd_lab.mdp.platform_gap_terms import boarding_family_mask
 from gd_lab.mdp.terrain_families import terrain_family_gate
 
-STAIR_FAMILIES = ("pyramid_stairs", "pyramid_stairs_wide", "pyramid_stairs_nose")
+STAIR_FAMILIES = ("pyramid_stairs", "pyramid_stairs_inv", "pyramid_stairs_wide", "pyramid_stairs_inv_wide",
+                  "pyramid_stairs_nose", "pyramid_stairs_inv_nose")
+SLOPE_FAMILIES = ("hf_pyramid_slope", "hf_pyramid_slope_inv")
+SHAPED_FAMILIES = STAIR_FAMILIES + SLOPE_FAMILIES  # where the 3906 / 6566 behaviour is kept as is (G3)
 FOOT_RADIUS = 0.02
 CONTACT_N = 1.0
 
@@ -55,6 +58,12 @@ def motion_direction(env, command_name: str = "base_velocity") -> torch.Tensor:
 
 def stairs_mask(env) -> torch.Tensor:
     return terrain_family_gate(env, STAIR_FAMILIES) == 0
+
+
+def shaped_mask(env) -> torch.Tensor:
+    """Stair and slope tiles. G3: the gait quality terms are off here (E2 11-01: every R1 variant pitched the trunk
+    less than 6566 on stairs and stair ascent fell 94.8 -> 92 / 83 / 70 %; the stair landing is loud by nature)."""
+    return terrain_family_gate(env, SHAPED_FAMILIES) == 0
 
 
 def nose_up_angle(env) -> torch.Tensor:
@@ -126,7 +135,7 @@ class TrunkNoseUp(ManagerTermBase):
 
     def __call__(self, env, asset_cfg: SceneEntityCfg, limit_deg: float = 3.0, down_deg: float = 6.0,
                  gap_limit_deg: float = 12.0, gap_down_deg: float = 10.0, ground_relative: bool = False,
-                 level_band: bool = False):
+                 level_band: bool = False, off_shaped: bool = False):
         nose = nose_up_angle(env)
         top = bottom = torch.zeros_like(nose)
         if ground_relative:
@@ -143,12 +152,13 @@ class TrunkNoseUp(ManagerTermBase):
                                  torch.full_like(nose, math.radians(down_deg)))
         up = (nose - top - up_limit).clamp_min(0.0)
         down = (bottom - nose - down_limit).clamp_min(0.0)
-        return up + down
+        cost = up + down
+        return cost * (~shaped_mask(env)).float() if off_shaped else cost
 
 
 # R4 ------------------------------------------------------------------------------------------------------------
 def feet_touchdown_v3(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg, free_speed: float = 0.3,
-                      stair_free_speed: float = 0.6):
+                      stair_free_speed: float = 0.6, off_shaped: bool = False):
     """Event (/dt): foot speed above ``free_speed`` at first contact, summed over the feet that just landed.
     ``stair_free_speed`` on stair tiles (stepping down lands faster). No gap relaxation: a gap landing is the
     loud one (p90 2 m/s on 3906 / 6566 / 1944)."""
@@ -158,7 +168,8 @@ def feet_touchdown_v3(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg
     free = torch.where(stairs_mask(env), torch.full_like(speed[:, 0], stair_free_speed),
                        torch.full_like(speed[:, 0], free_speed))
     excess = (speed - free[:, None]).clamp_min(0.0) * first
-    return excess.sum(dim=1) / env.step_dt
+    cost = excess.sum(dim=1) / env.step_dt
+    return cost * (~shaped_mask(env)).float() if off_shaped else cost
 
 
 # R5 ------------------------------------------------------------------------------------------------------------
@@ -185,7 +196,7 @@ class FeetImpactForce(ManagerTermBase):
         return masses * 9.81 / 4.0
 
     def __call__(self, env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg, free_ratio: float = 2.0,
-                 stair_free_ratio: float = 2.5, cap: float = 3.0, window_steps: int = 5):
+                 stair_free_ratio: float = 2.5, cap: float = 3.0, window_steps: int = 5, off_shaped: bool = False):
         if self.static is None:
             self.static = self._static_force(env, asset_cfg)
         sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
@@ -202,7 +213,8 @@ class FeetImpactForce(ManagerTermBase):
         excess = (ratio - free[:, None]).clamp(0.0, cap) * due
         self.since = torch.where(tracking, self.since + 1, self.since)
         self.since = torch.where(self.since > window_steps, torch.full_like(self.since, -1), self.since)
-        return excess.sum(dim=1) / env.step_dt
+        cost = excess.sum(dim=1) / env.step_dt
+        return cost * (~shaped_mask(env)).float() if off_shaped else cost
 
 
 # R6 ------------------------------------------------------------------------------------------------------------
@@ -228,18 +240,20 @@ def foot_clearance_ground(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntit
 
 
 # R7 ------------------------------------------------------------------------------------------------------------
-def swing_time_floor(env, sensor_cfg: SceneEntityCfg, floor_s: float = 0.14, command_name: str = "base_velocity"):
+def swing_time_floor(env, sensor_cfg: SceneEntityCfg, floor_s: float = 0.14, command_name: str = "base_velocity",
+                     off_shaped: bool = False):
     """Event (/dt): at touchdown, how far the swing that just ended fell short of ``floor_s``. Moving only."""
     sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     first = sensor.compute_first_contact(env.step_dt)[:, sensor_cfg.body_ids]
     last_air = sensor.data.last_air_time[:, sensor_cfg.body_ids]
     short = (floor_s - last_air).clamp_min(0.0) * first * (last_air > 0.0)
-    return short.sum(dim=1) * _moving(env, command_name).float() / env.step_dt
+    cost = short.sum(dim=1) * _moving(env, command_name).float() / env.step_dt
+    return cost * (~shaped_mask(env)).float() if off_shaped else cost
 
 
 # R9 ------------------------------------------------------------------------------------------------------------
 def stance_overextension(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg, hip_cfg: SceneEntityCfg,
-                         limit: float = 0.18, gap_limit: float = 0.22, gap_scale: float = 1.5):
+                         limit: float = 0.18, gap_limit: float = 0.22, gap_scale: float = 1.5, off_shaped: bool = False):
     """Per second: a stance foot left behind its hip (body frame, along the motion direction) by more than
     ``limit`` m, summed over feet. The "body goes, feet stay planted" state before the rushed catch-up swing.
     Gap tiles: ``gap_limit`` and ``gap_scale`` (a crossing needs a longer stride, but 30 cm is still charged)."""
@@ -254,17 +268,19 @@ def stance_overextension(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntity
     lim = torch.where(gap, torch.full_like(d, gap_limit), torch.full_like(d, limit))
     scale = torch.where(gap, torch.full_like(d, gap_scale), torch.ones_like(d))
     excess = (trailing - lim[:, None]).clamp_min(0.0) * _in_contact(env, sensor_cfg)
-    return excess.sum(dim=1) * scale * (d != 0).float()
+    cost = excess.sum(dim=1) * scale * (d != 0).float()
+    return cost * (~shaped_mask(env)).float() if off_shaped else cost
 
 
 # R10 -----------------------------------------------------------------------------------------------------------
 def swing_speed_cap(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg, cap: float = 3.0,
-                    gap_cap: float = 3.5):
+                    gap_cap: float = 3.5, off_shaped: bool = False):
     """Per second: swing-foot speed above ``cap`` m/s (``gap_cap`` on gap tiles), summed over airborne feet."""
     speed = env.scene[asset_cfg.name].data.body_lin_vel_w[:, asset_cfg.body_ids].norm(dim=-1)
     c = torch.where(boarding_family_mask(env), torch.full_like(speed[:, 0], gap_cap), torch.full_like(speed[:, 0], cap))
     excess = (speed - c[:, None]).clamp_min(0.0) * ~_in_contact(env, sensor_cfg)
-    return excess.sum(dim=1)
+    cost = excess.sum(dim=1)
+    return cost * (~shaped_mask(env)).float() if off_shaped else cost
 
 
 # R11 -----------------------------------------------------------------------------------------------------------
@@ -325,3 +341,25 @@ def backward_overspeed(env, margin: float = 0.2, command_name: str = "base_veloc
     speed = env.scene["robot"].data.root_lin_vel_b[:, 0]
     excess = (cmd - speed - margin).clamp_min(0.0) * (cmd < 0)
     return excess * (boarding_family_mask(env) | stairs_mask(env)).float()
+
+
+# R17 -----------------------------------------------------------------------------------------------------------
+class GapSupport(ManagerTermBase):
+    """Per second, gap tiles: feet short of ``min_feet`` in contact while a foot is within 0.5 m of a slot and the
+    command is moving. Prices the trot (two feet in the air) over a slot; a walk (one foot at a time) is free.
+    6566 crosses a backward slot by bracing the leading hind foot about 1 s and then flying the rest across
+    (swing 0.16 s, touchdown 2.1 m/s, 0.4 % falls). G1 / G2 charged the brace (R11) and the flight (R4, R7, R10)
+    and crossed as a slow trot instead: 6-11 % falls. This term pays for the support the brace gave, so the
+    flight is not needed (G3, 11-01)."""
+
+    def __init__(self, cfg, env):
+        super().__init__(cfg, env)
+        self.slots = _GapSlots(env)
+
+    def __call__(self, env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg, min_feet: int = 3,
+                 command_name: str = "base_velocity"):
+        feet = env.scene[asset_cfg.name].data.body_pos_w[:, asset_cfg.body_ids]
+        near = self.slots.foot_over_slot(env, feet)
+        n = _in_contact(env, sensor_cfg).sum(dim=1).float()
+        deficit = (float(min_feet) - n).clamp_min(0.0)
+        return deficit * near.float() * _moving(env, command_name).float()
