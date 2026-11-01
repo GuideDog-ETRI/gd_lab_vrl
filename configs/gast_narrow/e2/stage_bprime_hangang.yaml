@@ -111,6 +111,7 @@ conditions:
     - dead_end
     - gap
     - stairs
+    - terrain
   mid360_rear:
     enabled: true
     lidar: mid360
@@ -141,6 +142,7 @@ conditions:
     suites:
     - gap
     - stairs
+    - terrain
 report:
   baseline: v23u602
   max_drop_pt: 1.0
