@@ -1,8 +1,9 @@
 """Gait quality v3 task: the 6566 recipe (backward gap V2) + the v3 posture / touchdown / leg-following terms.
 
 Design: docs/design/GAIT_V3_DESIGN.md. Start: 3906 (user decision 11-01). The 3906 and backgap code stay unchanged.
-Each term can be switched off for ablations with GAIT_R<n>=0 (R1, R4..R11); GAIT_R13=1 keeps backward_nose_up.
-R1 measures the pitch against the terrain rise under the trunk; GAIT_R1_GROUND=0 is the G0 (absolute pitch) version.
+Each term can be switched off for ablations with GAIT_R<n>=0 (R1, R4..R11, R15, R16); GAIT_R13=1 keeps backward_nose_up.
+R1 allows any pitch between level and the terrain rise under the trunk (GAIT_R1_BAND=0: the G1 version, pitch minus
+rise; GAIT_R1_GROUND=0: the G0 version, absolute pitch).
 """
 from __future__ import annotations
 
@@ -20,14 +21,16 @@ HIP_BODIES = SceneEntityCfg("robot", body_names=".*_hip")
 
 # weights (design section 3; event terms are per touchdown, rates per second)
 W_NOSE_UP = -4.0           # R1 /s per rad over 3 deg (8 deg -> -0.35 /s, 15 deg -> -0.84 /s)
-W_TOUCHDOWN = -0.08        # R4 per touchdown per m/s over 0.3 (1.2 m/s -> -0.072)
+W_TOUCHDOWN = -0.3         # R4 per touchdown per m/s over 0.3 (1.2 m/s -> -0.27); -0.08 was -0.011 /s in G0 (inert)
 W_IMPACT = -0.1            # R5 per touchdown per unit of (peak / static share) over 2.0 (2.6x -> -0.06)
 W_CLEARANCE = -8.0         # R6 /s per m of shortfall below 7 cm mid-swing (3906: 4.6 cm -> about -0.1 /s mean)
 W_SWING_FLOOR = -1.0       # R7 per touchdown per s under 0.14 s (0.10 s -> -0.04); -2 cost 3906 -0.3 /s walking backward
 W_SLIP = -0.3              # R8
 W_OVEREXT = -6.0           # R9 /s per m beyond 18 cm (22 cm on gaps, x1.5): 30 cm behind -> -0.72 /s on a gap
 W_SWING_SPEED = -1.0       # R10 /s per m/s over 3.0 (3.5 on gaps; 3906 gap swings peak 3.5-4.5 m/s)
-W_LEAD_STALL = -2.0        # R11 /s per s of leading-pair stance over 0.5 s, capped 1.0
+W_LEAD_STALL = -2.0        # R11 /s per s of leading-pair stance over 0.8 s while the trunk moves >= 0.15 m/s, capped 1.0
+W_LIFT_CAP = -8.0          # R15 /s per m of swing sole above 9 cm (level ground only); 10 cm -> -0.08 /s per foot
+W_BACK_OVERSPEED = -1.0    # R16 /s per m/s of backward speed above the command + 0.2 on gap / stair tiles
 
 
 def _on(n: int) -> bool:
@@ -43,7 +46,8 @@ class GastGaitV3GapTeacherCfg(GastRayIrV21Gap50BackV2TeacherCfg):
             r.trunk_nose_up = RewardTermCfg(func=terms.TrunkNoseUp, weight=W_NOSE_UP,
                                             params={"asset_cfg": FEET_BODIES, "limit_deg": 3.0, "down_deg": 6.0,
                                                     "gap_limit_deg": 12.0, "gap_down_deg": 10.0,
-                                                    "ground_relative": os.environ.get("GAIT_R1_GROUND", "1") == "1"})
+                                                    "ground_relative": os.environ.get("GAIT_R1_GROUND", "1") == "1",
+                                                    "level_band": os.environ.get("GAIT_R1_BAND", "1") == "1"})
         if _on(4):
             r.feet_touchdown = RewardTermCfg(func=terms.feet_touchdown_v3, weight=W_TOUCHDOWN,
                                              params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
@@ -71,7 +75,13 @@ class GastGaitV3GapTeacherCfg(GastRayIrV21Gap50BackV2TeacherCfg):
                                                       "gap_cap": 3.5})
         if _on(11):
             r.lead_foot_stall = RewardTermCfg(func=terms.lead_foot_stall, weight=W_LEAD_STALL,
-                                              params={"sensor_cfg": FEET, "stall_s": 0.5, "cap_s": 1.0})
+                                              params={"sensor_cfg": FEET, "stall_s": 0.8, "cap_s": 1.0,
+                                                      "min_trunk_speed": 0.15})
+        if _on(15):
+            r.foot_lift_cap = RewardTermCfg(func=terms.FootLiftCap, weight=W_LIFT_CAP,
+                                            params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES, "cap": 0.09})
+        if _on(16):
+            r.backward_overspeed = RewardTermCfg(func=terms.backward_overspeed, weight=W_BACK_OVERSPEED, params={})
         if os.environ.get("GAIT_R13", "0") != "1":
             r.backward_nose_up = None  # absorbed by R1
 

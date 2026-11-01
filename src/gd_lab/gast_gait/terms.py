@@ -114,25 +114,35 @@ class TrunkNoseUp(ManagerTermBase):
     Replaces the v2 ``backward_nose_up`` (gap tile + backward command only) and the quadratic pitch term's job.
     ``ground_relative``: the pitch is measured against the terrain rise under the trunk (``ground_pitch``), so a
     trunk parallel to a stair flight or slope is not charged. G0 (absolute pitch) charged a stair climb at 3 deg and
-    lost stair ascent 94.8 -> 70.1 % (E2 11-01)."""
+    lost stair ascent 94.8 -> 70.1 % (E2 11-01).
+    ``level_band`` (with ``ground_relative``): any pitch between level and the terrain rise is free, the limits are
+    added outside that band (up to max(0, rise) + limit, down to min(0, rise) - down). G1 (pitch minus rise, band
+    +3 / -6 deg around the rise) charged a stair climb with a near-level trunk as "nose-down": 90 % of its R1 cost
+    came from stair and slope tiles, the term grew to -0.146 and stair ascent stayed 2.9 points under 6566."""
 
     def __init__(self, cfg, env):
         super().__init__(cfg, env)
         self.slots = _GapSlots(env)
 
     def __call__(self, env, asset_cfg: SceneEntityCfg, limit_deg: float = 3.0, down_deg: float = 6.0,
-                 gap_limit_deg: float = 12.0, gap_down_deg: float = 10.0, ground_relative: bool = False):
+                 gap_limit_deg: float = 12.0, gap_down_deg: float = 10.0, ground_relative: bool = False,
+                 level_band: bool = False):
         nose = nose_up_angle(env)
+        top = bottom = torch.zeros_like(nose)
         if ground_relative:
-            nose = nose - ground_pitch(env)
+            rise = ground_pitch(env)
+            if level_band:
+                top, bottom = rise.clamp_min(0.0), rise.clamp_max(0.0)
+            else:
+                top = bottom = rise
         feet = env.scene[asset_cfg.name].data.body_pos_w[:, asset_cfg.body_ids]
         relaxed = self.slots.foot_over_slot(env, feet)
         up_limit = torch.where(relaxed, torch.full_like(nose, math.radians(gap_limit_deg)),
                                torch.full_like(nose, math.radians(limit_deg)))
         down_limit = torch.where(relaxed, torch.full_like(nose, math.radians(gap_down_deg)),
                                  torch.full_like(nose, math.radians(down_deg)))
-        up = (nose - up_limit).clamp_min(0.0)
-        down = (-nose - down_limit).clamp_min(0.0)
+        up = (nose - top - up_limit).clamp_min(0.0)
+        down = (bottom - nose - down_limit).clamp_min(0.0)
         return up + down
 
 
@@ -258,10 +268,13 @@ def swing_speed_cap(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg, 
 
 
 # R11 -----------------------------------------------------------------------------------------------------------
-def lead_foot_stall(env, sensor_cfg: SceneEntityCfg, stall_s: float = 0.5, cap_s: float = 1.0):
+def lead_foot_stall(env, sensor_cfg: SceneEntityCfg, stall_s: float = 0.5, cap_s: float = 1.0,
+                    min_trunk_speed: float = 0.0):
     """Per second, gap tiles: the longer contact time of the two leading feet (front when forward, hind when backward)
     above ``stall_s``, capped at ``cap_s``. The "leading feet brace at the slot while the trunk goes on" state.
-    Feet order in ``sensor_cfg``: FL, FR, RL, RR."""
+    ``min_trunk_speed`` > 0: only while the trunk moves in the motion direction at least that fast. G1 (no gate)
+    also charged a full stop at the slot, and in MuJoCo the robot stopped at a backward slot, then pushed in and
+    fell (11-01). Feet order in ``sensor_cfg``: FL, FR, RL, RR."""
     sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     stance = sensor.data.current_contact_time[:, sensor_cfg.body_ids]  # [N, 4]
     d = motion_direction(env)
@@ -269,4 +282,46 @@ def lead_foot_stall(env, sensor_cfg: SceneEntityCfg, stall_s: float = 0.5, cap_s
     hind = stance[:, 2:].max(dim=1).values
     lead = torch.where(d > 0, front, hind)
     over = (lead - stall_s).clamp(0.0, cap_s)
-    return over * (d != 0).float() * boarding_family_mask(env).float() * _moving(env).float()
+    going = d * env.scene["robot"].data.root_lin_vel_b[:, 0] >= min_trunk_speed
+    return over * (d != 0).float() * going.float() * boarding_family_mask(env).float() * _moving(env).float()
+
+
+# R15 -----------------------------------------------------------------------------------------------------------
+class FootLiftCap(ManagerTermBase):
+    """Per second: swing foot sole higher than ``cap`` above the ground (nearest height-scanner hit), summed over the
+    feet, moving only. Only where the scanner sees level ground (height range under the trunk below ``flat_range``):
+    off on stairs, slopes and at gap slots, where the nearest-hit ground estimate is off by the step and a lift is
+    the point. G0 / G1 lifted every foot about 10 cm against R6's 7 cm floor, and the higher drop landed faster
+    than 3906 (hind touchdown 0.80 vs 0.63 m/s at 0.8 m/s, replay 11-01); the first version without the gate cost
+    -0.26 /s on slope tiles."""
+
+    def __init__(self, cfg, env):
+        super().__init__(cfg, env)
+        self.slots = _GapSlots(env)
+
+    def __call__(self, env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg, cap: float = 0.09,
+                 flat_range: float = 0.05, command_name: str = "base_velocity", scanner: str = "height_scanner"):
+        robot: RigidObject = env.scene[asset_cfg.name]
+        feet = robot.data.body_pos_w[:, asset_cfg.body_ids]
+        hits = env.scene.sensors[scanner].data.ray_hits_w
+        z = hits[..., 2]
+        finite = torch.isfinite(z)
+        zf = torch.where(finite, z, torch.zeros_like(z))
+        span = torch.where(finite, zf, zf.amin(1, keepdim=True)).amax(1) - torch.where(finite, zf, zf.amax(1, keepdim=True)).amin(1)
+        level = (span < flat_range) & finite.all(1)
+        d2 = ((feet[:, :, None, :2] - hits[:, None, :, :2]) ** 2).sum(-1)
+        ground = torch.gather(hits[..., 2], 1, d2.argmin(dim=-1))
+        ground = torch.where(torch.isfinite(ground), ground, feet[..., 2] - FOOT_RADIUS)
+        excess = (feet[..., 2] - FOOT_RADIUS - ground - cap).clamp_min(0.0) * ~_in_contact(env, sensor_cfg)
+        free = level & ~stairs_mask(env) & ~self.slots.foot_over_slot(env, feet)
+        return excess.sum(dim=1) * free.float() * _moving(env, command_name).float()
+
+
+# R16 -----------------------------------------------------------------------------------------------------------
+def backward_overspeed(env, margin: float = 0.2, command_name: str = "base_velocity"):
+    """Per second, gap and stair tiles: backward trunk speed above the backward command + ``margin`` (m/s). The
+    existing ``overspeed`` checks forward commands only; G1 stopped at a backward slot and then lunged in."""
+    cmd = env.command_manager.get_command(command_name)[:, 0]
+    speed = env.scene["robot"].data.root_lin_vel_b[:, 0]
+    excess = (cmd - speed - margin).clamp_min(0.0) * (cmd < 0)
+    return excess * (boarding_family_mask(env) | stairs_mask(env)).float()
