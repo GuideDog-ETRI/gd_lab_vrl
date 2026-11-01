@@ -61,15 +61,18 @@ TASKS = {"v2": ("GastNarrowV2", "gd_lab.gast_narrow.tasks_v2:GastNarrowV2Teacher
          "v24": ("GastNarrowV24", "gd_lab.gast_narrow.tasks_v24:GastNarrowV24TeacherCfg",
                  "gd_lab.gast_narrow.tasks_v24:GastNarrowV24RunnerCfg"),
          "v25": ("GastNarrowV25", "gd_lab.gast_narrow.tasks_v25:GastNarrowV25TeacherCfg",
-                 "gd_lab.gast_narrow.tasks_v25:GastNarrowV25RunnerCfg")}
+                 "gd_lab.gast_narrow.tasks_v25:GastNarrowV25RunnerCfg"),
+         # stage B': v2.5 (env NARROW_TURN=0 NARROW_CLIFF_COLUMNS=0) with the floor-only downward input on narrow tiles
+         "bprime": ("GastNarrowBPrime", "gd_lab.gast_bprime.tasks:GastNarrowBPrimeTeacherCfg",
+                    "gd_lab.gast_bprime.tasks:GastNarrowBPrimeRunnerCfg")}
 task_name, env_entry, agent_entry = TASKS[TASK_KIND]
 TASK = registry.register_task(task=task_name, robot="Rbq10", method="Dreamwaq", env_cfg=env_entry, agent_cfg=agent_entry)
 from gd_lab.gast_narrow import geometry, mdp_v2  # noqa: E402
 from gd_lab.gast_narrow.state import narrow_state  # noqa: E402
 from gd_lab.mdp.terrain_families import family_column_masks  # noqa: E402
 
-V24 = TASK_KIND in ("v24", "v25")  # turn / backward machinery (v2.4 and later)
-V25 = TASK_KIND == "v25"
+V24 = TASK_KIND in ("v24", "v25", "bprime")  # turn / backward machinery (v2.4 and later)
+V25 = TASK_KIND in ("v25", "bprime")
 if V24:
     from gd_lab.gast_narrow import mdp_turn  # noqa: E402
 if V25:

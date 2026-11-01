@@ -85,6 +85,14 @@ def shaped_mask(env) -> torch.Tensor:
     return terrain_family_gate(env, SHAPED_FAMILIES) == 0
 
 
+def narrow_floor(env) -> tuple[torch.Tensor, torch.Tensor]:
+    """(narrow-tile mask [N], floor z [N]) for ``floor_on_narrow`` (B'): narrow passages are sensed by the LiDAR only,
+    so the terms that read the downward height scan take the flat tile floor (env origin z) there instead -- the 1 m
+    passage walls are part of the terrain mesh and the nearest scan hit next to a wall is its top."""
+    from gd_lab.gast_narrow.state import narrow_mask
+    return narrow_mask(env), env.scene.env_origins[:, 2]
+
+
 def nose_up_angle(env) -> torch.Tensor:
     """Trunk front-up pitch (rad), positive = nose up; asin(-g_x) with g the projected gravity in the body frame."""
     g = env.scene["robot"].data.projected_gravity_b
@@ -154,11 +162,13 @@ class TrunkNoseUp(ManagerTermBase):
 
     def __call__(self, env, asset_cfg: SceneEntityCfg, limit_deg: float = 3.0, down_deg: float = 6.0,
                  gap_limit_deg: float = 12.0, gap_down_deg: float = 10.0, ground_relative: bool = False,
-                 level_band: bool = False, off_shaped: bool = False):
+                 level_band: bool = False, off_shaped: bool = False, floor_on_narrow: bool = False):
         nose = nose_up_angle(env)
         top = bottom = torch.zeros_like(nose)
         if ground_relative:
             rise = ground_pitch(env)
+            if floor_on_narrow:
+                rise = torch.where(narrow_floor(env)[0], torch.zeros_like(rise), rise)
             if level_band:
                 top, bottom = rise.clamp_min(0.0), rise.clamp_max(0.0)
             else:
@@ -240,7 +250,7 @@ class FeetImpactForce(ManagerTermBase):
 # R6 ------------------------------------------------------------------------------------------------------------
 def foot_clearance_ground(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg, target: float = 0.07,
                           phase_s: tuple[float, float] = (0.08, 0.20), command_name: str = "base_velocity",
-                          scanner: str = "height_scanner"):
+                          scanner: str = "height_scanner", floor_on_narrow: bool = False):
     """Per second: shortfall of the swing foot's sole below ``target`` above the ground, measured against the
     nearest height-scanner hit (ground frame, so tilting the trunk buys nothing), during the mid-swing window
     ``phase_s`` of the current air time. Linear, moving only."""
@@ -251,6 +261,9 @@ def foot_clearance_ground(env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntit
     nearest = d2.argmin(dim=-1)
     ground = torch.gather(hits[..., 2], 1, nearest)  # [N, F]
     ground = torch.where(torch.isfinite(ground), ground, feet[..., 2] - FOOT_RADIUS)
+    if floor_on_narrow:
+        narrow, floor = narrow_floor(env)
+        ground = torch.where(narrow[:, None], floor[:, None], ground)
     clearance = feet[..., 2] - FOOT_RADIUS - ground
     sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     air = sensor.data.current_air_time[:, sensor_cfg.body_ids]
@@ -339,7 +352,8 @@ class FootLiftCap(ManagerTermBase):
         self.slots = _GapSlots(env)
 
     def __call__(self, env, sensor_cfg: SceneEntityCfg, asset_cfg: SceneEntityCfg, cap: float = 0.09,
-                 flat_range: float = 0.05, command_name: str = "base_velocity", scanner: str = "height_scanner"):
+                 flat_range: float = 0.05, command_name: str = "base_velocity", scanner: str = "height_scanner",
+                 floor_on_narrow: bool = False):
         robot: RigidObject = env.scene[asset_cfg.name]
         feet = robot.data.body_pos_w[:, asset_cfg.body_ids]
         hits = env.scene.sensors[scanner].data.ray_hits_w
@@ -351,6 +365,10 @@ class FootLiftCap(ManagerTermBase):
         d2 = ((feet[:, :, None, :2] - hits[:, None, :, :2]) ** 2).sum(-1)
         ground = torch.gather(hits[..., 2], 1, d2.argmin(dim=-1))
         ground = torch.where(torch.isfinite(ground), ground, feet[..., 2] - FOOT_RADIUS)
+        if floor_on_narrow:  # flat floor: level, ground = floor (the walls would close the level gate)
+            narrow, floor = narrow_floor(env)
+            ground = torch.where(narrow[:, None], floor[:, None], ground)
+            level = level | narrow
         excess = (feet[..., 2] - FOOT_RADIUS - ground - cap).clamp_min(0.0) * ~_in_contact(env, sensor_cfg)
         free = level & ~stairs_mask(env) & ~self.slots.foot_over_slot(env, feet)
         return excess.sum(dim=1) * free.float() * _moving(env, command_name).float()

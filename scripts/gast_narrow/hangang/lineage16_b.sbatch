@@ -38,6 +38,12 @@ case ${LINEAGE_RECIPE:-v25p} in
   v25p) export NARROW_TRAIN_PY=scripts/gast_narrow/train_narrow_v25.py NARROW_TASK=Gd-GastNarrowV25-Rbq10-Dreamwaq-v0 \
                NARROW_TURN=0 NARROW_CLIFF_COLUMNS=0 NARROW_NOSE_WALK_DEG=${NARROW_NOSE_WALK_DEG:-20} \
                GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b_v25p.json ;;
+  # bprime (11-01, docs/hangang/WORKORDER_STAGE_BPRIME_20261101.md): v25p + gait v3 G5 terms from the A' model; no
+  # gap_nose_up (the anchor keeps every gap sample), floor-only downward input on narrow tiles, gait ramp off.
+  bprime) export NARROW_TRAIN_PY=scripts/gast_bprime/train_bprime.py NARROW_TASK=Gd-GastNarrowBPrime-Rbq10-Dreamwaq-v0 \
+                 NARROW_TURN=0 NARROW_CLIFF_COLUMNS=0 GAIT_RAMP_STEPS=0 GAIT_R20=1 NARROW_ANCHOR_GAP_NOSE=0 \
+                 NARROW_EXPERIMENT=gast/lineage16_bprime \
+                 GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b_v25p.json ;;
   v25) export NARROW_TRAIN_PY=scripts/gast_narrow/train_narrow_v25.py NARROW_TASK=Gd-GastNarrowV25-Rbq10-Dreamwaq-v0 \
               GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b_v25.json ;;
   v24) export NARROW_TRAIN_PY=scripts/gast_narrow/train_narrow_v24.py NARROW_TASK=Gd-GastNarrowV24-Rbq10-Dreamwaq-v0 ;;
@@ -72,7 +78,7 @@ echo "=== TRAIN_DONE stage=B nodes=$SLURM_NNODES per_gpu=$per total=$NARROW_TOTA
 # Resubmit hygiene (10-31, job 1187624 failed in 2 min): the checkpoint path must be ABSOLUTE (sha256sum runs in
 # $G/jobs), and sbatch passes this job's environment on, so the per-job variables (rank-log dir, ramp flag, source,
 # run id, update count, rendezvous) are unset for the child.
-ck=$(ls -t $G/gd_lab_vrl/logs/gast/lineage16_b/$GAST_RUN_ID/model_*.pt 2>/dev/null | head -1)
+ck=$(ls -t $G/gd_lab_vrl/logs/$NARROW_EXPERIMENT/$GAST_RUN_ID/model_*.pt 2>/dev/null | head -1)
 if [[ -n $ck && ${NO_RESUBMIT:-0} != 1 ]]; then
   done_n=$(basename "$ck" .pt | sed 's/model_//'); left=$(( NARROW_UPDATES - done_n ))
   if (( left > 20 )); then

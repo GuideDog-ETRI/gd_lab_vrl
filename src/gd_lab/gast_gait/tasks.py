@@ -58,69 +58,76 @@ RAMP_TERMS = {1: "trunk_nose_up", 4: "feet_touchdown", 5: "feet_impact_force", 6
 RAMP_FLOORS = {"feet_slipping": 0.34, "gap_foothold_margin": 0.625}
 
 
+def apply_gait_v3(cfg, floor_on_narrow: bool = False) -> None:
+    """The gait v3 terms, ramp and R20 command on a 6566-derived task config (this task; B' calls it on the narrow
+    v2.5 task). ``floor_on_narrow``: R1 / R6 / R15 take the flat tile floor on narrow tiles (B', LiDAR-only passages)."""
+    r = cfg.rewards
+    narrow = {"floor_on_narrow": True} if floor_on_narrow else {}
+    if _on(1):
+        r.trunk_nose_up = RewardTermCfg(func=terms.TrunkNoseUp, weight=W_NOSE_UP,
+                                        params={"asset_cfg": FEET_BODIES, "limit_deg": 3.0, "down_deg": 6.0,
+                                                "gap_limit_deg": 12.0, "gap_down_deg": 10.0,
+                                                "ground_relative": os.environ.get("GAIT_R1_GROUND", "1") == "1",
+                                                "level_band": os.environ.get("GAIT_R1_BAND", "1") == "1",
+                                                **SHAPED_OFF, **narrow})
+    if _on(4):
+        r.feet_touchdown = RewardTermCfg(func=terms.feet_touchdown_v3, weight=W_TOUCHDOWN,
+                                         params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
+                                                 "free_speed": 0.3, "stair_free_speed": 0.6, **SHAPED_OFF, **BACK_GAP_OFF})
+    if _on(5):
+        r.feet_impact_force = RewardTermCfg(func=terms.FeetImpactForce, weight=W_IMPACT,
+                                            params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
+                                                    "free_ratio": 2.0, "stair_free_ratio": 2.5, **SHAPED_OFF})
+    if _on(6):
+        r.foot_clearance = RewardTermCfg(func=terms.foot_clearance_ground, weight=W_CLEARANCE,
+                                         params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES, "target": 0.07, **narrow})
+    if _on(7):
+        r.swing_time_floor = RewardTermCfg(func=terms.swing_time_floor, weight=W_SWING_FLOOR,
+                                           params={"sensor_cfg": FEET, "floor_s": 0.14, **SHAPED_OFF, **BACK_GAP_OFF})
+    if _on(8):
+        r.feet_slipping.weight = W_SLIP
+    if _on(9):
+        r.stance_overextension = RewardTermCfg(func=terms.stance_overextension, weight=W_OVEREXT,
+                                               params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
+                                                       "hip_cfg": HIP_BODIES, "limit": 0.18,
+                                                       "gap_limit": 0.22, "gap_scale": 1.5, **SHAPED_OFF, **BACK_GAP_OFF})
+    if _on(10):
+        r.swing_speed_cap = RewardTermCfg(func=terms.swing_speed_cap, weight=W_SWING_SPEED,
+                                          params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES, "cap": 3.0,
+                                                  "gap_cap": 3.5, **SHAPED_OFF, **BACK_GAP_OFF})
+    if _on(11):
+        r.lead_foot_stall = RewardTermCfg(func=terms.lead_foot_stall, weight=W_LEAD_STALL,
+                                          params={"sensor_cfg": FEET, "stall_s": 0.8, "cap_s": 1.0,
+                                                  "min_trunk_speed": 0.15})
+    if _on(15):
+        r.foot_lift_cap = RewardTermCfg(func=terms.FootLiftCap, weight=W_LIFT_CAP,
+                                        params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES, "cap": 0.09, **narrow})
+    if _on(16):
+        r.backward_overspeed = RewardTermCfg(func=terms.backward_overspeed, weight=W_BACK_OVERSPEED, params={})
+    if _on(17):
+        r.gap_support = RewardTermCfg(func=terms.GapSupport, weight=W_GAP_SUPPORT,
+                                      params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES, "min_feet": 3})
+    if _on(18):
+        r.gap_foothold_margin.params["margin"] = GAP_FOOTHOLD_MARGIN
+        r.gap_foothold_margin.weight = W_GAP_FOOTHOLD
+    if _on(20):  # G5: backward gap speeds toward 0.2-0.5 m/s (G4 stood still at -0.3 m/s in front of the gaps)
+        cfg.commands.base_velocity.class_type = SlowBackGapVelocityCommand
+    if os.environ.get("GAIT_R13", "0") != "1":
+        r.backward_nose_up = None  # absorbed by R1
+    if RAMP_STEPS > 0:
+        names = [n for k, n in RAMP_TERMS.items() if _on(k)]
+        sched = cfg.curriculum.penalty_terrain_schedule  # the 6566 kappa schedule also sets feet_touchdown
+        sched.params["term_names"] = [n for n in sched.params["term_names"] if n not in names]
+        cfg.curriculum.gait_weight_ramp = CurriculumTermCfg(
+            func=terms.gait_weight_ramp, params={"term_names": names, "ramp_steps": RAMP_STEPS, "kappa_min": 0.2,
+                                                 "floors": RAMP_FLOORS})
+
+
 @configclass
 class GastGaitV3GapTeacherCfg(GastRayIrV21Gap50BackV2TeacherCfg):
     def __post_init__(self):
         super().__post_init__()
-        r = self.rewards
-        if _on(1):
-            r.trunk_nose_up = RewardTermCfg(func=terms.TrunkNoseUp, weight=W_NOSE_UP,
-                                            params={"asset_cfg": FEET_BODIES, "limit_deg": 3.0, "down_deg": 6.0,
-                                                    "gap_limit_deg": 12.0, "gap_down_deg": 10.0,
-                                                    "ground_relative": os.environ.get("GAIT_R1_GROUND", "1") == "1",
-                                                    "level_band": os.environ.get("GAIT_R1_BAND", "1") == "1",
-                                                    **SHAPED_OFF})
-        if _on(4):
-            r.feet_touchdown = RewardTermCfg(func=terms.feet_touchdown_v3, weight=W_TOUCHDOWN,
-                                             params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
-                                                     "free_speed": 0.3, "stair_free_speed": 0.6, **SHAPED_OFF, **BACK_GAP_OFF})
-        if _on(5):
-            r.feet_impact_force = RewardTermCfg(func=terms.FeetImpactForce, weight=W_IMPACT,
-                                                params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
-                                                        "free_ratio": 2.0, "stair_free_ratio": 2.5, **SHAPED_OFF})
-        if _on(6):
-            r.foot_clearance = RewardTermCfg(func=terms.foot_clearance_ground, weight=W_CLEARANCE,
-                                             params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES, "target": 0.07})
-        if _on(7):
-            r.swing_time_floor = RewardTermCfg(func=terms.swing_time_floor, weight=W_SWING_FLOOR,
-                                               params={"sensor_cfg": FEET, "floor_s": 0.14, **SHAPED_OFF, **BACK_GAP_OFF})
-        if _on(8):
-            r.feet_slipping.weight = W_SLIP
-        if _on(9):
-            r.stance_overextension = RewardTermCfg(func=terms.stance_overextension, weight=W_OVEREXT,
-                                                   params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
-                                                           "hip_cfg": HIP_BODIES, "limit": 0.18,
-                                                           "gap_limit": 0.22, "gap_scale": 1.5, **SHAPED_OFF, **BACK_GAP_OFF})
-        if _on(10):
-            r.swing_speed_cap = RewardTermCfg(func=terms.swing_speed_cap, weight=W_SWING_SPEED,
-                                              params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES, "cap": 3.0,
-                                                      "gap_cap": 3.5, **SHAPED_OFF, **BACK_GAP_OFF})
-        if _on(11):
-            r.lead_foot_stall = RewardTermCfg(func=terms.lead_foot_stall, weight=W_LEAD_STALL,
-                                              params={"sensor_cfg": FEET, "stall_s": 0.8, "cap_s": 1.0,
-                                                      "min_trunk_speed": 0.15})
-        if _on(15):
-            r.foot_lift_cap = RewardTermCfg(func=terms.FootLiftCap, weight=W_LIFT_CAP,
-                                            params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES, "cap": 0.09})
-        if _on(16):
-            r.backward_overspeed = RewardTermCfg(func=terms.backward_overspeed, weight=W_BACK_OVERSPEED, params={})
-        if _on(17):
-            r.gap_support = RewardTermCfg(func=terms.GapSupport, weight=W_GAP_SUPPORT,
-                                          params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES, "min_feet": 3})
-        if _on(18):
-            r.gap_foothold_margin.params["margin"] = GAP_FOOTHOLD_MARGIN
-            r.gap_foothold_margin.weight = W_GAP_FOOTHOLD
-        if _on(20):  # G5: backward gap speeds toward 0.2-0.5 m/s (G4 stood still at -0.3 m/s in front of the gaps)
-            self.commands.base_velocity.class_type = SlowBackGapVelocityCommand
-        if os.environ.get("GAIT_R13", "0") != "1":
-            r.backward_nose_up = None  # absorbed by R1
-        if RAMP_STEPS > 0:
-            names = [n for k, n in RAMP_TERMS.items() if _on(k)]
-            sched = self.curriculum.penalty_terrain_schedule  # the 6566 kappa schedule also sets feet_touchdown
-            sched.params["term_names"] = [n for n in sched.params["term_names"] if n not in names]
-            self.curriculum.gait_weight_ramp = CurriculumTermCfg(
-                func=terms.gait_weight_ramp, params={"term_names": names, "ramp_steps": RAMP_STEPS, "kappa_min": 0.2,
-                                                     "floors": RAMP_FLOORS})
+        apply_gait_v3(self)
 
 
 TASK = "GastGaitV3Gap"
