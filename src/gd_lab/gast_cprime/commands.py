@@ -23,6 +23,19 @@ from gd_lab.gast_narrow.mdp import WZ_GAIN, WZ_MAX, _wrap
 
 
 _DEBUG = os.environ.get("CPRIME_CMD_DEBUG", "0") == "1"
+# Staged zone command (design D2 alternative, adopted 11-02 after cprime_t1b it100 still walked off every deck): inside the
+# cliff zone the linear command is scaled by kappa = 0 for the first ZERO_CMD_STEPS env steps (100 steps = 1 update), then
+# ramps to 1 over CMD_RAMP_STEPS. With a zero command the start model stands (it knows "stand still"), so cliff_stand /
+# hold are sampled from update 0 while the drop is in view; the ramp hands the decision back to the policy. 0 = off
+# (E2 and continuation runs set CPRIME_ZERO_CMD_STEPS=0).
+ZERO_CMD_STEPS = int(os.environ.get("CPRIME_ZERO_CMD_STEPS", "10000"))
+CMD_RAMP_STEPS = int(os.environ.get("CPRIME_CMD_RAMP_STEPS", "10000"))
+
+
+def zone_command_scale(step: int) -> float:
+    if ZERO_CMD_STEPS <= 0:
+        return 1.0
+    return min(1.0, max(0.0, (step - ZERO_CMD_STEPS) / max(1, CMD_RAMP_STEPS)))
 
 
 class CPrimeVelocityCommand(BPrimeVelocityCommand):
@@ -40,6 +53,11 @@ class CPrimeVelocityCommand(BPrimeVelocityCommand):
         vx = c * v0[:, 0] - s * v0[:, 1]
         vy = s * v0[:, 0] + c * v0[:, 1]
         wz = (WZ_GAIN * rot).clamp(-WZ_MAX, WZ_MAX)
+        kappa = zone_command_scale(int(env.common_step_counter))
+        if kappa < 1.0:
+            zone = mdp_cliff.cliff_zone(env)
+            scale = torch.where(zone, torch.full_like(vx, kappa), torch.ones_like(vx))
+            vx, vy = vx * scale, vy * scale
         self.vel_command_b[mask, 0] = vx[mask]
         self.vel_command_b[mask, 1] = vy[mask]
         self.vel_command_b[mask, 2] = wz[mask]

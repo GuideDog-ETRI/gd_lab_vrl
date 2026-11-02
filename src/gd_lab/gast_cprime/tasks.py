@@ -10,7 +10,7 @@ flat and the env origin sits on it).
 from __future__ import annotations
 
 import torch
-from isaaclab.managers import ObservationGroupCfg, ObservationTermCfg
+from isaaclab.managers import ObservationGroupCfg, ObservationTermCfg, RewardTermCfg
 from isaaclab.utils import configclass
 
 from gd_lab.gast_bprime.commands import BPrimeVelocityCommand
@@ -20,11 +20,13 @@ from gd_lab.gast_cprime.cliff import reset_cliff_cprime
 from gd_lab.gast_cprime.commands import CPrimeVelocityCommand
 from gd_lab.gast_cprime.model import SUPPORT_GROUP
 from gd_lab.gast_cprime.support import SupportEnd
+from gd_lab.gast_cprime.terms import cliff_slow
 from gd_lab.gast_narrow import mdp_cliff, mdp_v2, tasks_v25
 from gd_lab.gast_narrow.state import narrow_state
 from gd_lab.gast_narrow.tasks_v22 import STALL_CMD, _speeds
 
 CLIFF_COLUMNS = 4
+CLIFF_SLOW_WEIGHT = 1.0
 
 
 class CPrimeStallPenalty(BPrimeStallPenalty):
@@ -67,6 +69,7 @@ class GastNarrowCPrimeTeacherCfg(GastNarrowBPrimeTeacherCfg):
         self.commands.base_velocity.class_type = CPrimeVelocityCommand  # world-frame cliff command (11-02 loophole)
         assert self.rewards.narrow_stall.func is BPrimeStallPenalty
         self.rewards.narrow_stall.func = CPrimeStallPenalty  # weight stays B' -2
+        self.rewards.cliff_slow = RewardTermCfg(func=cliff_slow, weight=CLIFF_SLOW_WEIGHT)
         setattr(self.observations, SUPPORT_GROUP, NarrowSupportEndGroup())
 
 

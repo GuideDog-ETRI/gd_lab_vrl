@@ -80,3 +80,4 @@ env:
   NARROW_TURN: '0'
   NARROW_CLIFF_COLUMNS: '4'
   GAIT_RAMP_STEPS: '0'
+  CPRIME_ZERO_CMD_STEPS: '0'   # staged zone command is a training aid only
