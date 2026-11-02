@@ -147,3 +147,14 @@ env.yaml에 `num_cols 48`, `narrow_cliff`, `reset_cliff_cprime`, `narrow_support
 **A6000 사전 검증 계획:** `train_cprime_3gpu.sh train`, NARROW_SOURCE = margin_t1(bprime_margin it859 = best_top5/259_top1.pt),
 5,120 env × 300, 앵커 두 개 = margin_t1, GPU 0,1,2. 시작 확인: source_kind `cprime_from_bprime`, widened 1열, it50 전후
 `Episode_Reward/cliff_stand` > 0, `narrow_cliff` 레벨 상승. 끝나면 E2 `stage_cprime_a6000.yaml`(cp_t1, cp_fin, margin_t1, 602, 6566).
+
+### 7.1 A6000 1차 런(cprime_t1, aa160ba) it57: 명령 허점 → 세계 좌표 명령 (11-02 16:30)
+
+- 증상: `cliff_stand` 0, 낭떠러지 레벨 0, **그리고 침범·추락도 0**(낭떠러지 에피소드는 모두 시간 초과). v25b(침범 1.0)와 다르다.
+- 원인(bpfin 낭떠러지 리플레이 24 env): 끝선 근처에서 **71 %가 90° 넘게 돌아섬**(평균 112°), 구역 체류 0.48 s, 정지 0.03 s, 침범·추락 0.
+  v2.5 명령은 몸 기준 일정 속도(ωz 0)라 돌아서서 데크를 "앞으로" 계속 걸으면 추종 보상을 전부 받고 위험이 없다. 갭에서 낙차 회피를
+  배운 A′ 계열은 이 길을 바로 찾는다(653은 그대로 걸어 떨어졌음).
+- 수정(`gast_cprime/commands.py` `CPrimeVelocityCommand`): 낭떠러지 명령을 **출발 방향(세계 좌표) 고정**으로. 매 스텝 출발 yaw − 현재 yaw로
+  회전한 벡터를 몸 기준 명령으로 주고, ωz = clamp(1.5·(yaw0 − yaw), ±0.6)로 출발 방향을 유지(통로 명령과 같은 게인). 출발 yaw는
+  `reset_cliff_cprime`가 기록(`cliff_yaw0`). 돌아서면 명령이 끝선 쪽으로 돌아오므로 점수를 얻는 길은 멈추거나 떨어지거나 둘뿐.
+- 로컬 smoke(192 × 5) 통과, env.yaml `CPrimeVelocityCommand` 확인. E2 cliff 셀은 e2_trial이 방향·속도만 덮어쓰므로 그대로 동작.
