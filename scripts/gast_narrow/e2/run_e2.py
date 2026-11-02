@@ -75,9 +75,12 @@ def build_cells(cfg: dict, suites: list[str]) -> list[dict]:
     if "cliff" in suites:  # v25 only: uncrossable drop, stop before the edge (GAST_NARROW_V25_DESIGN.md section 7)
         g = s["cliff"]
         for f, lv, d in itertools.product(g["families"], g["levels"], g.get("directions", ["front", "back", "left", "right"])):
-            speed = g["speed_fb"] if d in ("front", "back") else g["speed_lr"]
-            cells.append(dict(suite="cliff", family=f, case=f"L{lv}/{d}", level=lv, direction=d, speed=speed,
-                              envs=g["envs"], key=f"cliff/{f}/L{lv}/{d}"))
+            # speeds_fb / speeds_lr (lists, C') or speed_fb / speed_lr (one value, v2.5)
+            speeds = g.get("speeds_fb", [g.get("speed_fb")]) if d in ("front", "back") else g.get("speeds_lr", [g.get("speed_lr")])
+            for speed in speeds:
+                vtag = f"/v{speed}" if len(speeds) > 1 else ""
+                cells.append(dict(suite="cliff", family=f, case=f"L{lv}/{d}{vtag}", level=lv, direction=d, speed=speed,
+                                  envs=g["envs"], key=f"cliff/{f}/L{lv}/{d}{vtag}"))
     if "dead_end" in suites:
         g = s["dead_end"]
         for f, lv in itertools.product(g["families"], g["levels"]):

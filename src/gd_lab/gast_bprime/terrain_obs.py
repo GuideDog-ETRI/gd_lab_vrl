@@ -13,7 +13,16 @@ from __future__ import annotations
 import torch
 
 from gd_lab.gast.rayir import RaycastIrTerrain
-from gd_lab.gast_narrow.state import narrow_mask
+from gd_lab.gast_narrow import geometry
+from gd_lab.gast_narrow.state import narrow_state
+
+
+def passage_mask(env) -> torch.Tensor:
+    """Narrow tiles without the cliff decks (C', v2.6): a deck's env origin is its top, 1.0 m above the tile floor,
+    and capturing it as a flat floor would hide the drop (and fail the one-height check below). Equal to narrow_mask
+    on a terrain without cliff columns (B')."""
+    state = narrow_state(env)
+    return state.narrow & (state.kind != geometry.KINDS["cliff"])
 
 
 def _plane_cast(z0: float):
@@ -29,7 +38,7 @@ def _plane_cast(z0: float):
 class NarrowFloorRaycastIrTerrain(RaycastIrTerrain):
     def _capture(self, env, strength):
         fresh = super()._capture(env, strength)
-        narrow = narrow_mask(env)
+        narrow = passage_mask(env)
         if not bool(narrow.any()):
             return fresh
         z = env.scene.env_origins[narrow, 2]

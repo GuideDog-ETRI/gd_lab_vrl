@@ -108,7 +108,8 @@ def cell_metrics(cell, rows):
         cross = sum(r["gap_achieved"] and not r["gap_bypassed"] and not r["base_contact"] for r in rows) / n
         att = [sum(x) for x in zip(*[r["gap_attempts"] for r in rows])]  # started, clean, nonclean, retreat, reverse, end
         decided = sum(att[1:5])
-        return dict(n=n, cross=cross, clean=att[1] / decided if decided else None, attempts=decided, fall=fall,
+        stuck = sum(not r["gap_achieved"] and not r["gap_bypassed"] and not r["base_contact"] for r in rows) / n
+        return dict(n=n, cross=cross, clean=att[1] / decided if decided else None, attempts=decided, fall=fall, stuck=stuck,
                     foot_drop=sum(r.get("sum_platform_gap_foot_drop", 0.0) != 0.0 for r in rows) / n,
                     **nose_metrics(rows))
     if s in ("stairs", "terrain"):
@@ -253,6 +254,7 @@ def main():
                                                          ("이동 > 0.2 m 종료", "drift_fail", False), ("넘어짐", "fall", False),
                                                          ("무접촉", "touch_free", False)], pick=lambda c: not c["turnable"])
         table("갭", cond, "gap", [("건넘", "cross", True), ("clean/시도", "clean", True), ("넘어짐", "fall", True),
+                                  ("미도달(정지)", "stuck", False),
                                   ("머리 들림 최대 평균", "nose", False), ("머리 들림 최대 p90", "nose_p90", False),
                                   ("20° 초과", "nose20", False), ("15° 초과 시간", "nose_t15", False)])
         table("계단", cond, "stairs", [("통과", "pass_", True), ("넘어짐", "fall", True), ("몸통 접촉", "body", False)])

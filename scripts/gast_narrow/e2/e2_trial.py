@@ -64,15 +64,18 @@ TASKS = {"v2": ("GastNarrowV2", "gd_lab.gast_narrow.tasks_v2:GastNarrowV2Teacher
                  "gd_lab.gast_narrow.tasks_v25:GastNarrowV25RunnerCfg"),
          # stage B': v2.5 (env NARROW_TURN=0 NARROW_CLIFF_COLUMNS=0) with the floor-only downward input on narrow tiles
          "bprime": ("GastNarrowBPrime", "gd_lab.gast_bprime.tasks:GastNarrowBPrimeTeacherCfg",
-                    "gd_lab.gast_bprime.tasks:GastNarrowBPrimeRunnerCfg")}
+                    "gd_lab.gast_bprime.tasks:GastNarrowBPrimeRunnerCfg"),
+         # stage C': B' + cliff decks (env NARROW_TURN=0 NARROW_CLIFF_COLUMNS=4) + the support_end actor input
+         "cprime": ("GastNarrowCPrime", "gd_lab.gast_cprime.tasks:GastNarrowCPrimeTeacherCfg",
+                    "gd_lab.gast_cprime.tasks:GastNarrowCPrimeRunnerCfg")}
 task_name, env_entry, agent_entry = TASKS[TASK_KIND]
 TASK = registry.register_task(task=task_name, robot="Rbq10", method="Dreamwaq", env_cfg=env_entry, agent_cfg=agent_entry)
 from gd_lab.gast_narrow import geometry, mdp_v2  # noqa: E402
 from gd_lab.gast_narrow.state import narrow_state  # noqa: E402
 from gd_lab.mdp.terrain_families import family_column_masks  # noqa: E402
 
-V24 = TASK_KIND in ("v24", "v25", "bprime")  # turn / backward machinery (v2.4 and later)
-V25 = TASK_KIND in ("v25", "bprime")
+V24 = TASK_KIND in ("v24", "v25", "bprime", "cprime")  # turn / backward machinery (v2.4 and later)
+V25 = TASK_KIND in ("v25", "bprime", "cprime")
 if V24:
     from gd_lab.gast_narrow import mdp_turn  # noqa: E402
 if V25:

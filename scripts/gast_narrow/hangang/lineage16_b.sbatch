@@ -44,6 +44,12 @@ case ${LINEAGE_RECIPE:-v25p} in
                  NARROW_TURN=0 NARROW_CLIFF_COLUMNS=0 GAIT_RAMP_STEPS=0 GAIT_R20=1 NARROW_ANCHOR_GAP_NOSE=0 \
                  NARROW_EXPERIMENT=gast/lineage16_bprime \
                  GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b_v25p.json ;;
+  # cprime (11-02, docs/design/GAST_NARROW_V26_CLIFF_DESIGN.md): B' + 4 cliff-deck columns (front / back, 0.3..0.8 m/s)
+  # + the support_end actor input, from the stage B' model (STAGE_A = the B' checkpoint here).
+  cprime) export NARROW_TRAIN_PY=scripts/gast_cprime/train_cprime.py NARROW_TASK=Gd-GastNarrowCPrime-Rbq10-Dreamwaq-v0 \
+                 NARROW_TURN=0 NARROW_CLIFF_COLUMNS=4 GAIT_RAMP_STEPS=0 GAIT_R20=1 NARROW_ANCHOR_GAP_NOSE=0 \
+                 NARROW_EXPERIMENT=gast/lineage16_cprime \
+                 GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_cprime.json ;;
   v25) export NARROW_TRAIN_PY=scripts/gast_narrow/train_narrow_v25.py NARROW_TASK=Gd-GastNarrowV25-Rbq10-Dreamwaq-v0 \
               GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b_v25.json ;;
   v24) export NARROW_TRAIN_PY=scripts/gast_narrow/train_narrow_v24.py NARROW_TASK=Gd-GastNarrowV24-Rbq10-Dreamwaq-v0 ;;

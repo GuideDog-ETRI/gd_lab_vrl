@@ -1,0 +1,82 @@
+# Stage C' pre-validation E2 on onvlm2 (A6000, GPUs 0-2 only): docs/design/GAST_NARROW_V26_CLIFF_DESIGN.md section 6.
+# Task cprime (B' env + 4 cliff-deck columns + support_end input; env NARROW_TURN=0 NARROW_CLIFF_COLUMNS=4). Models
+# without the support_end column (B' margin_t1, 602, 6566) are widened with a zero column by e2_trial, so they act as
+# trained. Baseline for the retention check = the B' start model (margin_t1): passages within 1 pt, gap / stairs within
+# 1-2 pt. Cliff gates: hold >= 90 %, breach <= 5 %, fall 0; gap "미도달(정지)" <= 2 % (false stops at gaps).
+#   python3 scripts/gast_narrow/e2/run_e2.py configs/gast_narrow/e2/stage_cprime_a6000.yaml [--only cliff,gap] [--models ...]
+name: stage_cprime
+task: cprime
+out_root: logs/e2
+seed: 42
+seconds: 20.0
+hardware:
+  gpus: [0, 1, 2]             # onvlm2: GPU 3 is refused by run_e2.py
+  e2_slots_per_gpu: 2
+  e1_slots_per_gpu: 3
+  sif: /data/users/bsseo/gd_lab_isaaclab.sif
+  python: /data/users/bsseo/venv/bin/python
+models:
+  '# cp_t1': logs/gast/cprime/<run>/best_top5/<it>_top1.pt (fill in)
+  '# cp_fin': logs/gast/cprime/<run>/model_299.pt (fill in)
+  margin_t1: logs/gast/bprime/bprime_margin_5120x100_300_20261102/best_top5/259_top1.pt
+  v23u602: checkpoints/gast_narrow/narrow_v23_gh200_20261029/v23_gh200_it602_top5.pt
+  b6566: checkpoints/gast_narrow/backgapv2_6566.pt
+suites:
+  cliff:                      # C': deck with a 1.0 m drop; front / back only (D1), the robot must stop before the edge
+    enabled: true
+    families: [narrow_cliff]
+    levels: [7, 14]           # half-size 1.9 / 1.6 m
+    directions: [front, back]
+    speeds_fb: [0.3, 0.8]     # D3 range ends
+    envs: 512
+  gap:
+    enabled: true
+    directions: [forward, backward]
+    levels: [7, 11, 14]
+    speeds: [0.3, 0.5, 0.9]
+    envs: 512
+  stairs:
+    enabled: true
+    families: [pyramid_stairs, pyramid_stairs_inv, pyramid_stairs_wide, pyramid_stairs_inv_wide, pyramid_stairs_nose,
+               pyramid_stairs_inv_nose]
+    directions: [up, down]
+    levels: [9, 14]
+    speed: 0.8
+    envs: 512
+  terrain:
+    enabled: true
+    families: [hf_pyramid_slope, hf_pyramid_slope_inv, random_rough, ring_fence]
+    levels: [14]
+    direction: outward
+    speed: 1.0
+    envs: 512
+  narrow:
+    enabled: true
+    families: [narrow_corridor, narrow_door_pos, narrow_door_neg, narrow_bend_left, narrow_bend_right]
+    cases:
+    - {name: pass_wide, width: 0.8, margin: 0.1}
+    - {name: pass_tight, width: 0.66, margin: 0.05}
+    - {name: block_margin, width: 0.66, margin: 0.15}
+    - {name: block_narrow, width: 0.52, margin: 0.1}
+    envs: 512
+    directions: [forward, backward]
+  dead_end:
+    enabled: true
+    families: [narrow_dead_end]
+    levels: [7, 14]
+    margin: 0.1
+    envs: 512
+conditions:
+  nominal:     {enabled: true, lidar: both,   rear: true,  payload_kg: 5.0, push: false, stair_disturbance: false,
+                suites: [cliff, narrow, dead_end, gap, stairs, terrain]}
+  mid360_rear: {enabled: true, lidar: mid360, rear: true,  payload_kg: 5.0, push: false, stair_disturbance: false,
+                suites: [cliff, narrow, dead_end]}
+  lidar_off:   {enabled: true, lidar: 'off',  rear: false, payload_kg: 5.0, push: false, stair_disturbance: false,
+                suites: [cliff, gap, stairs, terrain]}   # the cliff stop must not depend on the LiDAR (its band sees no drop)
+report:
+  baseline: margin_t1
+  max_drop_pt: 1.0
+env:
+  NARROW_TURN: '0'
+  NARROW_CLIFF_COLUMNS: '4'
+  GAIT_RAMP_STEPS: '0'
