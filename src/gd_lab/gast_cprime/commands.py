@@ -23,12 +23,13 @@ from gd_lab.gast_narrow.mdp import WZ_GAIN, WZ_MAX, _wrap
 
 
 _DEBUG = os.environ.get("CPRIME_CMD_DEBUG", "0") == "1"
-# Staged zone command (design D2 alternative, adopted 11-02 after cprime_t1b it100 still walked off every deck): inside the
-# cliff zone the linear command is scaled by kappa = 0 for the first ZERO_CMD_STEPS env steps (100 steps = 1 update), then
-# ramps to 1 over CMD_RAMP_STEPS. With a zero command the start model stands (it knows "stand still"), so cliff_stand /
-# hold are sampled from update 0 while the drop is in view; the ramp hands the decision back to the policy. 0 = off
-# (E2 and continuation runs set CPRIME_ZERO_CMD_STEPS=0).
-ZERO_CMD_STEPS = int(os.environ.get("CPRIME_ZERO_CMD_STEPS", "10000"))
+# Staged zone command (tried 11-02 in cprime_t1c after t1b it100 still walked off every deck): inside the cliff zone the
+# linear command is scaled by kappa = 0 for the first ZERO_CMD_STEPS env steps (100 steps = 1 update), then ramps to 1
+# over CMD_RAMP_STEPS. With a zero command the start model stands, so cliff_stand / hold were sampled from update 0
+# (hold 1.00, level 0 -> 11) -- but the policy credited the standing to the zero command, not to the drop: at kappa 0.2
+# (update 120) hold fell to 0.79 and at update 150 to 0.17, the same walk-off as t1 / t1b. OFF by default since then
+# (0); the stand anchor of gast_cprime.anchor replaces it. CPRIME_ZERO_CMD_STEPS=<n> re-enables it for experiments.
+ZERO_CMD_STEPS = int(os.environ.get("CPRIME_ZERO_CMD_STEPS", "0"))
 CMD_RAMP_STEPS = int(os.environ.get("CPRIME_CMD_RAMP_STEPS", "10000"))
 
 

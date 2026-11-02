@@ -78,6 +78,8 @@ class GastNarrowCPrimeRunnerCfg(GastNarrowBPrimeRunnerCfg):
     def __post_init__(self):
         super().__post_init__()
         self.experiment_name = "gast/lineage16_cprime"
+        assert self.algorithm.class_name == "gd_lab.gast_narrow.anchor:NarrowAnchorPPO"
+        self.algorithm.class_name = "gd_lab.gast_cprime.anchor:CPrimeAnchorPPO"  # + stand anchor on the cliff zone
         self.policy.class_name = "gd_lab.gast_cprime.model:GastNarrowCPrimeActorCritic"
         self.algorithm.symmetry_cfg.data_augmentation_func = "gd_lab.gast_cprime.model:mirror_narrow_cprime"
 

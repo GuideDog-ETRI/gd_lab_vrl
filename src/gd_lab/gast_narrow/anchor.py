@@ -129,8 +129,25 @@ class NarrowAnchorPPO(GastPPO):
         proprio = proprio.clone()
         proprio[..., DREAMWAQ_SPEC.policy.slice("velocity_commands")] = 0.0
         out[key] = proprio
-        out[TURN_BLOCK_GROUP] = torch.zeros_like(obs[TURN_BLOCK_GROUP])
+        if TURN_BLOCK_GROUP in obs.keys():
+            out[TURN_BLOCK_GROUP] = torch.zeros_like(obs[TURN_BLOCK_GROUP])
         return out
+
+    def _stand_samples(self, obs_all):
+        """[T*N] bool mask of the samples the stand anchor pulls, or None when it is off. v2.4c: the turn-block flag
+        samples (+ v2.4e zone samples with NARROW_STAND_ANCHOR_ZONE=1). Stage C' overrides this (cliff zone)."""
+        if self._stand_weight <= 0 or TURN_BLOCK_GROUP not in obs_all.keys():
+            return None
+        stand = obs_all[TURN_BLOCK_GROUP][..., 0] > 0.5
+        # v2.4e: + the samples where the robot must stand under a moving command (v2 blocked zones before the line):
+        # the flag-only anchor left the dead-end stance unprotected (E2 v24h: dead_end L7 hold 100 -> 44-78 %).
+        # v2.4f: OFF by default (NARROW_STAND_ANCHOR_ZONE=1 turns it on). In run v24i (from 653) it halved the
+        # online narrow passage rate within 50 updates (0.95 -> 0.23-0.37) and did not raise the dead-end hold
+        # (0.20-0.42): blocked and passable tight corridors differ only by the margin input, so a supervised "stand"
+        # pull on the blocked zone spread to the passable ones while PPO kept pushing forward (the robot dithered).
+        if os.environ.get("NARROW_STAND_ANCHOR_ZONE", "0") == "1" and getattr(self, "_stand_buf", None) is not None:
+            stand = stand | self._stand_buf.flatten(0, 1)
+        return stand
 
     @staticmethod
     def _gap_nose_enabled() -> bool:
@@ -196,21 +213,13 @@ class NarrowAnchorPPO(GastPPO):
             nose_up = self._gap_nose_buf.flatten(0, 1)  # [T, N] -> T-major, as storage.observations.flatten(0, 1)
             nose_frac = float((nose_up & retention).float().mean())
             retention = retention & ~nose_up
-        stand_on = self._stand_weight > 0 and TURN_BLOCK_GROUP in obs_all.keys()
-        stand = obs_all[TURN_BLOCK_GROUP][..., 0] > 0.5 if stand_on else None
-        # v2.4e: + the samples where the robot must stand under a moving command (v2 blocked zones before the line):
-        # the flag-only anchor left the dead-end stance unprotected (E2 v24h: dead_end L7 hold 100 -> 44-78 %).
-        # v2.4f: OFF by default (NARROW_STAND_ANCHOR_ZONE=1 turns it on). In run v24i (from 653) it halved the
-        # online narrow passage rate within 50 updates (0.95 -> 0.23-0.37) and did not raise the dead-end hold
-        # (0.20-0.42): blocked and passable tight corridors differ only by the margin input, so a supervised "stand"
-        # pull on the blocked zone spread to the passable ones while PPO kept pushing forward (the robot dithered).
-        if stand_on and os.environ.get("NARROW_STAND_ANCHOR_ZONE", "0") == "1" \
-                and getattr(self, "_stand_buf", None) is not None:
-            stand = stand | self._stand_buf.flatten(0, 1)
+        stand = self._stand_samples(obs_all)
+        stand_on = stand is not None
         n = retention.shape[0]
         mini = n // self.num_mini_batches
         total, frac, steps = 0.0, float(retention.float().mean()), 0
         stand_total, stand_frac = 0.0, float(stand.float().mean()) if stand_on else 0.0
+        stand_norms = [0.0, 0.0]
         for _ in range(self._anchor_epochs):
             order = torch.randperm(self.num_mini_batches * mini, device=self.device)
             for i in range(self.num_mini_batches):
@@ -231,6 +240,10 @@ class NarrowAnchorPPO(GastPPO):
                     stand_loss = self._stand_weight * (stand_err * smask).sum() / smask.sum().clamp_min(1)
                     loss = loss + stand_loss
                     stand_total += float(stand_loss.detach()) / self._stand_weight
+                    # Diagnostics: is the target a stance (small action norm) and how far is the policy from it?
+                    cnt = smask.sum().clamp_min(1)
+                    stand_norms[0] += float((stand_target.norm(dim=-1) * smask).sum() / cnt)
+                    stand_norms[1] += float((mu.detach().norm(dim=-1) * smask).sum() / cnt)
                 self.optimizer.zero_grad(set_to_none=True)
                 loss.backward()
                 if self.is_multi_gpu:
@@ -241,4 +254,6 @@ class NarrowAnchorPPO(GastPPO):
                 steps += 1
         return {"anchor_mse": total / max(steps, 1), "anchor_retention_fraction": frac,
                 "anchor_nose_excluded_fraction": nose_frac,
-                "stand_anchor_mse": stand_total / max(steps, 1), "stand_anchor_fraction": stand_frac}
+                "stand_anchor_mse": stand_total / max(steps, 1), "stand_anchor_fraction": stand_frac,
+                "stand_target_action_norm": stand_norms[0] / max(steps, 1),
+                "stand_policy_action_norm": stand_norms[1] / max(steps, 1)}
