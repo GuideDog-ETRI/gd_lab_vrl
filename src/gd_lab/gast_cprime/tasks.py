@@ -9,18 +9,38 @@ flat and the env origin sits on it).
 """
 from __future__ import annotations
 
+import torch
 from isaaclab.managers import ObservationGroupCfg, ObservationTermCfg
 from isaaclab.utils import configclass
 
 from gd_lab.gast_bprime.commands import BPrimeVelocityCommand
-from gd_lab.gast_bprime.tasks import GastNarrowBPrimeRunnerCfg, GastNarrowBPrimeTeacherCfg
+from gd_lab.gast_bprime.tasks import (STALL_S, BPrimeStallPenalty, GastNarrowBPrimeRunnerCfg,
+                                      GastNarrowBPrimeTeacherCfg)
 from gd_lab.gast_cprime.cliff import reset_cliff_cprime
 from gd_lab.gast_cprime.commands import CPrimeVelocityCommand
 from gd_lab.gast_cprime.model import SUPPORT_GROUP
 from gd_lab.gast_cprime.support import SupportEnd
-from gd_lab.gast_narrow import mdp_cliff, tasks_v25
+from gd_lab.gast_narrow import mdp_cliff, mdp_v2, tasks_v25
+from gd_lab.gast_narrow.state import narrow_state
+from gd_lab.gast_narrow.tasks_v22 import STALL_CMD, _speeds
 
 CLIFF_COLUMNS = 4
+
+
+class CPrimeStallPenalty(BPrimeStallPenalty):
+    """B' stall penalty (1.0 s, -2) also on cliff tiles OUTSIDE the cliff zone. v2.5 switched it off on the whole deck
+    ("standing is the task there"); with a drop-averse start model the cheapest way to avoid the breach is then to stand
+    (or dawdle) far from the edge, where nothing is paid or charged (A6000 cprime_t1 / t1b, 11-02: cliff_stand 0 and
+    breach / fall 0 from it12 on). Inside the zone (e < 0.6 m) standing stays free and paid (cliff_stand, hold)."""
+
+    def __call__(self, env):
+        state = narrow_state(env)
+        command, speed = _speeds(env)
+        passable = state.narrow & ~mdp_v2.narrow_episode(env).blocked & ~state.past_exit
+        stuck = passable & (command > STALL_CMD) & (speed < mdp_v2.STILL_SPEED)
+        self.still = torch.where(stuck, self.still + env.step_dt, torch.zeros_like(self.still))
+        free = (state.kind == mdp_cliff.CLIFF) & mdp_cliff.cliff_zone(env)
+        return (self.still > STALL_S).float() * (~free).float()
 
 
 @configclass
@@ -45,6 +65,8 @@ class GastNarrowCPrimeTeacherCfg(GastNarrowBPrimeTeacherCfg):
         self.events.reset_cliff.func = reset_cliff_cprime
         assert self.commands.base_velocity.class_type is BPrimeVelocityCommand
         self.commands.base_velocity.class_type = CPrimeVelocityCommand  # world-frame cliff command (11-02 loophole)
+        assert self.rewards.narrow_stall.func is BPrimeStallPenalty
+        self.rewards.narrow_stall.func = CPrimeStallPenalty  # weight stays B' -2
         setattr(self.observations, SUPPORT_GROUP, NarrowSupportEndGroup())
 
 

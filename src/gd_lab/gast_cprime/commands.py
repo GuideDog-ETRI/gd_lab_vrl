@@ -12,12 +12,17 @@ passage command does (gain WZ_GAIN, clamp WZ_MAX). The only ways to score are to
 """
 from __future__ import annotations
 
+import os
+
 import torch
 
 from gd_lab.gast_bprime.commands import BPrimeVelocityCommand
 from gd_lab.gast_cprime.cliff import cliff_yaw0
 from gd_lab.gast_narrow import mdp_cliff
 from gd_lab.gast_narrow.mdp import WZ_GAIN, WZ_MAX, _wrap
+
+
+_DEBUG = os.environ.get("CPRIME_CMD_DEBUG", "0") == "1"
 
 
 class CPrimeVelocityCommand(BPrimeVelocityCommand):
@@ -38,3 +43,8 @@ class CPrimeVelocityCommand(BPrimeVelocityCommand):
         self.vel_command_b[mask, 0] = vx[mask]
         self.vel_command_b[mask, 1] = vy[mask]
         self.vel_command_b[mask, 2] = wz[mask]
+        if _DEBUG and int(env.common_step_counter) % 100 == 0:
+            print(f"[CPRIME_CMD] step={int(env.common_step_counter)} cliff_envs={int(mask.sum())} "
+                  f"|rot|max={float(rot[mask].abs().max()):.2f} rad vy|max={float(vy[mask].abs().max()):.2f} "
+                  f"wz|max={float(wz[mask].abs().max()):.2f} yaw0[:3]={cliff_yaw0(env)[mask][:3].tolist()} "
+                  f"yaw[:3]={yaw[mask][:3].tolist()}", flush=True)
