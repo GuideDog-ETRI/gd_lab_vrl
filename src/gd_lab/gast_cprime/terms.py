@@ -16,5 +16,6 @@ def cliff_slow(env, v_ref: float = V_REF):
     This term pays for every bit of deceleration; cliff_stand and the hold bonus still pay for standing still."""
     speed = env.scene["robot"].data.root_lin_vel_b[:, :2].norm(dim=-1)
     zone = mdp_cliff.cliff_zone(env)
-    anchor.set_cliff_zone_mask(zone)  # the C' stand anchor (gast_cprime.anchor) pulls exactly these samples
+    # The C' stand anchor (gast_cprime.anchor) pulls exactly the zone samples; the retention anchor skips the cliff decks.
+    anchor.set_cliff_zone_mask(zone, mdp_cliff._cliff_mask(env))
     return (1.0 - speed / v_ref).clamp(0.0, 1.0) * zone.float()

@@ -9,6 +9,8 @@ flat and the env origin sits on it).
 """
 from __future__ import annotations
 
+import os
+
 import torch
 from isaaclab.managers import ObservationGroupCfg, ObservationTermCfg, RewardTermCfg
 from isaaclab.utils import configclass
@@ -16,17 +18,30 @@ from isaaclab.utils import configclass
 from gd_lab.gast_bprime.commands import BPrimeVelocityCommand
 from gd_lab.gast_bprime.tasks import (STALL_S, BPrimeStallPenalty, GastNarrowBPrimeRunnerCfg,
                                       GastNarrowBPrimeTeacherCfg)
+from gd_lab.gast_cprime import anchor
 from gd_lab.gast_cprime.cliff import reset_cliff_cprime
 from gd_lab.gast_cprime.commands import CPrimeVelocityCommand
 from gd_lab.gast_cprime.model import SUPPORT_GROUP
 from gd_lab.gast_cprime.support import SupportEnd
+from gd_lab.gast_cprime.terrain_obs import CPrimeRaycastIrTerrain
+from gd_lab.gast_bprime.terrain_obs import NarrowFloorRaycastIrTerrain
 from gd_lab.gast_cprime.terms import cliff_slow
 from gd_lab.gast_narrow import mdp_cliff, mdp_v2, tasks_v25
 from gd_lab.gast_narrow.state import narrow_state
 from gd_lab.gast_narrow.tasks_v22 import STALL_CMD, _speeds
+from gd_lab.mdp.gap_stair_v2 import _gap_mask
 
 CLIFF_COLUMNS = 4
 CLIFF_SLOW_WEIGHT = 1.0
+STALL_FREE_E = float(os.environ.get("CPRIME_STALL_FREE_E", "0.8"))  # m from the edge; 0.6 (= ZONE) = the t1d rule
+GAP_STALL = os.environ.get("CPRIME_GAP_STALL", "1") == "1"            # t1f; 0 = the t1d rule (no stall cost on gaps)
+GAP_STALL_SCALE = float(os.environ.get("CPRIME_GAP_STALL_SCALE", "1.0"))  # x the B' -2 on gap tiles
+
+
+def gap_approach(env) -> torch.Tensor:
+    """[N] bool: on a gap tile, no crossing credited yet, not walked around the slot."""
+    crossing = env.reward_manager.get_term_cfg("platform_gap_crossing").func
+    return _gap_mask(env) & ~crossing.achieved.any(dim=1) & ~crossing.bypassed
 
 
 class CPrimeStallPenalty(BPrimeStallPenalty):
@@ -39,10 +54,26 @@ class CPrimeStallPenalty(BPrimeStallPenalty):
         state = narrow_state(env)
         command, speed = _speeds(env)
         passable = state.narrow & ~mdp_v2.narrow_episode(env).blocked & ~state.past_exit
+        gap = gap_approach(env)
+        anchor.set_gap_approach_mask(gap)
+        if GAP_STALL:
+            # t1f: also on a gap tile before the crossing. E2 t1d: the stand anchor spread to the gaps (support_end
+            # fires 22-45 % in front of a gap) and nothing charged the stop -- gap not reached 41 % forward / 73 %
+            # backward, 0-1 % crossings at 0.3-0.5 m/s backward (margin_t1 0-1 % not reached).
+            passable = passable | gap
         stuck = passable & (command > STALL_CMD) & (speed < mdp_v2.STILL_SPEED)
         self.still = torch.where(stuck, self.still + env.step_dt, torch.zeros_like(self.still))
         free = (state.kind == mdp_cliff.CLIFF) & mdp_cliff.cliff_zone(env)
-        return (self.still > STALL_S).float() * (~free).float()
+        if STALL_FREE_E > mdp_cliff.ZONE:
+            # t1e: also free where the drop is already in view (0.6..STALL_FREE_E m). t1d it100 replay: the no-hold
+            # cliff episodes stood still just outside the zone until the time-out and paid -2 /s for a safe stop.
+            # Only the charge goes; cliff_stand / hold still pay inside the zone only (gap tiles: support_end fires
+            # 80 % at 0.6..0.8 m, so no stop reward there).
+            cliff = mdp_cliff.cliff_episode(env)
+            monitor = mdp_v2._monitor(env)
+            free = free | (mdp_cliff._cliff_mask(env) & (cliff.e < STALL_FREE_E) & ~monitor.breached & ~cliff.fell)
+        scale = torch.where(gap, GAP_STALL_SCALE, 1.0) if GAP_STALL else 1.0
+        return (self.still > STALL_S).float() * (~free).float() * scale
 
 
 @configclass
@@ -71,6 +102,8 @@ class GastNarrowCPrimeTeacherCfg(GastNarrowBPrimeTeacherCfg):
         self.rewards.narrow_stall.func = CPrimeStallPenalty  # weight stays B' -2
         self.rewards.cliff_slow = RewardTermCfg(func=cliff_slow, weight=CLIFF_SLOW_WEIGHT)
         setattr(self.observations, SUPPORT_GROUP, NarrowSupportEndGroup())
+        assert self.observations.terrain.camera_visible.func is NarrowFloorRaycastIrTerrain
+        self.observations.terrain.camera_visible = ObservationTermCfg(func=CPrimeRaycastIrTerrain)  # no cliff blackout
 
 
 @configclass

@@ -133,6 +133,15 @@ class NarrowAnchorPPO(GastPPO):
             out[TURN_BLOCK_GROUP] = torch.zeros_like(obs[TURN_BLOCK_GROUP])
         return out
 
+    def _retention_samples(self, obs_all):
+        """[T*N] bool mask of the samples the retention anchor pulls: v2.1 = every sample off the narrow tiles."""
+        return obs_all[PRIV_GROUP][..., NARROW_FLAG] < 0.5
+
+    def _focus_samples(self, obs_all):
+        """([T*N] bool mask, weight) of an extra retention term averaged over these samples only, or (None, 0).
+        Off here; stage C' uses it for the gap approach."""
+        return None, 0.0
+
     def _stand_samples(self, obs_all):
         """[T*N] bool mask of the samples the stand anchor pulls, or None when it is off. v2.4c: the turn-block flag
         samples (+ v2.4e zone samples with NARROW_STAND_ANCHOR_ZONE=1). Stage C' overrides this (cliff zone)."""
@@ -207,7 +216,7 @@ class NarrowAnchorPPO(GastPPO):
         if getattr(self, "_anchor", None) is None:
             self._build_anchor()
         obs_all = self.storage.observations.flatten(0, 1)
-        retention = obs_all[PRIV_GROUP][..., NARROW_FLAG] < 0.5
+        retention = self._retention_samples(obs_all)
         nose_frac = 0.0
         if self._gap_nose_enabled():
             nose_up = self._gap_nose_buf.flatten(0, 1)  # [T, N] -> T-major, as storage.observations.flatten(0, 1)
@@ -215,6 +224,8 @@ class NarrowAnchorPPO(GastPPO):
             retention = retention & ~nose_up
         stand = self._stand_samples(obs_all)
         stand_on = stand is not None
+        focus, focus_weight = self._focus_samples(obs_all)
+        focus_total, focus_frac = 0.0, float(focus.float().mean()) if focus is not None else 0.0
         n = retention.shape[0]
         mini = n // self.num_mini_batches
         total, frac, steps = 0.0, float(retention.float().mean()), 0
@@ -232,6 +243,11 @@ class NarrowAnchorPPO(GastPPO):
                 # Every rank runs backward + all-reduce, also with no retention sample (no collective mismatch).
                 count = mask.sum()
                 loss = self._anchor_weight * (err * mask).sum() / count.clamp_min(1)
+                if focus is not None:
+                    fmask = focus[idx]
+                    focus_err = (err * fmask).sum() / fmask.sum().clamp_min(1)
+                    loss = loss + focus_weight * focus_err
+                    focus_total += float(focus_err.detach())
                 if stand_on:
                     smask = stand[idx]
                     with torch.no_grad():
@@ -254,6 +270,7 @@ class NarrowAnchorPPO(GastPPO):
                 steps += 1
         return {"anchor_mse": total / max(steps, 1), "anchor_retention_fraction": frac,
                 "anchor_nose_excluded_fraction": nose_frac,
+                "anchor_focus_mse": focus_total / max(steps, 1), "anchor_focus_fraction": focus_frac,
                 "stand_anchor_mse": stand_total / max(steps, 1), "stand_anchor_fraction": stand_frac,
                 "stand_target_action_norm": stand_norms[0] / max(steps, 1),
                 "stand_policy_action_norm": stand_norms[1] / max(steps, 1)}

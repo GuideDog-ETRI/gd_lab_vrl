@@ -5,7 +5,8 @@ Same as scripts/gast_bprime/train_bprime.py (copied, the original untouched) wit
 1. Registers Gd-GastNarrowCPrime-Rbq10-Dreamwaq-v0 (gd_lab.gast_cprime.tasks: B' + cliff decks + support_end input).
 2. --warm_start_rayir accepts a B' checkpoint (start: actor.0.weight widened by the one zero support_end column, new
    PPO optimizer) or a C' checkpoint (continue, PPO restored).
-3. Online Top-5: the v2.5 score with the cliff gates (configs/gast_narrow/online_top5_lineage16_cprime.json).
+3. Online Top-5: the v2.5 score with the cliff gates + gap not-reached gate (gast_cprime.top5;
+   configs/gast_narrow/online_top5_lineage16_cprime.json).
 """
 import faulthandler
 import os
@@ -168,9 +169,9 @@ def _from_bprime(alg, checkpoint_path, policy_lr, terrain_lr, *, expected_sha256
 
 warm_start.warm_start_from_rayir = _from_bprime
 
-from gd_lab.gast_narrow import narrow_top5_v25  # noqa: E402
+from gd_lab.gast_cprime import top5  # noqa: E402
 
-narrow_top5_v25.install()
+top5.install()  # v2.5 score + gap not-reached gate (t1f)
 sys.path.insert(0, str(ROOT / "scripts/gast"))  # cli_args.py next to train_teacher.py
 sys.argv[0] = str(ROOT / "scripts/gast/train_teacher.py")
 runpy.run_path(sys.argv[0], run_name="__main__")
