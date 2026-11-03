@@ -19,7 +19,7 @@ from gd_lab.gast_bprime.commands import BPrimeVelocityCommand
 from gd_lab.gast_bprime.tasks import (STALL_S, BPrimeStallPenalty, GastNarrowBPrimeRunnerCfg,
                                       GastNarrowBPrimeTeacherCfg)
 from gd_lab.gast_cprime import anchor
-from gd_lab.gast_cprime.cliff import reset_cliff_cprime
+from gd_lab.gast_cprime.cliff import STAND_ZONE, reset_cliff_cprime, track_lin_vel_xy_cprime
 from gd_lab.gast_cprime.commands import CPrimeVelocityCommand
 from gd_lab.gast_cprime.model import SUPPORT_GROUP
 from gd_lab.gast_cprime.support import SupportEnd
@@ -33,7 +33,8 @@ from gd_lab.mdp.gap_stair_v2 import _gap_mask
 
 CLIFF_COLUMNS = 4
 CLIFF_SLOW_WEIGHT = 1.0
-STALL_FREE_E = float(os.environ.get("CPRIME_STALL_FREE_E", "0.8"))  # m from the edge; 0.6 (= ZONE) = the t1d rule
+# m from the edge; t1i: = STAND_ZONE (a stop before the stand zone pays the stall cost); t1e-t1h 0.8, t1d 0.6 (= ZONE)
+STALL_FREE_E = float(os.environ.get("CPRIME_STALL_FREE_E", str(STAND_ZONE)))
 GAP_STALL = os.environ.get("CPRIME_GAP_STALL", "1") == "1"            # t1f; 0 = the t1d rule (no stall cost on gaps)
 GAP_STALL_SCALE = float(os.environ.get("CPRIME_GAP_STALL_SCALE", "1.0"))  # x the B' -2 on gap tiles
 
@@ -48,7 +49,8 @@ class CPrimeStallPenalty(BPrimeStallPenalty):
     """B' stall penalty (1.0 s, -2) also on cliff tiles OUTSIDE the cliff zone. v2.5 switched it off on the whole deck
     ("standing is the task there"); with a drop-averse start model the cheapest way to avoid the breach is then to stand
     (or dawdle) far from the edge, where nothing is paid or charged (A6000 cprime_t1 / t1b, 11-02: cliff_stand 0 and
-    breach / fall 0 from it12 on). Inside the zone (e < 0.6 m) standing stays free and paid (cliff_stand, hold)."""
+    breach / fall 0 from it12 on). Inside the stand zone (gast_cprime.cliff.STAND_ZONE) standing stays free and paid
+    (cliff_stand, hold)."""
 
     def __call__(self, env):
         state = narrow_state(env)
@@ -101,6 +103,8 @@ class GastNarrowCPrimeTeacherCfg(GastNarrowBPrimeTeacherCfg):
         assert self.rewards.narrow_stall.func is BPrimeStallPenalty
         self.rewards.narrow_stall.func = CPrimeStallPenalty  # weight stays B' -2
         self.rewards.cliff_slow = RewardTermCfg(func=cliff_slow, weight=CLIFF_SLOW_WEIGHT)
+        assert self.rewards.track_lin_vel_xy_exp.func is tasks_v25.track_lin_vel_xy_cliff
+        self.rewards.track_lin_vel_xy_exp.func = track_lin_vel_xy_cprime  # t1i: off in the slow zone too
         setattr(self.observations, SUPPORT_GROUP, NarrowSupportEndGroup())
         assert self.observations.terrain.camera_visible.func is NarrowFloorRaycastIrTerrain
         self.observations.terrain.camera_visible = ObservationTermCfg(func=CPrimeRaycastIrTerrain)  # no cliff blackout
