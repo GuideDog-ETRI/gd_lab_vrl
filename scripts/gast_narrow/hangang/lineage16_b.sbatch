@@ -44,6 +44,14 @@ case ${LINEAGE_RECIPE:-v25p} in
                  NARROW_TURN=0 NARROW_CLIFF_COLUMNS=0 GAIT_RAMP_STEPS=0 GAIT_R20=1 NARROW_ANCHOR_GAP_NOSE=0 \
                  NARROW_EXPERIMENT=gast/lineage16_bprime \
                  GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b_v25p.json ;;
+  # bprime_stride (11-05, gd_lab.gast_backstride.bprime): bprime + the backstride A18L gap terms (long diagonal trot
+  # both ways, R17 off, step floor 0.50 m, landing margin, backward gaps <= 0.20 m), from the A18L model (STAGE_A).
+  bprime_stride) source $G/gd_lab_vrl/scripts/gast_backstride/a18l_env.sh
+                 export NARROW_TRAIN_PY=scripts/gast_backstride/train_bprime_stride.py \
+                 NARROW_TASK=Gd-GastNarrowBPrimeStride-Rbq10-Dreamwaq-v0 \
+                 NARROW_TURN=0 NARROW_CLIFF_COLUMNS=0 GAIT_RAMP_STEPS=0 GAIT_R20=1 NARROW_ANCHOR_GAP_NOSE=0 \
+                 NARROW_EXPERIMENT=gast/lineage16_bprime_stride \
+                 GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b_v25p.json ;;
   # cprime (11-02, docs/design/GAST_NARROW_V26_CLIFF_DESIGN.md): B' + 4 cliff-deck columns (front / back, 0.3..0.8 m/s)
   # + the support_end actor input, from the stage B' model (STAGE_A = the B' checkpoint here).
   cprime) export NARROW_TRAIN_PY=scripts/gast_cprime/train_cprime.py NARROW_TASK=Gd-GastNarrowCPrime-Rbq10-Dreamwaq-v0 \

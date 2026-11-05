@@ -12,21 +12,26 @@ from gd_lab.gast_gait.terms import _GapSlots
 BACK_GAP_MAX = float(os.environ.get("BACKSTRIDE_BACK_GAP_MAX", "0"))  # m; 0 = every gap width (6566 / a1993)
 
 
+def forward_on_wide_slots(command, env_ids) -> None:
+    """Turn the reversed commands of env_ids whose gap tile has a slot wider than BACK_GAP_MAX forward."""
+    if BACK_GAP_MAX <= 0.0:
+        return
+    if not hasattr(command, "_slots"):
+        command._slots = _GapSlots(command._env)
+    if command._slots.geometry is None:
+        return
+    ids = torch.as_tensor(env_ids, device=command.device, dtype=torch.long)
+    slots, _ = command._slots.geometry.for_envs(command._env)
+    wide = (slots[ids, :, 1] - slots[ids, :, 0]).amax(-1) > BACK_GAP_MAX + 1e-6
+    flip = ids[command.backward[ids] & wide]
+    if len(flip):
+        command.vel_command_b[flip, 0] = command.vel_command_b[flip, 0].abs()
+        command.backward[flip] = False
+
+
 class NarrowBackGapVelocityCommand(SlowBackGapVelocityCommand):
     """SlowBackGapVelocityCommand; reversed commands on slots wider than BACK_GAP_MAX are turned forward."""
 
     def _resample_command(self, env_ids):
         super()._resample_command(env_ids)
-        if BACK_GAP_MAX <= 0.0:
-            return
-        if not hasattr(self, "_slots"):
-            self._slots = _GapSlots(self._env)
-        if self._slots.geometry is None:
-            return
-        ids = torch.as_tensor(env_ids, device=self.device, dtype=torch.long)
-        slots, _ = self._slots.geometry.for_envs(self._env)
-        wide = (slots[ids, :, 1] - slots[ids, :, 0]).amax(-1) > BACK_GAP_MAX + 1e-6
-        flip = ids[self.backward[ids] & wide]
-        if len(flip):
-            self.vel_command_b[flip, 0] = self.vel_command_b[flip, 0].abs()
-            self.backward[flip] = False
+        forward_on_wide_slots(self, env_ids)

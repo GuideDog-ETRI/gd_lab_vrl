@@ -44,6 +44,7 @@ W_LAND_MARGIN = _w("LAND_MARGIN", 0.0)  # per crossing touchdown per m under 0.1
 W_ASIDE = _w("ASIDE", 0.0)  # per front touchdown before the slot while its hind foot has crossed but not stepped again (A11)
 W_PLACE = _w("PLACE", -4.0)       # per touchdown per m off the placement band (a1993: ~0.06 m x ~8 touchdowns/s)
 SPACING_FLOOR = float(os.environ.get("BACKSTRIDE_SPACING_FLOOR", "0.40"))
+STRIDE_FLOOR = float(os.environ.get("BACKSTRIDE_STRIDE_FLOOR", "0.40"))  # A18L: 0.50 m (long trot steps near slots)
 HIND_FLOOR = float(os.environ.get("BACKSTRIDE_HIND_FLOOR", "0.45"))
 LIFT_TARGET = float(os.environ.get("BACKSTRIDE_LIFT_TARGET", "0.08"))
 BACK_R17 = os.environ.get("BACKSTRIDE_BACK_R17", "1") == "1"
@@ -51,86 +52,92 @@ BACK_R17_SCALE = float(os.environ.get("BACKSTRIDE_BACK_R17_SCALE", "1"))  # A8: 
 PRINT_MODE = os.environ.get("BACKSTRIDE_PRINT_MODE", "next")  # next: 0.30 m off the new hind print (A5); vacated: into the old one (A8)
 
 
+def apply_backstride(cfg, command_cls=NarrowBackGapVelocityCommand) -> None:
+    """Add the backstride gap terms to a gait v3 task config (the A' gap task here; B' passages in bprime.py).
+    command_cls replaces the velocity command when BACKSTRIDE_BACK_GAP_MAX > 0 (it must keep the task's own command)."""
+    r = cfg.rewards
+    # always registered: it also hands the backward gap mask to the retention anchor. The reward manager skips
+    # weight-0 terms, so "off" is a negligible weight (mask only).
+    r.back_gap_spacing = RewardTermCfg(func=terms.stance_spacing_floor, weight=W_SPACING or -1e-9,
+                                       params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
+                                               "floor": SPACING_FLOOR})
+    if W_LIFT:
+        r.back_gap_front_lift = RewardTermCfg(func=terms.FrontLiftOverSlot, weight=W_LIFT,
+                                              params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
+                                                      "target": LIFT_TARGET})
+    if W_PLACE:
+        r.back_gap_placement = RewardTermCfg(func=terms.touchdown_placement, weight=W_PLACE,
+                                             params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
+                                                     "hip_cfg": HIP_BODIES, "front_max": 0.15, "hind_min": 0.18})
+    seq = {"sensor_cfg": FEET, "asset_cfg": FEET_BODIES}
+    if W_ORDER:
+        r.back_gap_order = RewardTermCfg(func=terms.TrailerLiftoffOrder, weight=W_ORDER, params=dict(seq))
+    if W_SUPPORT:
+        r.back_gap_liftoff_support = RewardTermCfg(func=terms.TrailerLiftoffSupport, weight=W_SUPPORT,
+                                                   params=dict(seq))
+    if W_PRINT:
+        if PRINT_MODE == "preslot":
+            r.back_gap_footprint = RewardTermCfg(func=terms.TrailerIntoPreSlotSpot, weight=W_PRINT,
+                                                 params=dict(seq, tol=0.08, reach=0.35))
+        elif PRINT_MODE == "vacated":
+            r.back_gap_footprint = RewardTermCfg(func=terms.TrailerIntoVacated, weight=W_PRINT,
+                                                 params=dict(seq, tol=0.08))
+        else:
+            r.back_gap_footprint = RewardTermCfg(func=terms.TrailerFootprint, weight=W_PRINT,
+                                                 params=dict(seq, target=0.30, tol=0.10))
+    if W_HIND_HEIGHT:
+        r.back_gap_hind_height = RewardTermCfg(func=terms.hind_stance_height_floor, weight=W_HIND_HEIGHT,
+                                               params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
+                                                       "floor": HIND_FLOOR})
+    if W_FRONT_FIRST:
+        r.back_gap_front_first = RewardTermCfg(func=terms.FrontCrossesFirst, weight=W_FRONT_FIRST,
+                                               params=dict(seq))
+    if W_CROSS_FROM:
+        r.back_gap_cross_from = RewardTermCfg(func=terms.FrontCrossFromPreSlotSpot, weight=W_CROSS_FROM,
+                                              params=dict(seq, tol=0.12, reach=0.35))
+    if W_ASIDE:
+        r.back_gap_hind_aside = RewardTermCfg(func=terms.HindStepsAsideFirst, weight=W_ASIDE, params=dict(seq))
+    if W_LEAD_REACH:
+        r.back_gap_lead_reach = RewardTermCfg(func=terms.LeaderCrossingReach, weight=W_LEAD_REACH,
+                                              params=dict(seq, hip_cfg=HIP_BODIES, target=0.32))
+    if BACK_GAP_MAX > 0.0:
+        cfg.commands.base_velocity.class_type = command_cls
+    if W_CROSS_STEP:
+        r.back_gap_cross_step = RewardTermCfg(func=terms.BackGapCrossingStep, weight=W_CROSS_STEP,
+                                              params=dict(seq, floor=0.55, land_past=0.15))
+    if W_DIAG:
+        r.back_gap_diag_trot = RewardTermCfg(func=terms.HindSwingDiagonalPlanted, weight=W_DIAG, params=dict(seq))
+    if W_LAND_MARGIN:
+        r.gap_land_margin = RewardTermCfg(func=terms.CrossingLandingMargin, weight=W_LAND_MARGIN,
+                                          params={**seq, "land_past": 0.10})
+    if W_STRIDE:
+        r.back_gap_stride = RewardTermCfg(func=terms.BackGapStrideFloor, weight=W_STRIDE,
+                                          params=dict(seq, floor=STRIDE_FLOOR))
+    if W_CLOSE_LAND:
+        r.back_gap_close_land = RewardTermCfg(func=terms.touchdown_onto_pair_foot, weight=W_CLOSE_LAND,
+                                              params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
+                                                      "clear": 0.30})
+    if W_NOSE_DOWN:
+        r.back_gap_nose_down = RewardTermCfg(func=terms.BackGapNoseDown, weight=W_NOSE_DOWN,
+                                             params={"asset_cfg": FEET_BODIES})
+    if terms.BOTH_DIR:
+        r.gap_support = None  # A18: no three-point support on forward gaps either (user 11-05)
+    elif not BACK_R17 and getattr(r, "gap_support", None) is not None:
+        r.gap_support.func = terms.GapSupportForwardOnly  # A4: the hind foot may step back out of the way
+    elif BACK_R17_SCALE != 1.0 and getattr(r, "gap_support", None) is not None:
+        r.gap_support.func = terms.GapSupportBackBoost  # A8: one foot at a time over a backward slot
+        r.gap_support.params["back_scale"] = BACK_R17_SCALE
+    if W_OVEREXT:
+        r.back_gap_overextension = RewardTermCfg(func=terms.back_gap_overextension, weight=W_OVEREXT,
+                                                 params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
+                                                         "hip_cfg": HIP_BODIES, "limit": 0.30})
+
+
 @configclass
 class GastGaitV3BackStrideTeacherCfg(GastGaitV3GapTeacherCfg):
     def __post_init__(self):
         super().__post_init__()
-        r = self.rewards
-        # always registered: it also hands the backward gap mask to the retention anchor. The reward manager skips
-        # weight-0 terms, so "off" is a negligible weight (mask only).
-        r.back_gap_spacing = RewardTermCfg(func=terms.stance_spacing_floor, weight=W_SPACING or -1e-9,
-                                           params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
-                                                   "floor": SPACING_FLOOR})
-        if W_LIFT:
-            r.back_gap_front_lift = RewardTermCfg(func=terms.FrontLiftOverSlot, weight=W_LIFT,
-                                                  params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
-                                                          "target": LIFT_TARGET})
-        if W_PLACE:
-            r.back_gap_placement = RewardTermCfg(func=terms.touchdown_placement, weight=W_PLACE,
-                                                 params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
-                                                         "hip_cfg": HIP_BODIES, "front_max": 0.15, "hind_min": 0.18})
-        seq = {"sensor_cfg": FEET, "asset_cfg": FEET_BODIES}
-        if W_ORDER:
-            r.back_gap_order = RewardTermCfg(func=terms.TrailerLiftoffOrder, weight=W_ORDER, params=dict(seq))
-        if W_SUPPORT:
-            r.back_gap_liftoff_support = RewardTermCfg(func=terms.TrailerLiftoffSupport, weight=W_SUPPORT,
-                                                       params=dict(seq))
-        if W_PRINT:
-            if PRINT_MODE == "preslot":
-                r.back_gap_footprint = RewardTermCfg(func=terms.TrailerIntoPreSlotSpot, weight=W_PRINT,
-                                                     params=dict(seq, tol=0.08, reach=0.35))
-            elif PRINT_MODE == "vacated":
-                r.back_gap_footprint = RewardTermCfg(func=terms.TrailerIntoVacated, weight=W_PRINT,
-                                                     params=dict(seq, tol=0.08))
-            else:
-                r.back_gap_footprint = RewardTermCfg(func=terms.TrailerFootprint, weight=W_PRINT,
-                                                     params=dict(seq, target=0.30, tol=0.10))
-        if W_HIND_HEIGHT:
-            r.back_gap_hind_height = RewardTermCfg(func=terms.hind_stance_height_floor, weight=W_HIND_HEIGHT,
-                                                   params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
-                                                           "floor": HIND_FLOOR})
-        if W_FRONT_FIRST:
-            r.back_gap_front_first = RewardTermCfg(func=terms.FrontCrossesFirst, weight=W_FRONT_FIRST,
-                                                   params=dict(seq))
-        if W_CROSS_FROM:
-            r.back_gap_cross_from = RewardTermCfg(func=terms.FrontCrossFromPreSlotSpot, weight=W_CROSS_FROM,
-                                                  params=dict(seq, tol=0.12, reach=0.35))
-        if W_ASIDE:
-            r.back_gap_hind_aside = RewardTermCfg(func=terms.HindStepsAsideFirst, weight=W_ASIDE, params=dict(seq))
-        if W_LEAD_REACH:
-            r.back_gap_lead_reach = RewardTermCfg(func=terms.LeaderCrossingReach, weight=W_LEAD_REACH,
-                                                  params=dict(seq, hip_cfg=HIP_BODIES, target=0.32))
-        if BACK_GAP_MAX > 0.0:
-            self.commands.base_velocity.class_type = NarrowBackGapVelocityCommand
-        if W_CROSS_STEP:
-            r.back_gap_cross_step = RewardTermCfg(func=terms.BackGapCrossingStep, weight=W_CROSS_STEP,
-                                                  params=dict(seq, floor=0.55, land_past=0.15))
-        if W_DIAG:
-            r.back_gap_diag_trot = RewardTermCfg(func=terms.HindSwingDiagonalPlanted, weight=W_DIAG, params=dict(seq))
-        if W_LAND_MARGIN:
-            r.gap_land_margin = RewardTermCfg(func=terms.CrossingLandingMargin, weight=W_LAND_MARGIN,
-                                              params={**seq, "land_past": 0.10})
-        if W_STRIDE:
-            r.back_gap_stride = RewardTermCfg(func=terms.BackGapStrideFloor, weight=W_STRIDE,
-                                              params=dict(seq, floor=0.40))
-        if W_CLOSE_LAND:
-            r.back_gap_close_land = RewardTermCfg(func=terms.touchdown_onto_pair_foot, weight=W_CLOSE_LAND,
-                                                  params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
-                                                          "clear": 0.30})
-        if W_NOSE_DOWN:
-            r.back_gap_nose_down = RewardTermCfg(func=terms.BackGapNoseDown, weight=W_NOSE_DOWN,
-                                                 params={"asset_cfg": FEET_BODIES})
-        if terms.BOTH_DIR:
-            r.gap_support = None  # A18: no three-point support on forward gaps either (user 11-05)
-        elif not BACK_R17 and getattr(r, "gap_support", None) is not None:
-            r.gap_support.func = terms.GapSupportForwardOnly  # A4: the hind foot may step back out of the way
-        elif BACK_R17_SCALE != 1.0 and getattr(r, "gap_support", None) is not None:
-            r.gap_support.func = terms.GapSupportBackBoost  # A8: one foot at a time over a backward slot
-            r.gap_support.params["back_scale"] = BACK_R17_SCALE
-        if W_OVEREXT:
-            r.back_gap_overextension = RewardTermCfg(func=terms.back_gap_overextension, weight=W_OVEREXT,
-                                                     params={"sensor_cfg": FEET, "asset_cfg": FEET_BODIES,
-                                                             "hip_cfg": HIP_BODIES, "limit": 0.30})
+        apply_backstride(self)
 
 
 @configclass
