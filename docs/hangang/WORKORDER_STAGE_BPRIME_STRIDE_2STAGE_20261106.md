@@ -3,6 +3,14 @@
 **상태: 사용자 결정 11-06 "대안 A로 가자".** 앞 문서 `WORKORDER_STAGE_BPRIME_STRIDE_20261105.md`의 한 번에 하는 레시피
 (job 1222681)는 취소. 이 문서는 바뀐 것만 적는다.
 
+**수정 11-06 19:00 (사용자 결정): 1단계 job 1227288 취소, 2단계를 A6000 1단계 결과에서 바로 시작.**
+A18L 출발 1단계는 135 update까지 막힌 통로·막다른 길 서기 0.0 %, 서기 보상 ≈ 0, 막다른 길 지형 레벨 0이었다. A6000에서도 A18L 출발
+런(bps_fin)은 300 update 동안 막다른 길 레벨 0이었고, 서기가 1~2.5 % 남은 모델(bps_cont)에서 출발한 1단계(v22)만 레벨이 0 → 8.7로
+올랐다. 1단계는 서기가 조금이라도 있는 모델에서만 작동한다. 그래서 1단계는 A6000 v22 결과를 쓰고, 한강은 **2단계만** 돌린다:
+`NARROW_SOURCE` = `checkpoints/gast_narrow/bprime_stride_v22_20261106/bprime_stride_v22_299.pt`
+(sha256 `1062d254f0b27d3981b7b0a08cdc2a2ff314038b7f852b7f8a15245f3d7ddf08`). A6000에서 같은 경로(v22 → 2단계 300 it)의 결과는
+it236 통과 92.0 %, 서기 99.4 %, 갭 건넘 96.2 %, 계단 95.1 %. 아래 §2·§4의 1단계 행은 기록으로만 남긴다.
+
 ## 1. 왜 2단계인가
 
 | 문제 정의 | 결과 | 반영 방향 |
@@ -19,7 +27,7 @@
 | 코드 | origin/gh200 = 이 문서 커밋. `BPRIME_STRIDE_STAGE`(gd_lab.gast_backstride.bprime), sbatch `STRIDE_STAGE=1|2` |
 | STAGE_A (1단계 출발, 두 단계 모두 앵커·서기 앵커) | `checkpoints/gast_narrow/backstride_20261105/backstride_a18l_299.pt`, sha256 `a1493d04a97afde7f415c026c1e34bf902f4edbd080357764aeb999468a60b8e` |
 | 1단계 | `STRIDE_STAGE=1`: margin 끔(`BPRIME_MARGIN_BALANCE=0`), 정지 벌점 `NarrowStallPenaltyV25` −1.0. 나머지(A18L 갭 항, 후진 갭 ≤ 0.20 m, 앵커)는 앞 문서와 같음. 800 update |
-| 2단계 | `STRIDE_STAGE=2`, `NARROW_SOURCE` = 1단계 Top-1(PPO 상태 복원, source_kind `bprime_stride_continue`). B′ 그대로. 1,000 update |
+| 2단계 | `STRIDE_STAGE=2`, `NARROW_SOURCE` = **A6000 1단계 v22 model_299**(위 경로, PPO 상태 복원, source_kind `bprime_stride_continue`). B′ 그대로. 1,000 update |
 | 규모 | 16노드 × 4 GPU × 2,048 = 131,072 env, 저장 50마다. 약 52 update/h → 1단계 약 15.5 h, 2단계 약 19.5 h(24 h 한도 안) |
 | 실험 이름 | `gast/lineage16_bprime_stride_s1`, `gast/lineage16_bprime_stride_s2` |
 | 운용 | **자동 재제출 없음**(sbatch 기본 `NO_RESUBMIT=1`), `NCCL_PROTO=^LL128`(sbatch 기본), sbatch·scancel은 사용자 확인 후 |
@@ -46,10 +54,15 @@ cd $G/jobs && LINEAGE_RECIPE=bprime_stride STRIDE_STAGE=1 NARROW_UPDATES=800 STA
   STAGE_A_SHA256=a1493d04a97afde7f415c026c1e34bf902f4edbd080357764aeb999468a60b8e timeout -k 10 60 sbatch --test-only lineage16_b.sbatch
 cd $G/jobs && LINEAGE_RECIPE=bprime_stride STRIDE_STAGE=1 NARROW_UPDATES=800 STAGE_A=$S \
   STAGE_A_SHA256=a1493d04a97afde7f415c026c1e34bf902f4edbd080357764aeb999468a60b8e timeout -k 10 60 sbatch lineage16_b.sbatch
-# 2단계 (1단계 판정 뒤, 사용자 확인 후): C = 1단계 best_top5 Top-1의 절대 경로
+# 2단계 (사용자 확인 후): C = A6000 1단계 결과 v22 model_299
+C=$G/gd_lab_vrl/checkpoints/gast_narrow/bprime_stride_v22_20261106/bprime_stride_v22_299.pt
+sha256sum $C                                           # 1062d254...ddf08
 cd $G/jobs && LINEAGE_RECIPE=bprime_stride STRIDE_STAGE=2 NARROW_UPDATES=1000 STAGE_A=$S \
   STAGE_A_SHA256=a1493d04a97afde7f415c026c1e34bf902f4edbd080357764aeb999468a60b8e \
-  NARROW_SOURCE=$C NARROW_SOURCE_SHA256=$(sha256sum $C | cut -d" " -f1) timeout -k 10 60 sbatch lineage16_b.sbatch
+  NARROW_SOURCE=$C NARROW_SOURCE_SHA256=1062d254f0b27d3981b7b0a08cdc2a2ff314038b7f852b7f8a15245f3d7ddf08 timeout -k 10 60 sbatch --test-only lineage16_b.sbatch
+cd $G/jobs && LINEAGE_RECIPE=bprime_stride STRIDE_STAGE=2 NARROW_UPDATES=1000 STAGE_A=$S \
+  STAGE_A_SHA256=a1493d04a97afde7f415c026c1e34bf902f4edbd080357764aeb999468a60b8e \
+  NARROW_SOURCE=$C NARROW_SOURCE_SHA256=1062d254f0b27d3981b7b0a08cdc2a2ff314038b7f852b7f8a15245f3d7ddf08 timeout -k 10 60 sbatch lineage16_b.sbatch
 ```
 
 시작 확인(첫 update 로그 뒤 1회 보고): `source_kind`(1단계 `backstride`, 2단계 `bprime_stride_continue`),
@@ -58,6 +71,6 @@ cd $G/jobs && LINEAGE_RECIPE=bprime_stride STRIDE_STAGE=2 NARROW_UPDATES=1000 ST
 
 ## 5. 감시·중간 산출
 
-- 1단계 **model_100.pt**가 나오면 `model_100.pt` + `params/` 를 tar로 묶어 사용자에게 전달(업로드) — MuJoCo 갭·계단·좁은
+- (1단계 취소로 해당 없음) 1단계 **model_100.pt**가 나오면 `model_100.pt` + `params/` 를 tar로 묶어 사용자에게 전달(업로드) — MuJoCo 갭·계단·좁은
   통로 녹화로 걸음걸이 경향을 본다. 학습은 계속 돈다.
-- 중간 E2: 1단계 400 update(요청 시). 한강 세션은 대기(모니터·루프 없음), 보고는 요청 시 1회, push하지 않는다.
+- 2단계 model_100.pt가 나오면 같은 방식으로 묶어 전달(MuJoCo 막다른 길 서기·갭·계단 확인). 중간 E2: 2단계 300 update(요청 시). 한강 세션은 대기(모니터·루프 없음), 보고는 요청 시 1회, push하지 않는다.
