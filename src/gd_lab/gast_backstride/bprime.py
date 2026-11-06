@@ -5,8 +5,16 @@ support back over 2,000 updates. Here the backstride gap terms are added on top 
 the A18L switches: BOTH_DIR=1, R17 off both ways, diagonal trot, step floor 0.50 m, landing margin, backward gaps
 <= 0.20 m). Retention anchor: B' (off the narrow tiles) minus the gap steps (BOTH_DIR: any gap step); stand anchor
 as B'.
+
+Two stages (11-06): with the B' margin draw (50/50 blocked / pass at 0.62-0.74 m) and the B' stall penalty
+(1.0 s, -2) from update 0 the policy never learned to stand (A6000 bprime_stride_cont: stand 1-2.5 %; Hangang job
+1222681 cancelled). B' itself had them only after stand was learned. BPRIME_STRIDE_STAGE=1: margin draw off
+(BPRIME_MARGIN_BALANCE=0, checked here) and the v2.5 stall (1.5 s, -1) -- stand is learned (A6000 v22stall: 92 %);
+BPRIME_STRIDE_STAGE=2 (default): B' as is, from the stage 1 model (A6000 margin: stand 99 %).
 """
 from __future__ import annotations
+
+import os
 
 import torch
 from isaaclab.utils import configclass
@@ -14,9 +22,13 @@ from isaaclab.utils import configclass
 from gd_lab.gast_backstride import terms
 from gd_lab.gast_backstride.commands import forward_on_wide_slots
 from gd_lab.gast_backstride.tasks import apply_backstride
+from gd_lab.gast_bprime import margin
 from gd_lab.gast_bprime.commands import BPrimeVelocityCommand
 from gd_lab.gast_bprime.tasks import GastNarrowBPrimeRunnerCfg, GastNarrowBPrimeTeacherCfg
 from gd_lab.gast_narrow.anchor import NarrowAnchorPPO
+from gd_lab.gast_narrow.tasks_v25 import NarrowStallPenaltyV25
+
+STAGE = os.environ.get("BPRIME_STRIDE_STAGE", "2")
 
 
 class BPrimeNarrowBackGapVelocityCommand(BPrimeVelocityCommand):
@@ -52,6 +64,12 @@ class GastNarrowBPrimeStrideTeacherCfg(GastNarrowBPrimeTeacherCfg):
     def __post_init__(self):
         super().__post_init__()
         apply_backstride(self, command_cls=BPrimeNarrowBackGapVelocityCommand)
+        if STAGE == "1":
+            assert not margin.ENABLED, "BPRIME_STRIDE_STAGE=1 needs BPRIME_MARGIN_BALANCE=0"
+            self.rewards.narrow_stall.func = NarrowStallPenaltyV25
+            self.rewards.narrow_stall.weight = -1.0
+        elif STAGE != "2":
+            raise ValueError(f"BPRIME_STRIDE_STAGE must be 1 or 2, got {STAGE!r}")
 
 
 @configclass

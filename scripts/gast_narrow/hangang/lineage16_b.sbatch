@@ -15,9 +15,9 @@
 #   STAGE_A=<stage A best .pt> STAGE_A_SHA256=<sha> sbatch lineage16_b.sbatch
 # Continue a run (next 24 h job): NARROW_SOURCE=<model_N.pt of this run> NARROW_SOURCE_SHA256=<sha> (PPO restored).
 # Stop early with a save: touch $G/gd_lab_vrl/logs/launches/$GAST_RUN_ID/STOP
-# 24 h limit: Slurm sends USR1 15 min before the limit -> the run saves and stops; this script then resubmits itself
-# from the newest model_<n>.pt with the remaining updates (NO_RESUBMIT=1 turns that off). The same happens after a
-# crash that left a checkpoint. Check `squeue` for the follow-up job; the run id carries the job id.
+# 24 h limit: Slurm sends USR1 15 min before the limit -> the run saves and stops. Resubmission from the newest
+# model_<n>.pt with the remaining updates happens only with NO_RESUBMIT=0 (11-06 Hangang policy: no automatic
+# resubmit, every sbatch is confirmed by the user; default NO_RESUBMIT=1). Multi-node runs need NCCL_PROTO=^LL128.
 set -uo pipefail
 G=/scratch/t515a05/gd_lab
 module load apptainer
@@ -45,12 +45,15 @@ case ${LINEAGE_RECIPE:-v25p} in
                  NARROW_EXPERIMENT=gast/lineage16_bprime \
                  GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b_v25p.json ;;
   # bprime_stride (11-05, gd_lab.gast_backstride.bprime): bprime + the backstride A18L gap terms (long diagonal trot
-  # both ways, R17 off, step floor 0.50 m, landing margin, backward gaps <= 0.20 m), from the A18L model (STAGE_A).
-  bprime_stride) source $G/gd_lab_vrl/scripts/gast_backstride/a18l_env.sh
+  # both ways, R17 off, step floor 0.50 m, landing margin, backward gaps <= 0.20 m), anchor = the A18L model (STAGE_A).
+  # STRIDE_STAGE=1 (from A18L): margin draw off + v2.5 stall; STRIDE_STAGE=2 (NARROW_SOURCE = the stage 1 model): B'.
+  bprime_stride) : "${STRIDE_STAGE:?STRIDE_STAGE=1|2 for bprime_stride}"
+                 source $G/gd_lab_vrl/scripts/gast_backstride/a18l_env.sh
+                 export BPRIME_STRIDE_STAGE=$STRIDE_STAGE BPRIME_MARGIN_BALANCE=$(( STRIDE_STAGE == 1 ? 0 : 1 ))
                  export NARROW_TRAIN_PY=scripts/gast_backstride/train_bprime_stride.py \
                  NARROW_TASK=Gd-GastNarrowBPrimeStride-Rbq10-Dreamwaq-v0 \
                  NARROW_TURN=0 NARROW_CLIFF_COLUMNS=0 GAIT_RAMP_STEPS=0 GAIT_R20=1 NARROW_ANCHOR_GAP_NOSE=0 \
-                 NARROW_EXPERIMENT=gast/lineage16_bprime_stride \
+                 NARROW_EXPERIMENT=gast/lineage16_bprime_stride_s$STRIDE_STAGE \
                  GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b_v25p.json ;;
   # cprime (11-02, docs/design/GAST_NARROW_V26_CLIFF_DESIGN.md): B' + 4 cliff-deck columns (front / back, 0.3..0.8 m/s)
   # + the support_end actor input, from the stage B' model (STAGE_A = the B' checkpoint here).
@@ -68,7 +71,7 @@ export NARROW_ANCHOR_CKPT=$STAGE_A
 # run's own checkpoint; a live-policy target diverged on onvlm2, v2.4 design 13.1).
 export NARROW_STAND_ANCHOR_CKPT=$STAGE_A
 export GAST_RUN_ID=lineage16_b_${SLURM_NNODES}n_${per}x4_${NARROW_UPDATES}_$(date +%Y%m%d)_${SLURM_JOB_ID}
-export NCCL_DEBUG=${NCCL_DEBUG:-WARN}
+export NCCL_DEBUG=${NCCL_DEBUG:-WARN} NCCL_PROTO=${NCCL_PROTO:-^LL128}  # 11-05 Hangang policy for multi-node runs
 export NARROW_TORCHRUN_ARGS=${NARROW_TORCHRUN_ARGS:-"--log_dir $G/logs/ranklogs_${SLURM_JOB_ID} --redirects 3"}
 echo "stage=B cpus_on_node=$SLURM_CPUS_ON_NODE nodes=$SLURM_NNODES head=$head per_gpu=$per total=$NARROW_TOTAL_ENVS source=$NARROW_SOURCE anchor=$STAGE_A start=$(date)"
 cd $G/gd_lab_vrl
@@ -93,7 +96,7 @@ echo "=== TRAIN_DONE stage=B nodes=$SLURM_NNODES per_gpu=$per total=$NARROW_TOTA
 # $G/jobs), and sbatch passes this job's environment on, so the per-job variables (rank-log dir, ramp flag, source,
 # run id, update count, rendezvous) are unset for the child.
 ck=$(ls -t $G/gd_lab_vrl/logs/$NARROW_EXPERIMENT/$GAST_RUN_ID/model_*.pt 2>/dev/null | head -1)
-if [[ -n $ck && ${NO_RESUBMIT:-0} != 1 ]]; then
+if [[ -n $ck && ${NO_RESUBMIT:-1} == 0 ]]; then
   done_n=$(basename "$ck" .pt | sed 's/model_//'); left=$(( NARROW_UPDATES - done_n ))
   if (( left > 20 )); then
     echo "resubmit: $ck done=$done_n left=$left"
