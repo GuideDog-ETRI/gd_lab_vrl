@@ -1,0 +1,41 @@
+source: /data/users/bsseo/gd_lab_vrl_worktrees/gast_narrow_v2/checkpoints/gast_narrow/narrowv1_1748.pt
+source_sha256: e404fb41df686233b1d2909470dc685068c655c2295f69eb87b4a3478eeb7dc0
+source_iteration: 1748
+source_task: Gd-GastNarrowV1-Rbq10-Dreamwaq-v0
+source_kind: narrow_v1_1748
+narrow_version: v2
+target_task: Gd-GastNarrowV2-Rbq10-Dreamwaq-v0
+ppo_optimizer: new
+cenet_optimizer_restored: true
+copied: 79
+fresh: 0
+widened:
+- 'actor.0.weight: (512, 251) -> (512, 252) (new columns zero)'
+- 'critic.0.weight: (512, 304) -> (512, 307) (new columns zero)'
+learning_rates:
+  policy: 0.0001
+  terrain: 0.0003
+terrain_levels_restored: true
+task: Gd-GastNarrowV2-Rbq10-Dreamwaq-v0
+train_arm_env: '4'
+reward_weights:
+  platform_gap_foot_drop: -2.0
+  platform_gap_crossing: 0.5
+  platform_gap_monitor: 1.0
+  platform_gap_intrusion: -3.0
+  platform_gap_clean: 0.5
+  gap_foothold_margin: -0.25
+  stair_foothold_margin: -0.2
+  gap_slot_probe: -1.0
+  stair_handle_disturbance: -1.0
+  stair_push_fall: -3.0
+  stair_push_slip: -0.2
+learning_rates_requested:
+  policy: 0.0001
+  terrain: 0.0003
+schedule: fixed
+mapper_augmentation:
+  mapper_aug_enabled: false
+  mapper_aug_ramp_steps: 50000
+  mapper_aug_clean_fraction: 0.25
+  mapper_aug_seed: 14942

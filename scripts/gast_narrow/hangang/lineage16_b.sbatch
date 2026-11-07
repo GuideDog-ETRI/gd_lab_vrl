@@ -1,0 +1,107 @@
+#!/bin/bash
+#SBATCH --job-name=lin16_b
+#SBATCH --partition=natStr
+#SBATCH --nodes=16
+#SBATCH --ntasks-per-node=1
+#SBATCH --gres=gpu:4
+#SBATCH --exclusive
+#SBATCH --time=23:50:00
+#SBATCH --signal=B:USR1@900
+#SBATCH --exclude=node1730,node1395,node1402
+#SBATCH --comment="field=robotics;appl=pytorch-ddp"
+#SBATCH --output=/scratch/t515a05/gd_lab/logs/%x_%j.out
+# Lineage stage B (docs/hangang/WORKORDER_LINEAGE16_20261030.md): the whole GAST-Narrow v2.3 recipe in one run from the
+# stage A model (fresh LiDAR encoder, zero-widened first layers), anchor = the same stage A model.
+#   STAGE_A=<stage A best .pt> STAGE_A_SHA256=<sha> sbatch lineage16_b.sbatch
+# Continue a run (next 24 h job): NARROW_SOURCE=<model_N.pt of this run> NARROW_SOURCE_SHA256=<sha> (PPO restored).
+# Stop early with a save: touch $G/gd_lab_vrl/logs/launches/$GAST_RUN_ID/STOP
+# 24 h limit: Slurm sends USR1 15 min before the limit -> the run saves and stops. Resubmission from the newest
+# model_<n>.pt with the remaining updates happens only with NO_RESUBMIT=0 (11-06 Hangang policy: no automatic
+# resubmit, every sbatch is confirmed by the user; default NO_RESUBMIT=1). Multi-node runs need NCCL_PROTO=^LL128.
+set -uo pipefail
+G=/scratch/t515a05/gd_lab
+module load apptainer
+export GD_LAB_SIF=$G/gd_lab_isaaclab.sif GD_LAB_PYTHON=$G/venv/bin/python APPTAINER_BINDPATH=/scratch,$G/nvidia_icd_gh200.json:/usr/share/vulkan/icd.d/nvidia_icd.json
+export APPTAINERENV_LD_PRELOAD=/lib/aarch64-linux-gnu/libgomp.so.1:/usr/local/lib/python3.11/dist-packages/isaacsim/kit/libcarb.so
+: "${STAGE_A:?STAGE_A=<stage A best checkpoint>}" "${STAGE_A_SHA256:?STAGE_A_SHA256=<its sha256>}"
+per=${PER_GPU:-2048}
+head=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -1)
+export NARROW_GPUS=0,1,2,3 NARROW_NCCL_WORKAROUND=0 NARROW_NNODES=$SLURM_NNODES NARROW_RDZV_ENDPOINT=$head:$((20000 + SLURM_JOB_ID % 20000))
+export NARROW_TOTAL_ENVS=$((per * 4 * SLURM_NNODES)) NARROW_UPDATES=${NARROW_UPDATES:-2000} NARROW_SAVE_EVERY=50
+export NARROW_EXPERIMENT=gast/lineage16_b GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b.json
+# LINEAGE_RECIPE=v23 (user decision 10-31: "one skill at a time"): the v2.3 narrow-passage recipe that made
+# 602 on 128 nodes -- passages / doors / L-bends, stop when blocked, dead ends. In-place turns (v2.4/v2.5) and the cliff
+# stop (v2.6) are separate later stages on top of the stage B model. v24 / v25: the turn recipes (not for this stage).
+# v25p (10-31, user: backward passages belong to the passage stage): the v2.3 passage terrain (44 columns) + v2.4
+# backward passages 25 % (rear Mid-360 on), trunk self-occlusion, gap nose-up 5 deg; no turn / cliff tiles. DEFAULT.
+case ${LINEAGE_RECIPE:-v25p} in
+  v25p) export NARROW_TRAIN_PY=scripts/gast_narrow/train_narrow_v25.py NARROW_TASK=Gd-GastNarrowV25-Rbq10-Dreamwaq-v0 \
+               NARROW_TURN=0 NARROW_CLIFF_COLUMNS=0 NARROW_NOSE_WALK_DEG=${NARROW_NOSE_WALK_DEG:-20} \
+               GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b_v25p.json ;;
+  # bprime (11-01, docs/hangang/WORKORDER_STAGE_BPRIME_20261101.md): v25p + gait v3 G5 terms from the A' model; no
+  # gap_nose_up (the anchor keeps every gap sample), floor-only downward input on narrow tiles, gait ramp off.
+  bprime) export NARROW_TRAIN_PY=scripts/gast_bprime/train_bprime.py NARROW_TASK=Gd-GastNarrowBPrime-Rbq10-Dreamwaq-v0 \
+                 NARROW_TURN=0 NARROW_CLIFF_COLUMNS=0 GAIT_RAMP_STEPS=0 GAIT_R20=1 NARROW_ANCHOR_GAP_NOSE=0 \
+                 NARROW_EXPERIMENT=gast/lineage16_bprime \
+                 GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b_v25p.json ;;
+  # bprime_stride (11-05, gd_lab.gast_backstride.bprime): bprime + the backstride A18L gap terms (long diagonal trot
+  # both ways, R17 off, step floor 0.50 m, landing margin, backward gaps <= 0.20 m), anchor = the A18L model (STAGE_A).
+  # STRIDE_STAGE=1 (from A18L): margin draw off + v2.5 stall; STRIDE_STAGE=2 (NARROW_SOURCE = the stage 1 model): B'.
+  bprime_stride) : "${STRIDE_STAGE:?STRIDE_STAGE=1|2 for bprime_stride}"
+                 source $G/gd_lab_vrl/scripts/gast_backstride/a18l_env.sh
+                 export BPRIME_STRIDE_STAGE=$STRIDE_STAGE BPRIME_MARGIN_BALANCE=$(( STRIDE_STAGE == 1 ? 0 : 1 ))
+                 export NARROW_TRAIN_PY=scripts/gast_backstride/train_bprime_stride.py \
+                 NARROW_TASK=Gd-GastNarrowBPrimeStride-Rbq10-Dreamwaq-v0 \
+                 NARROW_TURN=0 NARROW_CLIFF_COLUMNS=0 GAIT_RAMP_STEPS=0 GAIT_R20=1 NARROW_ANCHOR_GAP_NOSE=0 \
+                 NARROW_EXPERIMENT=gast/lineage16_bprime_stride_s$STRIDE_STAGE \
+                 GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b_v25p.json ;;
+  # cprime (11-02, docs/design/GAST_NARROW_V26_CLIFF_DESIGN.md): B' + 4 cliff-deck columns (front / back, 0.3..0.8 m/s)
+  # + the support_end actor input, from the stage B' model (STAGE_A = the B' checkpoint here).
+  cprime) export NARROW_TRAIN_PY=scripts/gast_cprime/train_cprime.py NARROW_TASK=Gd-GastNarrowCPrime-Rbq10-Dreamwaq-v0 \
+                 NARROW_TURN=0 NARROW_CLIFF_COLUMNS=4 GAIT_RAMP_STEPS=0 GAIT_R20=1 NARROW_ANCHOR_GAP_NOSE=0 \
+                 NARROW_EXPERIMENT=gast/lineage16_cprime \
+                 GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_cprime.json ;;
+  v25) export NARROW_TRAIN_PY=scripts/gast_narrow/train_narrow_v25.py NARROW_TASK=Gd-GastNarrowV25-Rbq10-Dreamwaq-v0 \
+              GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_narrow/online_top5_lineage16_b_v25.json ;;
+  v24) export NARROW_TRAIN_PY=scripts/gast_narrow/train_narrow_v24.py NARROW_TASK=Gd-GastNarrowV24-Rbq10-Dreamwaq-v0 ;;
+esac
+export NARROW_SOURCE=${NARROW_SOURCE:-$STAGE_A} NARROW_SOURCE_SHA256=${NARROW_SOURCE_SHA256:-$STAGE_A_SHA256}
+export NARROW_ANCHOR_CKPT=$STAGE_A
+# The stand anchor's frozen target must stay the stage A model also on resubmits (NARROW_SOURCE then points at this
+# run's own checkpoint; a live-policy target diverged on onvlm2, v2.4 design 13.1).
+export NARROW_STAND_ANCHOR_CKPT=$STAGE_A
+export GAST_RUN_ID=lineage16_b_${SLURM_NNODES}n_${per}x4_${NARROW_UPDATES}_$(date +%Y%m%d)_${SLURM_JOB_ID}
+export NCCL_DEBUG=${NCCL_DEBUG:-WARN} NCCL_PROTO=${NCCL_PROTO:-^LL128}  # 11-05 Hangang policy for multi-node runs
+export NARROW_TORCHRUN_ARGS=${NARROW_TORCHRUN_ARGS:-"--log_dir $G/logs/ranklogs_${SLURM_JOB_ID} --redirects 3"}
+echo "stage=B cpus_on_node=$SLURM_CPUS_ON_NODE nodes=$SLURM_NNODES head=$head per_gpu=$per total=$NARROW_TOTAL_ENVS source=$NARROW_SOURCE anchor=$STAGE_A start=$(date)"
+cd $G/gd_lab_vrl
+t0=$(date +%s)
+# hydra.output_subdir=null: 64 ranks writing outputs/<date>/<time>/.hydra/ in the same second on /scratch (Lustre)
+# killed rank 4 of job 1182064 with OSError EIO (10-30); the Hydra config dump is not needed.
+# USR1 15 min before the limit -> STOP file (save + exit). The srun must run in the BACKGROUND: bash runs a trap only
+# after the foreground command returns, so with a foreground srun the STOP file was never written (10-31, job
+# 1182335: the limit killed the job without a save; the Hangang session wrote STOP by hand).
+trap 'echo "USR1: time limit near, saving"; touch logs/launches/$GAST_RUN_ID/STOP' USR1
+srun --ntasks-per-node=1 --cpus-per-task=$SLURM_CPUS_ON_NODE --cpu-bind=none --kill-on-bad-exit=1 bash -c '
+  h=/tmp/gdhome_$SLURM_JOB_ID; mkdir -p $h/.local/share $h/.cache
+  cp -a $HOME/.local/share/ov $h/.local/share/ && cp -a $HOME/.nvidia-omniverse $h/ 2>/dev/null
+  cp -a $HOME/.cache/ov $h/.cache/ 2>/dev/null
+  NARROW_APPTAINER_HOME=$h exec bash scripts/gast_narrow/train_narrow_v23.sh train env.commands.base_velocity.debug_vis=false hydra.output_subdir=null' &
+sp=$!
+wait $sp; rc=$?
+while kill -0 $sp 2>/dev/null; do wait $sp; rc=$?; done  # wait returns early when the trap runs; wait again
+echo "=== TRAIN_DONE stage=B nodes=$SLURM_NNODES per_gpu=$per total=$NARROW_TOTAL_ENVS rc=$rc wall=$(( $(date +%s) - t0 ))s"
+# Resubmit from the newest checkpoint when updates remain (time limit, STOP file, crash with a checkpoint).
+# Resubmit hygiene (10-31, job 1187624 failed in 2 min): the checkpoint path must be ABSOLUTE (sha256sum runs in
+# $G/jobs), and sbatch passes this job's environment on, so the per-job variables (rank-log dir, ramp flag, source,
+# run id, update count, rendezvous) are unset for the child.
+ck=$(ls -t $G/gd_lab_vrl/logs/$NARROW_EXPERIMENT/$GAST_RUN_ID/model_*.pt 2>/dev/null | head -1)
+if [[ -n $ck && ${NO_RESUBMIT:-1} == 0 ]]; then
+  done_n=$(basename "$ck" .pt | sed 's/model_//'); left=$(( NARROW_UPDATES - done_n ))
+  if (( left > 20 )); then
+    echo "resubmit: $ck done=$done_n left=$left"
+    (cd $G/jobs && env -u NARROW_TORCHRUN_ARGS -u NARROW_KEEP_RAMPS -u NARROW_SOURCE -u NARROW_SOURCE_SHA256 -u GAST_RUN_ID -u NARROW_UPDATES -u NARROW_TOTAL_ENVS -u NARROW_RDZV_ENDPOINT -u NARROW_NNODES STAGE_A=$STAGE_A STAGE_A_SHA256=$STAGE_A_SHA256 NARROW_SOURCE=$ck \
+       NARROW_SOURCE_SHA256=$(sha256sum "$ck" | cut -d" " -f1) NARROW_UPDATES=$left LINEAGE_RECIPE=${LINEAGE_RECIPE:-v25p} \
+       PER_GPU=$per sbatch --parsable -N $SLURM_NNODES lineage16_b.sbatch)
+  fi
+fi

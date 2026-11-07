@@ -241,7 +241,14 @@ def _exchange_directories(a: Path, b: Path) -> None:
     result = libc.renameat2(-100, os.fsencode(a), -100, os.fsencode(b), 2)
     if result != 0:
         errno = ctypes.get_errno()
-        raise OSError(errno, os.strerror(errno))
+        if errno not in (22, 38, 95):  # EINVAL / ENOSYS / EOPNOTSUPP: e.g. Lustre (KISTI Hangang /scratch)
+            raise OSError(errno, os.strerror(errno))
+        # Two plain renames instead of one exchange (a reader may briefly miss the directory): b -> tmp, a -> b,
+        # tmp -> a, so the caller still removes the old generation from `a`.
+        tmp = b.with_name(b.name + ".old")
+        os.rename(b, tmp)
+        os.rename(a, b)
+        os.rename(tmp, a)
 
 
 def rotate_top5(directory: Path, entries: list[dict], candidate_iteration: int, save_model) -> None:

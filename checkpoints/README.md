@@ -1,5 +1,7 @@
 # 체크포인트
 
+**2026-11-07부터: 계보와 단계별 선정 모델은 `LINEAGE.md`를 본다. git의 가중치는 `<단계>/selected/`의 선정 모델뿐이고, 나머지는 `legacy/`(로컬)다.** 아래는 이전 기록.
+
 현재 계보의 묶음만 둔다. 일반적으로 메타데이터(README, `params/`, `SHA256SUMS.txt`, `metadata.json`, leaderboard)는 git에 있고,
 가중치(`*.pt`, `*.onnx`)는 git 밖이다(.gitignore). 받은 가중치는 같은 경로에 두고 `sha256sum -c SHA256SUMS.txt`로 확인한다.
 예외(2026-10-14, 사용자 요청): 배포 기준 GAST v2.1 교사 두 개의 가중치만 git에 포함한다 —

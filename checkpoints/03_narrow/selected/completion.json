@@ -1,0 +1,8 @@
+{
+  "completed_updates": 1000,
+  "wall_seconds": 67420.23297375697,
+  "checkpoint": "/scratch/t515a05/gd_lab/gd_lab_vrl/logs/gast/lineage16_bprime_stride_s2/lineage16_b_16n_2048x4_1000_20261106_1228779/model_999.pt",
+  "num_envs_per_rank0": 2048,
+  "total_envs": 131072,
+  "horizon": 100
+}

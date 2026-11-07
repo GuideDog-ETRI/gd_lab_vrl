@@ -1,0 +1,8 @@
+{
+  "completed_updates": 700,
+  "wall_seconds": 15362.740596026,
+  "checkpoint": "/data/users/bsseo/gd_lab_vrl_worktrees/gast_narrow_v2/logs/gast/narrow_v21/narrow_v21_1111_4096x100_700_20261027/model_699.pt",
+  "num_envs_per_rank0": 1366,
+  "total_envs": 4096,
+  "horizon": 100
+}

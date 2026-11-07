@@ -1,0 +1,36 @@
+source: /scratch/t515a05/gd_lab/gd_lab_vrl/logs/gast/aprime16/aprime16_16n_2048x4_2000_20261102_1194183/model_1406.pt
+source_sha256: e311ecded3ba71d3ee1847d0b9c88a11aa7b47a8a6ac9b5477e76e7ecac3d97b
+source_iteration: 1406
+source_task: Gd-GastGaitV3Gap-Rbq10-Dreamwaq-v0
+source_kind: gait_v3_continuation
+ppo_optimizer: new
+cenet_optimizer_restored: true
+latent_head_zeroed: false
+learning_rates:
+  policy: 0.0001
+  terrain: 0.0003
+target_task: Gd-GastGaitV3Gap-Rbq10-Dreamwaq-v0
+terrain_levels_restored: true
+task: Gd-GastGaitV3Gap-Rbq10-Dreamwaq-v0
+train_arm_env: '4'
+reward_weights:
+  platform_gap_foot_drop: -2.0
+  platform_gap_crossing: 0.5
+  platform_gap_monitor: 1.0
+  platform_gap_intrusion: -3.0
+  platform_gap_clean: 0.5
+  gap_foothold_margin: -0.4
+  stair_foothold_margin: -0.2
+  gap_slot_probe: -1.0
+  stair_handle_disturbance: -1.0
+  stair_push_fall: -3.0
+  stair_push_slip: -0.2
+learning_rates_requested:
+  policy: 0.0001
+  terrain: 0.0003
+schedule: fixed
+mapper_augmentation:
+  mapper_aug_enabled: false
+  mapper_aug_ramp_steps: 50000
+  mapper_aug_clean_fraction: 0.25
+  mapper_aug_seed: 14942

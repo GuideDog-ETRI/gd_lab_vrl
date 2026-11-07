@@ -1,0 +1,21 @@
+"""Cross-node NCCL probe: broadcast_object_list (as rsl_rl), 1-element and 16 MB all_reduce, timed."""
+import os, time, datetime, torch, torch.distributed as dist
+local = int(os.environ["LOCAL_RANK"]); torch.cuda.set_device(local)
+dist.init_process_group("nccl", timeout=datetime.timedelta(seconds=90))
+r, w = dist.get_rank(), dist.get_world_size()
+def step(name, fn):
+    torch.cuda.synchronize(); t = time.time(); fn(); torch.cuda.synchronize()
+    if r == 0: print(f"PROBE {name}: {1000*(time.time()-t):.1f} ms", flush=True)
+step("broadcast_object_list 4MB", lambda: dist.broadcast_object_list([{"w": torch.randn(1 << 20, device="cuda")}] if r == 0 else [None], src=0))
+x = torch.ones(1, device="cuda"); step("all_reduce 1 elem", lambda: dist.all_reduce(x))
+y = torch.ones(4 << 20, device="cuda"); step("all_reduce 16MB", lambda: dist.all_reduce(y))
+for _ in range(3): dist.all_reduce(y)
+torch.cuda.synchronize(); t = time.time()
+for _ in range(20): dist.all_reduce(y)
+torch.cuda.synchronize()
+t = time.time()
+for _ in range(2000): dist.all_reduce(x)
+torch.cuda.synchronize()
+if r == 0: print(f"PROBE 2000 tiny all_reduce: {time.time()-t:.1f} s", flush=True)
+if r == 0: print(f"PROBE all_reduce 16MB x20 avg: {1000*(time.time()-t)/20:.1f} ms  ok={float(x)=={w}} world={w}", flush=True)
+dist.destroy_process_group()

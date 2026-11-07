@@ -1,0 +1,36 @@
+source: /scratch/t515a05/gd_lab/gd_lab_vrl/checkpoints/teachers/gast/rayir_top5_20261016/3906_gap50_from_dwb38000/best_top5/3906_top1.pt
+source_sha256: f3e7afe53ea8be0f2dd777f331af417aba20b13b5e5be5470ec3d939470f4d98
+source_iteration: 3906
+source_task: Gd-GastRayIrV21Gap50-Rbq10-Dreamwaq-v0
+source_kind: native_rayir
+ppo_optimizer: new
+cenet_optimizer_restored: true
+latent_head_zeroed: false
+learning_rates:
+  policy: 0.0001
+  terrain: 0.0003
+target_task: Gd-GastGaitV3Gap-Rbq10-Dreamwaq-v0
+terrain_levels_restored: true
+task: Gd-GastGaitV3Gap-Rbq10-Dreamwaq-v0
+train_arm_env: '4'
+reward_weights:
+  platform_gap_foot_drop: -2.0
+  platform_gap_crossing: 0.5
+  platform_gap_monitor: 1.0
+  platform_gap_intrusion: -3.0
+  platform_gap_clean: 0.5
+  gap_foothold_margin: -0.25
+  stair_foothold_margin: -0.2
+  gap_slot_probe: -1.0
+  stair_handle_disturbance: -1.0
+  stair_push_fall: -3.0
+  stair_push_slip: -0.2
+learning_rates_requested:
+  policy: 0.0001
+  terrain: 0.0003
+schedule: fixed
+mapper_augmentation:
+  mapper_aug_enabled: false
+  mapper_aug_ramp_steps: 50000
+  mapper_aug_clean_fraction: 0.25
+  mapper_aug_seed: 14942
