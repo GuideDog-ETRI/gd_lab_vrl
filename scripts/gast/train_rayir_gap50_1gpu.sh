@@ -26,7 +26,7 @@ case "$source_kind" in
   gast) teacher="${GAST_SOURCE_TEACHER:-$root/checkpoints/teachers/gast/gast_v21_top5_20261013/teacher/26123_top1.pt}"
         sha="${GAST_SOURCE_SHA256:-113c2b88a0518edfe85bdc33e3984f4f89d6412edb7773649548beaa65ed429e}"
         flag=--warm_start_gast ;;
-  dwb)  teacher="${GAST_SOURCE_TEACHER:-$root/checkpoints/00_blind/selected/teacher/model_38000.pt}"
+  dwb)  teacher="${GAST_SOURCE_TEACHER:-$root/checkpoints/00_blind/0_blind_walk_dwb38000/teacher/model_38000.pt}"
         sha="${GAST_SOURCE_SHA256:-c6cfe178cc069766f9543fb5fba983eb05a322d507e4302ee2495d4d26d2d46b}"
         flag=--warm_start_dwb ;;
   *) echo "bad source: $source_kind" >&2; exit 2 ;;

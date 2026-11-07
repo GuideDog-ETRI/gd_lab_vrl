@@ -29,7 +29,7 @@ export NARROW_GPUS=0,1,2,3 NARROW_NCCL_WORKAROUND=0 NARROW_NNODES=$SLURM_NNODES 
 export NARROW_TOTAL_ENVS=$((per * 4 * SLURM_NNODES)) NARROW_UPDATES=${NARROW_UPDATES:-1200} NARROW_SAVE_EVERY=50
 export NARROW_TRAIN_PY=scripts/gast_narrow/train_lineage_a.py NARROW_TASK=Gd-GastRayIrV21Gap50BackV2-Rbq10-Dreamwaq-v0
 export NARROW_EXPERIMENT=gast/lineage16_a GD_LAB_TOP5_CRITERIA_FILE=$G/gd_lab_vrl/configs/gast_backgap/online_top5.json
-export NARROW_SOURCE=${NARROW_SOURCE:-$G/gd_lab_vrl/checkpoints/01_ray_ir/selected/best_top5/3906_top1.pt}
+export NARROW_SOURCE=${NARROW_SOURCE:-$G/gd_lab_vrl/checkpoints/01_ray_ir/1_rayir_terrain_gap50_3906/best_top5/3906_top1.pt}
 export NARROW_SOURCE_SHA256=${NARROW_SOURCE_SHA256:-f3e7afe53ea8be0f2dd777f331af417aba20b13b5e5be5470ec3d939470f4d98}
 # No anchor runner in this task, so nothing flushes a deferred normalizer: per-step all_reduce (64 ranks on OFI).
 export GD_LAB_NORMALIZER_DEFER=0
