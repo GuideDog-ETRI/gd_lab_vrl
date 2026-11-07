@@ -20,7 +20,7 @@ export U118=1 U126_ARM=L0S U116_FAMILY=gap U130_SENSOR=cam
 export U130_DUAL=2 U130_DDEEP=0.7 U127_SENSOR_COUNT=1 U136_CAM_FILTER=1 U136_IR=native
 export GD_LAB_V21_SPEED_RAMP_STEPS=0 GD_LAB_REPLAY_LOCK="$out/replay.lock"
 if [[ "$level" == off ]]; then unset U157_POSE_ERR; else export U157_POSE_ERR="$level"; fi
-teacher="$root/checkpoints/01_ray_ir/1_rayir_terrain_gap50_5090_90111/best_top5/3906_top1.pt"
+teacher="$root/checkpoints/01_ray_ir/1_rayir_terrain_gap50_5090/best_top5/3906_top1.pt"
 entry=scripts/gast/eval_heightmap121.py
 if [[ ${U157_REFERENCE_ENTRY:-} == 1 ]]; then
   [[ "$level" == off ]] || exit 2
