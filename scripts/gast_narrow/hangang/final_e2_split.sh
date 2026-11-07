@@ -5,7 +5,7 @@
 set -uo pipefail
 G=/scratch/t515a05/gd_lab; REPO=$G/gd_lab_vrl; RUN=$1; EXCLUDE=${2:-node1730,node1395,node1402}
 D=$REPO/logs/gast/narrow_v23/$RUN; CFG=$REPO/configs/gast_narrow/e2
-declare -A M=([b6566]=checkpoints/gast_narrow/backgapv2_6566.pt [v22u371]=checkpoints/gast_narrow/narrowv22_371.pt)
+declare -A M=([b6566]=checkpoints/legacy/gast_narrow/backgapv2_6566.pt [v22u371]=checkpoints/legacy/gast_narrow/narrowv22_371.pt)
 for t in "$D"/best_top5/*_top*.pt; do [[ -e $t ]] && M[top$(basename "$t" .pt)]=${t#$REPO/}; done
 for t in "$D"/model_*.pt; do n=$(basename "$t" .pt); n=${n#model_}; (( n > 0 )) && M[v23it$n]=${t#$REPO/}; done
 for k in "${!M[@]}"; do

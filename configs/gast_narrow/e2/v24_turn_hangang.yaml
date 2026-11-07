@@ -15,7 +15,7 @@ hardware:
   python: /scratch/t515a05/gd_lab/venv/bin/python
 
 models:
-  v23u602: checkpoints/gast_narrow/narrow_v23_gh200_20261029/v23_gh200_it602_top5.pt
+  v23u602: checkpoints/legacy/gast_narrow/narrow_v23_gh200_20261029/v23_gh200_it602_top5.pt
   # lineage16B_t1: logs/gast/narrow_v24/<lineage16_b run>/best_top5/<it>_top1.pt
   # lineage16B_t2: ...
 

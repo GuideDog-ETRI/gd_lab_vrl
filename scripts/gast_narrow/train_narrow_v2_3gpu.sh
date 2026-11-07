@@ -22,7 +22,7 @@ case "$mode" in
   train) envs=4096; horizon=100; updates=${NARROW_UPDATES:-1500}; save=100 ;;
   *) echo "bad mode: $mode" >&2; exit 2 ;;
 esac
-teacher="${NARROW_SOURCE:-$root/checkpoints/gast_narrow/narrowv1_1748.pt}"
+teacher="${NARROW_SOURCE:-$root/checkpoints/legacy/gast_narrow/narrowv1_1748.pt}"
 sha=${NARROW_SOURCE_SHA256:-e404fb41df686233b1d2909470dc685068c655c2295f69eb87b4a3478eeb7dc0}
 test -s "$teacher" || { echo "missing 1748: $teacher" >&2; exit 2; }
 if [[ -z "${GD_LAB_SIF:-}" ]]; then

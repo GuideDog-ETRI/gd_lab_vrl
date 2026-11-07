@@ -153,7 +153,7 @@ def test_split_deploy_matches_training_with_held_frame():
 
 
 def test_real_38000_checkpoint():
-    root = Path(__file__).resolve().parents[1] / "checkpoints/teachers/blind/arm4_38000"
+    root = Path(__file__).resolve().parents[1] / "checkpoints/00_blind/selected"
     checkpoint = root / "teacher/model_38000.pt"
     if not checkpoint.is_file():
         pytest.skip("Local teacher bundle unavailable")

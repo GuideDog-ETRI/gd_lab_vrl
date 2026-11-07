@@ -1,0 +1,37 @@
+--- git status ---
+On branch gh200
+Your branch is up to date with 'origin/gh200'.
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	configs/gast_narrow/e2/aprime_final_p1.yaml
+	configs/gast_narrow/e2/aprime_final_p2.yaml
+	configs/gast_narrow/e2/aprime_final_p3.yaml
+	configs/gast_narrow/e2/aprime_mid_1194183_u1000.yaml
+	configs/gast_narrow/e2/aprime_mid_1194183_u300.yaml
+	configs/gast_narrow/e2/aprime_mid_1194183_u600.yaml
+	configs/gast_narrow/e2/aprime_mid_1203105_u1500.yaml
+	configs/gast_narrow/e2/v23_ab_e2_1.yaml
+	configs/gast_narrow/e2/v23_ab_e2_2.yaml
+	configs/gast_narrow/e2/v23_ab_e2_3.yaml
+	configs/gast_narrow/e2/v23_final_b6566.yaml
+	configs/gast_narrow/e2/v23_final_gh200.yaml
+	configs/gast_narrow/e2/v23_final_top538_top3.yaml
+	configs/gast_narrow/e2/v23_final_top539_top1.yaml
+	configs/gast_narrow/e2/v23_final_top557_top2.yaml
+	configs/gast_narrow/e2/v23_final_top602_top5.yaml
+	configs/gast_narrow/e2/v23_final_top604_top4.yaml
+	configs/gast_narrow/e2/v23_final_v22u371.yaml
+	configs/gast_narrow/e2/v23_final_v23it100.yaml
+	configs/gast_narrow/e2/v23_final_v23it200.yaml
+	configs/gast_narrow/e2/v23_final_v23it300.yaml
+	configs/gast_narrow/e2/v23_final_v23it400.yaml
+	configs/gast_narrow/e2/v23_final_v23it500.yaml
+	configs/gast_narrow/e2/v23_final_v23it600.yaml
+	configs/gast_narrow/e2/v23_final_v23it613.yaml
+	core
+
+nothing added to commit but untracked files present (use "git add" to track) 
+
+
+--- git diff ---

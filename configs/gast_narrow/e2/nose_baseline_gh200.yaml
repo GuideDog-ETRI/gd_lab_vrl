@@ -16,9 +16,9 @@ hardware:
   python: /scratch/t515a05/gd_lab/venv/bin/python
 
 models:                       # gap nose-up reference (6566), v2.1 start (465), v2.3 start (371)
-  b6566: checkpoints/gast_narrow/backgapv2_6566.pt
-  v21u465: checkpoints/gast_narrow/narrowv21_465.pt
-  v22u371: checkpoints/gast_narrow/narrowv22_371.pt
+  b6566: checkpoints/legacy/gast_narrow/backgapv2_6566.pt
+  v21u465: checkpoints/legacy/gast_narrow/narrowv21_465.pt
+  v22u371: checkpoints/legacy/gast_narrow/narrowv22_371.pt
 
 suites:
   gap:                        # platform gap crossing, heading locked to +/-x, fixed speed

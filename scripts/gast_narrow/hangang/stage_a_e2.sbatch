@@ -52,7 +52,7 @@ items = sorted(names.items())
 chunks = [items[i::nodes] for i in range(nodes)]
 for i, chunk in enumerate(chunks):
     cfg = dict(base, name=f"stage_a_part{i}", out_root=str(out / "parts"),
-               models=dict([("b6566", "checkpoints/gast_narrow/backgapv2_6566.pt")] + chunk))
+               models=dict([("b6566", "checkpoints/legacy/gast_narrow/backgapv2_6566.pt")] + chunk))
     (out / "cfg" / f"part{i}.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True))
 print("configs:", [len(c) for c in chunks])
 EOF

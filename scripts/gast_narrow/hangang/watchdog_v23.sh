@@ -33,8 +33,8 @@ import re, sys, os
 src, dst, repo, tops = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:]
 s = open(src).read().replace("name: v23_check_gh200", "name: v23_final_gh200")
 lines = ["models:                       # 6566 (gap reference), 371 (v2.3 start), v2.3 final Top-5",
-         "  b6566: checkpoints/gast_narrow/backgapv2_6566.pt",
-         "  v22u371: checkpoints/gast_narrow/narrowv22_371.pt"]
+         "  b6566: checkpoints/legacy/gast_narrow/backgapv2_6566.pt",
+         "  v22u371: checkpoints/legacy/gast_narrow/narrowv22_371.pt"]
 for t in tops:
     it = re.match(r"(?:model_)?(\d+)", os.path.basename(t)).group(1)
     lines.append(f"  v23u{it}: {os.path.relpath(t, repo)}")

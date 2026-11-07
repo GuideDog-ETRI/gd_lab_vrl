@@ -21,10 +21,10 @@ case "$mode" in
   train) envs=4096; horizon=100; updates=${NARROW_UPDATES:-700}; save=100 ;;
   *) echo "bad mode: $mode" >&2; exit 2 ;;
 esac
-teacher="${NARROW_SOURCE:-$root/checkpoints/gast_narrow/narrowv2_1111.pt}"
+teacher="${NARROW_SOURCE:-$root/checkpoints/legacy/gast_narrow/narrowv2_1111.pt}"
 sha=${NARROW_SOURCE_SHA256:-34bb627e6c4b29c847178bd1f7a1a54f060db25c77f88d120a956183815783ea}
 test -s "$teacher" || { echo "missing 1111: $teacher" >&2; exit 2; }
-export NARROW_ANCHOR_CKPT="${NARROW_ANCHOR_CKPT:-$root/checkpoints/gast_narrow/backgapv2_6566.pt}"
+export NARROW_ANCHOR_CKPT="${NARROW_ANCHOR_CKPT:-$root/checkpoints/legacy/gast_narrow/backgapv2_6566.pt}"
 export NARROW_ANCHOR_WEIGHT=${NARROW_ANCHOR_WEIGHT:-1.0} NARROW_ANCHOR_EPOCHS=${NARROW_ANCHOR_EPOCHS:-1}
 test -s "$NARROW_ANCHOR_CKPT" || { echo "missing 6566 anchor: $NARROW_ANCHOR_CKPT" >&2; exit 2; }
 if [[ -z "${GD_LAB_SIF:-}" ]]; then

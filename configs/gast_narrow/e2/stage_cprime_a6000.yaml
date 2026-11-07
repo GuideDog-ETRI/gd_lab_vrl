@@ -19,8 +19,8 @@ models:
   '# cp_t1': logs/gast/cprime/<run>/best_top5/<it>_top1.pt (fill in)
   '# cp_fin': logs/gast/cprime/<run>/model_299.pt (fill in)
   margin_t1: logs/gast/bprime/bprime_margin_5120x100_300_20261102/best_top5/259_top1.pt
-  v23u602: checkpoints/gast_narrow/narrow_v23_gh200_20261029/v23_gh200_it602_top5.pt
-  b6566: checkpoints/gast_narrow/backgapv2_6566.pt
+  v23u602: checkpoints/legacy/gast_narrow/narrow_v23_gh200_20261029/v23_gh200_it602_top5.pt
+  b6566: checkpoints/legacy/gast_narrow/backgapv2_6566.pt
 suites:
   cliff:                      # C': deck with a 1.0 m drop; front / back only (D1), the robot must stop before the edge
     enabled: true

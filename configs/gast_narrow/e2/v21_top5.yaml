@@ -15,8 +15,8 @@ hardware:
   python: /data/users/bsseo/venv/bin/python
 
 models:                       # v2.1 Top-5 vs 6566 (gap reference) and 1111 (v2.1 start)
-  b6566: checkpoints/gast_narrow/backgapv2_6566.pt
-  v2u1111: checkpoints/gast_narrow/narrowv2_1111.pt
+  b6566: checkpoints/legacy/gast_narrow/backgapv2_6566.pt
+  v2u1111: checkpoints/legacy/gast_narrow/narrowv2_1111.pt
   v21u465: logs/gast/narrow_v21/narrow_v21_1111_4096x100_700_20261027/best_top5/465_top1.pt
   v21u355: logs/gast/narrow_v21/narrow_v21_1111_4096x100_700_20261027/best_top5/355_top2.pt
   v21u536: logs/gast/narrow_v21/narrow_v21_1111_4096x100_700_20261027/best_top5/536_top3.pt

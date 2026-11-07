@@ -20,7 +20,7 @@ hardware:
   python: /data/users/bsseo/venv/bin/python
 
 models:
-  v23u602: checkpoints/gast_narrow/narrow_v23_gh200_20261029/v23_gh200_it602_top5.pt
+  v23u602: checkpoints/legacy/gast_narrow/narrow_v23_gh200_20261029/v23_gh200_it602_top5.pt
   v24h653: logs/gast/narrow_v24/narrow_v24h_602_5120x100_800_20261031/best_top5/653_top1.pt
   # Final Top-5 of the v2.5 run (fill in after training):
   # v25t1: logs/gast/narrow_v25/<run>/best_top5/<it>_top1.pt

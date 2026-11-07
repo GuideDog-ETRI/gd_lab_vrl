@@ -17,8 +17,8 @@ hardware:
   python: /scratch/t515a05/gd_lab/venv/bin/python
 
 models:                       # 6566 (gap reference), 371 (v2.3 start), v2.3 after 13 iterations (64 nodes)
-  b6566: checkpoints/gast_narrow/backgapv2_6566.pt
-  v22u371: checkpoints/gast_narrow/narrowv22_371.pt
+  b6566: checkpoints/legacy/gast_narrow/backgapv2_6566.pt
+  v22u371: checkpoints/legacy/gast_narrow/narrowv22_371.pt
   v23u13: logs/gast/narrow_v23/narrow_v23_371_64n_2048x4_1090_20261028_1170163/model_3.pt
 
 suites:

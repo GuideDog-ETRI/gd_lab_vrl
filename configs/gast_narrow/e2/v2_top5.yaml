@@ -15,8 +15,8 @@ hardware:
   python: /data/users/bsseo/venv/bin/python
 
 models:                       # name: path (any of 6566 / 3906 / Narrow v1 / Narrow v2 checkpoints)
-  b6566: checkpoints/gast_narrow/backgapv2_6566.pt
-  v1u1748: checkpoints/gast_narrow/narrowv1_1748.pt
+  b6566: checkpoints/legacy/gast_narrow/backgapv2_6566.pt
+  v1u1748: checkpoints/legacy/gast_narrow/narrowv1_1748.pt
   v2u1111: logs/gast/narrow_v2/narrow_v2_1748_4096x100_1500_20261026/best_top5/1111_top1.pt
   v2u644: logs/gast/narrow_v2/narrow_v2_1748_4096x100_1500_20261026/best_top5/644_top2.pt
   v2u1143: logs/gast/narrow_v2/narrow_v2_1748_4096x100_1500_20261026/best_top5/1143_top3.pt

@@ -18,8 +18,8 @@ hardware:
   sif: /scratch/t515a05/gd_lab/gd_lab_isaaclab.sif
   python: /scratch/t515a05/gd_lab/venv/bin/python
 models:
-  b6566: checkpoints/gast_narrow/backgapv2_6566.pt
-  v23u602: checkpoints/gast_narrow/narrow_v23_gh200_20261029/v23_gh200_it602_top5.pt
+  b6566: checkpoints/legacy/gast_narrow/backgapv2_6566.pt
+  v23u602: checkpoints/legacy/gast_narrow/narrow_v23_gh200_20261029/v23_gh200_it602_top5.pt
   stageA: <STAGE_A path from logs/e2/stage_a_<job>/merged/STAGE_A.txt>
   '# b1': logs/gast/lineage16_b/<run>/best_top5/<it>_top1.pt (fill in)
 suites:

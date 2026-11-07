@@ -26,10 +26,10 @@ case "$mode" in
   train) envs=${NARROW_TOTAL_ENVS:-4096}; horizon=100; updates=${NARROW_UPDATES:-400}; save=${NARROW_SAVE_EVERY:-100} ;;
   *) echo "bad mode: $mode" >&2; exit 2 ;;
 esac
-teacher="${NARROW_SOURCE:-$root/checkpoints/gast_narrow/narrowv22_371.pt}"
+teacher="${NARROW_SOURCE:-$root/checkpoints/legacy/gast_narrow/narrowv22_371.pt}"
 sha=${NARROW_SOURCE_SHA256:-00ce70515294ea9033505c40c1e295205e9070856c12c4a0d950dfffe693e677}
 test -s "$teacher" || { echo "missing source checkpoint: $teacher" >&2; exit 2; }
-export NARROW_ANCHOR_CKPT="${NARROW_ANCHOR_CKPT:-$root/checkpoints/gast_narrow/backgapv2_6566.pt}"
+export NARROW_ANCHOR_CKPT="${NARROW_ANCHOR_CKPT:-$root/checkpoints/legacy/gast_narrow/backgapv2_6566.pt}"
 export NARROW_ANCHOR_WEIGHT=${NARROW_ANCHOR_WEIGHT:-1.0} NARROW_ANCHOR_EPOCHS=${NARROW_ANCHOR_EPOCHS:-1}
 export GD_LAB_NORMALIZER_DEFER=${GD_LAB_NORMALIZER_DEFER:-1}  # normalizer moments reduced once per update (rl/distributed.py)
 # (flushed by the anchor runner, gast_narrow/anchor.py: a task without it -- lineage stage A -- must set this to 0)

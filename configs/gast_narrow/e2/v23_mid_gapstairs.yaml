@@ -17,8 +17,8 @@ hardware:
   python: /scratch/t515a05/gd_lab/venv/bin/python
 
 models:                       # mid-run gap/stairs check: 6566, 371, v2.3 at cumulative 107 and 407 iterations
-  b6566: checkpoints/gast_narrow/backgapv2_6566.pt
-  v22u371: checkpoints/gast_narrow/narrowv22_371.pt
+  b6566: checkpoints/legacy/gast_narrow/backgapv2_6566.pt
+  v22u371: checkpoints/legacy/gast_narrow/narrowv22_371.pt
   v23c107: logs/gast/narrow_v23/narrow_v23_371_118n_2048x4_1087_20261028_1170560/model_94.pt
   v23c407: logs/gast/narrow_v23/narrow_v23_371_236n_2048x4_993_20261028_1171339/model_300.pt
 

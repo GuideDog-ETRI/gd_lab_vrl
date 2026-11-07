@@ -19,8 +19,8 @@ hardware:
   python: /scratch/t515a05/gd_lab/venv/bin/python
 models:
   aprime: __APRIME__
-  r3906: checkpoints/teachers/gast/rayir_top5_20261016/3906_gap50_from_dwb38000/best_top5/3906_top1.pt
-  b6566: checkpoints/gast_narrow/backgapv2_6566.pt
+  r3906: checkpoints/01_ray_ir/selected/best_top5/3906_top1.pt
+  b6566: checkpoints/legacy/gast_narrow/backgapv2_6566.pt
 suites:
   gap:
     enabled: true
