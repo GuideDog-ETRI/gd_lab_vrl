@@ -135,8 +135,8 @@ logs/                학습 로그 (git 밖)
 
   | 가중치 | 경로 |
   |---|---|
-  | DWB-38000 (블라인드 루트) | `checkpoints/00_blind/0_blind_walk_dwb38000/teacher/model_38000.pt` |
-  | Ray+IR 3906 | `checkpoints/01_ray_ir/1_rayir_terrain_gap50_3906/best_top5/3906_top1.pt` |
+  | DWB-38000 (블라인드 루트) | `checkpoints/00_blind/0_blind_walk_dwb38000_a6000/teacher/model_38000.pt` |
+  | Ray+IR 3906 | `checkpoints/01_ray_ir/1_rayir_terrain_gap50_3906_5090_90111/best_top5/3906_top1.pt` |
 
 - 다른 `*.pt`(PyTorch 체크포인트)·`*.onnx`(배포용 그래프)는 `.gitignore`로 제외한다. 학습 서버(로컬 5090, 90.111, onvlm2)에만 있으며, SHA256SUMS.txt로 확인하고 직접 복사한다.
 - mp4·webm 영상은 git에 넣지 않는다.
