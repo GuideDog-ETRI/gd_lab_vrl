@@ -44,7 +44,7 @@ GuideDog RBQ10 시각 보행 정책(gd_lab_vrl)의 교사 모델 계보와, 단�
                              └─ C2 = 제자리 회전 — to-do                              §15
 ```
 
-**현재 계보의 단계별 선정 모델(⓪ DWB-38000, ① 3906, ② a1993, ③ A18L, ④ bps_cont 299, ⑤ v22 299, ⑥ 861)은 `checkpoints/<단계>/selected/`에 있고,
+**현재 계보의 단계별 선정 모델(⓪ DWB-38000, ① 3906, ② a1993, ③ A18L, ④ bps_cont 299, ⑤ v22 299, ⑥ 861)은 `checkpoints/<단계>/<번호_특징_모델>/`에 있고,
 표는 `checkpoints/LINEAGE.md`다. git에는 이 7개만 있고 나머지는 `checkpoints/legacy/`(로컬).**
 
 이전 계통(참고): b1_18 ONNX(50 Hz) → 17206 → 21068 → GAST v2.1 2000 → Ray+IR → 2769; GAST 26123 → Ray+IR gap50 → 2836;
@@ -453,7 +453,7 @@ pass_tight 84, bend_right 66.
 1단계 Top-1에서, 1,000 it). 보존 앵커 = A18L. (정정 11-07: 서기 앵커는 이 계보에서 **표본 0개**였다 — 회전 차단 입력이 늘 0(NARROW_TURN=0)이고
 구역 옵션도 꺼져 있다. 서기는 1단계의 보상으로 배웠다.)
 **수정(11-06 19:00).** 한강 1단계(A18L 출발)는 서기가 생기지 않아 취소. 1단계는 **서기가 조금이라도 있는 모델**에서만
-작동한다(아래 표). 한강은 A6000 1단계 결과 **v22 model_299**(sha 1062d254…ddf08, `checkpoints/03_narrow/bprime_stage1/selected/`)에서
+작동한다(아래 표). 한강은 A6000 1단계 결과 **v22 model_299**(sha 1062d254…ddf08, `checkpoints/03_narrow/5_narrow_stand_first_v22/`)에서
 2단계를 바로 시작한다 — A6000에서 검증된 경로(v22 → margin it236: 통과 92.0, 서기 99.4, 갭 96.2)를 16노드로 키운 것.
 
 | 런 (출발) | 서기 보상 it10 → it299 | 정지 유지 보상 | 막다른 길 지형 레벨 it299 |

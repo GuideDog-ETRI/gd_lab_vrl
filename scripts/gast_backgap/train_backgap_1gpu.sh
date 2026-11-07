@@ -19,7 +19,7 @@ case "$mode" in
   train) envs=1024; horizon=100; updates=${BACKGAP_UPDATES:-3000}; save=100 ;;
   *) echo "bad mode: $mode" >&2; exit 2 ;;
 esac
-teacher="${BACKGAP_SOURCE:-/home/user/gd_project/archive/gd_lab_vrl_worktrees/gast_nav_v1/checkpoints/01_ray_ir/selected/best_top5/3906_top1.pt}"
+teacher="${BACKGAP_SOURCE:-/home/user/gd_project/archive/gd_lab_vrl_worktrees/gast_nav_v1/checkpoints/01_ray_ir/1_rayir_terrain_gap50_3906/best_top5/3906_top1.pt}"
 sha=${BACKGAP_SOURCE_SHA256:-f3e7afe53ea8be0f2dd777f331af417aba20b13b5e5be5470ec3d939470f4d98}
 test -s "$teacher" || { echo "missing 3906: $teacher" >&2; exit 2; }
 cd "$root"
