@@ -19,7 +19,7 @@ hardware:
   python: /scratch/t515a05/gd_lab/venv/bin/python
 models:
   aprime: __APRIME__
-  r3906: checkpoints/01_ray_ir/1_rayir_terrain_gap50_3906/best_top5/3906_top1.pt
+  r3906: checkpoints/01_ray_ir/1_rayir_terrain_gap50_3906_5090_90111/best_top5/3906_top1.pt
   b6566: checkpoints/legacy/gast_narrow/backgapv2_6566.pt
 suites:
   gap:
